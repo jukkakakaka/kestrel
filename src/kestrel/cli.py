@@ -80,9 +80,14 @@ def cmd_desktop(args: argparse.Namespace) -> int:
     url = f"http://127.0.0.1:{port}"
 
     try:
+        import webview  # noqa: F401
+
         from kestrel.desktop.app import run_desktop
     except ImportError:
-        print("desktop extras missing. Install with: uv sync --extra desktop")
+        print("Desktop extras are missing. Install them with:")
+        print("    uv sync --extra desktop")
+        print(f"The web UI is still available at {url}")
+        server.should_exit = True
         return 1
 
     try:

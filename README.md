@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/brand/logo.svg" alt="Kestrel 隼" width="420">
+</p>
+
 # Kestrel 隼
 
 **Watch. Then strike.** — a self-hosted, multi-market stock scanner and trading journal that keeps you honest.
