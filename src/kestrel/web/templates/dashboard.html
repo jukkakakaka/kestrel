@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ t('dash.title') }} · {{ t('app.name') }}{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h1>{{ t('dash.title') }}</h1>
+    <div class="actions">
+      <input id="add-code" placeholder="{{ t('dash.add_placeholder') }}" autocomplete="off">
+      <button class="btn" id="add-btn">{{ t('action.add') }}</button>
+      <button class="btn ghost" id="refresh-btn">{{ t('action.refresh') }}</button>
+    </div>
+  </div>
+
+  <div id="stale" class="notice hidden">{{ t('dash.stale') }}</div>
+
+  {% if items %}
+  <table class="grid" id="quote-table">
+    <thead>
+      <tr>
+        <th>{{ t('dash.market') }}</th>
+        <th>{{ t('dash.code') }}</th>
+        <th>{{ t('dash.name') }}</th>
+        <th class="num">{{ t('dash.price') }}</th>
+        <th class="num">{{ t('dash.change') }}</th>
+        <th>{{ t('dash.source') }}</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for it in items %}
+      <tr data-key="{{ it.market }}:{{ it.code }}">
+        <td><span class="tag tag-{{ it.market|lower }}">{{ it.market }}</span></td>
+        <td class="mono">{{ it.code }}</td>
+        <td class="name">{{ it.name }}</td>
+        <td class="num mono" data-field="price">—</td>
+        <td class="num mono" data-field="change">—</td>
+        <td class="src" data-field="source">—</td>
+        <td><button class="link danger" data-remove="{{ it.market }}/{{ it.code }}">{{ t('action.remove') }}</button></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">{{ t('dash.empty') }}</p>
+  {% endif %}
+
+  <p class="hint">{{ t('dash.hint') }}</p>
+</section>
+{% endblock %}

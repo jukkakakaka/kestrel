@@ -1,0 +1,31 @@
+# data & secrets
+data/
+*.db
+*.db-shm
+*.db-wal
+secret.key
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# local overrides
+.env
+config.local.yaml
+*.local.json

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}{{ t('settings.title') }} · {{ t('app.name') }}{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-head"><h1>{{ t('settings.title') }}</h1></div>
+  <div class="tabs">
+    <button class="tab active" data-tab="general">{{ t('settings.general') }}</button>
+    <button class="tab" data-tab="markets">{{ t('settings.markets') }}</button>
+    <button class="tab" data-tab="datasources">{{ t('settings.datasources') }}</button>
+    <button class="tab" data-tab="agents">{{ t('settings.agents') }}</button>
+    <button class="tab" data-tab="notify">{{ t('settings.notify') }}</button>
+    <button class="tab" data-tab="fees">{{ t('settings.fees') }}</button>
+  </div>
+  <p class="hint">{{ t('settings.soon') }}</p>
+</section>
+{% endblock %}

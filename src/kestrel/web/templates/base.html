@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}" data-theme="{{ theme }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ t('app.name') }}{% endblock %}</title>
+  <link rel="icon" href="/static/favicon/favicon-32.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/static/favicon/favicon-180.png">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script>
+    (function () {
+      var saved = document.documentElement.getAttribute('data-theme');
+      var mql = window.matchMedia('(prefers-color-scheme: dark)');
+      function apply() {
+        var mode = saved === 'auto' ? (mql.matches ? 'dark' : 'light') : saved;
+        document.documentElement.setAttribute('data-mode', mode);
+      }
+      apply();
+      mql.addEventListener('change', function () { if (saved === 'auto') apply(); });
+    })();
+  </script>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <a class="brand" href="/">
+      <img src="/static/brand/logo-mark.svg" alt="" width="26" height="26">
+      <span class="brand-name">{{ t('app.name') }}</span>
+      <span class="brand-tag">{{ t('app.tagline') }}</span>
+    </a>
+    <nav class="nav">
+      <a href="/" class="active">{{ t('nav.dashboard') }}</a>
+      <a href="/settings">{{ t('nav.settings') }}</a>
+    </nav>
+    <div class="tools">
+      <select id="locale" aria-label="{{ t('lang.label') }}">
+        {% for code in locales %}
+        <option value="{{ code }}" {% if code == locale %}selected{% endif %}>{{ code }}</option>
+        {% endfor %}
+      </select>
+      <select id="theme" aria-label="{{ t('theme.label') }}">
+        <option value="auto" {% if theme == 'auto' %}selected{% endif %}>{{ t('theme.auto') }}</option>
+        <option value="light" {% if theme == 'light' %}selected{% endif %}>{{ t('theme.light') }}</option>
+        <option value="dark" {% if theme == 'dark' %}selected{% endif %}>{{ t('theme.dark') }}</option>
+      </select>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="foot wrap">
+  <span>{{ t('footer.disclaimer') }}</span>
+  <span class="dot">·</span>
+  <span>{{ t('footer.local') }}</span>
+  <span class="dot">·</span>
+  <span>v{{ version }}</span>
+</footer>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
