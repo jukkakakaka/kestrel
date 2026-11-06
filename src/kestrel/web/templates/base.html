@@ -31,7 +31,9 @@
     <nav class="nav">
       <a href="/" class="{% if request.url.path == '/' %}active{% endif %}">{{ t('nav.dashboard') }}</a>
       <a href="/scan" class="{% if request.url.path.startswith('/scan') %}active{% endif %}">{{ t('nav.scan') }}</a>
-      <a href="/settings" class="{% if request.url.path.startswith('/settings') %}active{% endif %}">{{ t('nav.settings') }}</a>
+      <a href="/journal" class="{% if request.url.path.startswith('/journal') or request.url.path.startswith('/ipo') %}active{% endif %}">{{ t('nav.journal') }}</a>
+      <a href="/backtest" class="{% if request.url.path.startswith('/backtest') %}active{% endif %}">{{ t('nav.backtest') }}</a>
+      <a href="/settings" class="{% if request.url.path.startswith('/settings') or request.url.path.startswith('/fees') %}active{% endif %}">{{ t('nav.settings') }}</a>
     </nav>
     <div class="tools">
       <select id="locale" aria-label="{{ t('lang.label') }}">

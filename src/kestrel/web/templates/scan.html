@@ -29,11 +29,11 @@
         <div><span class="k">{{ t('scan.stop') }}</span><span class="v mono down">{{ r.stop|money(3) }}</span></div>
         <div><span class="k">{{ t('scan.target') }}</span><span class="v mono up">{{ r.target1|money(3) }}</span></div>
         <div><span class="k">{{ t('scan.qty') }}</span><span class="v mono">{{ r.qty }}</span></div>
-        <div><span class="k">{{ t('scan.rr') }}</span><span class="v mono">{{ '%.1f'|format(r.r_multiple) }} : 1</span></div>
+        <div><span class="k"><span class="gloss" data-term="rr">{{ t('scan.rr') }}</span></span><span class="v mono">{{ '%.1f'|format(r.r_multiple) }} : 1</span></div>
         <div><span class="k">{{ t('scan.risk') }}</span><span class="v mono">{{ r.risk_amount|money(1) }}</span></div>
       </div>
 
-      {% if r.explain_zh %}
+      {% if r.explain_zh and ui.learning %}
       <details class="rec-explain">
         <summary>{{ t('scan.why') }}</summary>
         <p>{{ r.explain_zh }}</p>

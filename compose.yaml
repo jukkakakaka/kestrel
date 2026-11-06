@@ -1,0 +1,17 @@
+name: kestrel
+
+services:
+  kestrel:
+    build: .
+    image: kestrel:local
+    container_name: kestrel
+    ports:
+      - "8000:8000"
+    volumes:
+      - kestrel-data:/data
+    environment:
+      KESTREL_HOME: /data
+    restart: unless-stopped
+
+volumes:
+  kestrel-data:

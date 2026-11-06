@@ -3,15 +3,73 @@
 
 {% block content %}
 <section class="panel">
-  <div class="panel-head"><h1>{{ t('settings.title') }}</h1></div>
+  <div class="panel-head"><h1>{{ t('settings.title') }}</h1>
+    <div class="actions"><a class="btn ghost" href="/fees">{{ t('fees.title') }}</a></div></div>
+
+  {% if saved %}<div class="notice">{{ t('settings.saved') }}</div>{% endif %}
+
   <div class="tabs">
-    <button class="tab active" data-tab="general">{{ t('settings.general') }}</button>
-    <button class="tab" data-tab="markets">{{ t('settings.markets') }}</button>
-    <button class="tab" data-tab="datasources">{{ t('settings.datasources') }}</button>
-    <button class="tab" data-tab="agents">{{ t('settings.agents') }}</button>
-    <button class="tab" data-tab="notify">{{ t('settings.notify') }}</button>
-    <button class="tab" data-tab="fees">{{ t('settings.fees') }}</button>
+    {% for s in sections %}
+    <button class="tab {% if loop.first %}active{% endif %}" data-tab="{{ s.code }}">
+      {{ s.label_zh if locale.startswith('zh') else s.label_en }}
+    </button>
+    {% endfor %}
+    <button class="tab" data-tab="glossary">{{ t('settings.glossary') }}</button>
   </div>
-  <p class="hint">{{ t('settings.soon') }}</p>
+
+  {% for s in sections %}
+  <form method="post" action="/settings/{{ s.code }}" class="settings-pane {% if not loop.first %}hidden{% endif %}" data-pane="{{ s.code }}">
+    {% for f in s.fields %}
+    <div class="setting-row">
+      <div class="setting-label">
+        <span>{{ f.label_zh if locale.startswith('zh') else f.label_en }}</span>
+        {% set help = f.help_zh if locale.startswith('zh') else f.help_en %}
+        {% if help %}<small>{{ help }}</small>{% endif %}
+      </div>
+      <div class="setting-input">
+        {% if f.kind == 'switch' %}
+        <label class="switch">
+          <input type="checkbox" name="{{ f.key }}" {% if values.get(f.key) %}checked{% endif %}>
+          <span></span>
+        </label>
+        {% elif f.kind == 'select' %}
+        <select name="{{ f.key }}">
+          {% for value, label in f.options %}
+          <option value="{{ value }}" {% if values.get(f.key) == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        {% elif f.kind == 'number' %}
+        <input type="number" step="{{ f.step }}" name="{{ f.key }}" value="{{ values.get(f.key) }}">
+        {% elif f.kind == 'password' %}
+        <input type="password" name="{{ f.key }}" value="{{ values.get(f.key) }}" autocomplete="off">
+        {% else %}
+        <input type="text" name="{{ f.key }}" value="{{ values.get(f.key) }}">
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+    <div class="row-actions"><button class="btn">{{ t('action.save') }}</button></div>
+  </form>
+  {% endfor %}
+
+  <div class="settings-pane hidden" data-pane="glossary" id="glossary">
+    <p class="hint">{{ t('settings.glossary_hint') }}</p>
+    <table class="grid">
+      <thead><tr><th>{{ t('settings.term') }}</th><th>{{ t('settings.explain') }}</th><th></th></tr></thead>
+      <tbody>
+      {% for g in glossary %}
+      <tr>
+        <td><strong>{{ g.term_zh if locale.startswith('zh') else g.term_en }}</strong></td>
+        <td class="tiny">{{ g.body_zh if locale.startswith('zh') else g.body_en }}</td>
+        <td>
+          <form method="post" action="/glossary/{{ g.key }}/toggle">
+            <button class="link">{{ t('settings.restore') if g.suppressed else t('settings.silence') }}</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}

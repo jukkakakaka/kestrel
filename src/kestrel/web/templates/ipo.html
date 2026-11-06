@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ t('j.ipo') }} · {{ t('app.name') }}{% endblock %}
+
+{% block content %}
+<div class="kpi">
+  <div class="k"><div class="v">{{ stats.count }}</div><div class="l">{{ t('ipo.tries') }}</div></div>
+  <div class="k"><div class="v">{{ '%.0f'|format(stats.hit_rate * 100) }}%</div><div class="l">{{ t('ipo.hit_rate') }}</div></div>
+  <div class="k"><div class="v">HK${{ '%.0f'|format(stats.fee) }}</div><div class="l">{{ t('ipo.fees') }}</div></div>
+  <div class="k"><div class="v {{ 'up' if stats.net >= 0 else 'down' }}">HK${{ '%.0f'|format(stats.net) }}</div><div class="l">{{ t('ipo.net') }}</div></div>
+</div>
+
+<section class="panel">
+  <div class="panel-head"><h1>{{ t('j.ipo') }}</h1>
+    <div class="actions"><a class="btn ghost" href="/journal">{{ t('nav.journal') }}</a></div></div>
+
+  <form method="post" action="/ipo/add" class="grid g5">
+    <div class="field"><label>{{ t('ipo.name') }}</label><input name="name" required placeholder="某某科技"></div>
+    <div class="field"><label>{{ t('ipo.lot') }}</label><input name="lot_size" type="number" value="500" required></div>
+    <div class="field"><label>{{ t('ipo.offer') }}</label><input name="offer_price" type="number" step="0.001" required placeholder="12.8"></div>
+    <div class="field"><label>{{ t('ipo.lots') }}</label><input name="lots" type="number" value="1"></div>
+    <div class="field"><label>{{ t('ipo.fee') }}</label><input name="fee" type="number" step="0.01" value="0"></div>
+    <div class="field"><label>{{ t('ipo.allot') }}</label><input name="allot_qty" type="number" value="0"></div>
+    <div class="field"><label>{{ t('ipo.sell') }}</label><input name="sell_price" type="number" step="0.001"></div>
+    <div class="field"><label>&nbsp;</label><button class="btn" style="width:100%">{{ t('action.add') }}</button></div>
+  </form>
+</section>
+
+<section class="panel" style="margin-top:16px">
+  {% if rows %}
+  <table class="grid">
+    <thead><tr><th>{{ t('ipo.name') }}</th><th class="num">{{ t('ipo.lot_amount') }}</th><th class="num">{{ t('ipo.lots') }}</th>
+      <th class="num">{{ t('ipo.fee') }}</th><th class="num">{{ t('ipo.allot') }}</th><th class="num">{{ t('ipo.pnl') }}</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+    {% set p = pnl(r) %}
+    <tr>
+      <td><strong>{{ r.name }}</strong> <span class="muted mono">{{ r.code or '' }}</span></td>
+      <td class="num mono">HK${{ (r.lot_size * r.offer_price / 1e6)|round(0)|int }}</td>
+      <td class="num mono">{{ r.lots }}</td>
+      <td class="num mono">{{ r.fee|money(0) }}</td>
+      <td class="num mono">{{ r.allot_qty or '—' }}</td>
+      <td class="num mono {{ 'up' if p.net >= 0 else 'down' }}">{{ '%.0f'|format(p.net) }}</td>
+      <td><form method="post" action="/ipo/{{ r.id }}/delete"><button class="link danger">×</button></form></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="empty">{{ t('ipo.empty') }}</p>{% endif %}
+  <p class="hint">{{ t('ipo.hint') }}</p>
+</section>
+{% endblock %}

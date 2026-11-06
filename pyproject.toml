@@ -61,3 +61,4 @@ ignore = ["E501"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+addopts = "--basetemp=.pytest_tmp -q"

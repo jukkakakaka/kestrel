@@ -87,13 +87,16 @@ class FeeBreakdown:
     total: Decimal
 
     def as_dict(self) -> dict[str, str]:
+        def q(value: Decimal) -> str:
+            return f"{value.quantize(Decimal('0.01')):,.2f}"
+
         return {
-            "commission": str(self.commission),
-            "platform": str(self.platform),
-            "stamp": str(self.stamp),
-            "exchange": str(self.exchange),
-            "settlement": str(self.settlement),
-            "total": str(self.total),
+            "commission": q(self.commission),
+            "platform": q(self.platform),
+            "stamp": q(self.stamp),
+            "exchange": q(self.exchange),
+            "settlement": q(self.settlement),
+            "total": q(self.total),
         }
 
 

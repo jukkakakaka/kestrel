@@ -104,9 +104,8 @@
       fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
         .then(function (r) { return r.json(); })
         .then(function (res) {
-          if (res.ok) {
-            location.reload();
-          } else {
+          if (res.ok) { location.reload(); }
+          else {
             if (scanStatus) scanStatus.textContent = res.error || 'failed';
             scanBtn.disabled = false;
           }
@@ -114,4 +113,67 @@
         .catch(function () { scanBtn.disabled = false; });
     });
   }
+
+  var tabs = document.querySelectorAll('.tab[data-tab]');
+  if (tabs.length) {
+    tabs.forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        tabs.forEach(function (t) { t.classList.remove('active'); });
+        tab.classList.add('active');
+        var name = tab.getAttribute('data-tab');
+        document.querySelectorAll('[data-pane]').forEach(function (pane) {
+          pane.classList.toggle('hidden', pane.getAttribute('data-pane') !== name);
+        });
+        if (history.replaceState) history.replaceState(null, '', '#' + name);
+      });
+    });
+    var hash = location.hash.replace('#', '');
+    if (hash) {
+      var target = document.querySelector('.tab[data-tab="' + hash + '"]');
+      if (target) target.click();
+    }
+  }
+
+  var glossaryPromise = null;
+  function glossary() {
+    if (!glossaryPromise) {
+      glossaryPromise = fetch('/api/glossary').then(function (r) { return r.json(); });
+    }
+    return glossaryPromise;
+  }
+
+  var pop = null;
+  function hidePop() {
+    if (pop && pop.parentNode) pop.parentNode.removeChild(pop);
+    pop = null;
+  }
+
+  document.addEventListener('mouseover', function (e) {
+    var el = e.target.closest('[data-term]');
+    if (!el) return;
+    glossary().then(function (data) {
+      var item = data.items && data.items[el.getAttribute('data-term')];
+      if (!item) return;
+      hidePop();
+      pop = document.createElement('div');
+      pop.className = 'gloss-pop';
+      var title = document.createElement('b');
+      title.textContent = item.term;
+      var body = document.createElement('span');
+      body.textContent = item.body;
+      pop.appendChild(title);
+      pop.appendChild(body);
+      document.body.appendChild(pop);
+      var rect = el.getBoundingClientRect();
+      var top = rect.bottom + window.scrollY + 8;
+      var left = Math.min(rect.left + window.scrollX, window.innerWidth - 320);
+      pop.style.top = top + 'px';
+      pop.style.left = Math.max(12, left) + 'px';
+    });
+  });
+
+  document.addEventListener('mouseout', function (e) {
+    if (e.target.closest && e.target.closest('[data-term]')) hidePop();
+  });
+  window.addEventListener('scroll', hidePop, { passive: true });
 })();

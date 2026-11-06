@@ -9,9 +9,31 @@ from kestrel.core.money import format_amount
 from kestrel.db.engine import connect
 from kestrel.notify.channels import ChannelError, Message, build_channel
 from kestrel.receipts import tokens
-from kestrel.services import config as config_service
+from kestrel.services import settings_schema
 
 log = logging.getLogger(__name__)
+
+CHANNEL_KEYS = ("ntfy", "webhook", "weclawbot", "smtp")
+
+
+def configured_channels(cfg: dict) -> list[tuple[str, dict]]:
+    out = []
+    for code in CHANNEL_KEYS:
+        if not cfg.get(f"notify.{code}.enabled"):
+            continue
+        conf = {
+            key.split(".", 2)[2]: value
+            for key, value in cfg.items()
+            if key.startswith(f"notify.{code}.")
+        }
+        if code == "ntfy" and not conf.get("topic"):
+            continue
+        if code == "webhook" and not conf.get("url"):
+            continue
+        if code == "weclawbot" and not (conf.get("base_url") and conf.get("bot_id")):
+            continue
+        out.append((code, conf))
+    return out
 
 
 def render(rec: dict, locale: str, base_url: str) -> Message:
@@ -27,16 +49,14 @@ def render(rec: dict, locale: str, base_url: str) -> Message:
         body = (
             f"Entry {entry} | Stop {stop} | Target {target} | Qty {rec['qty']}\n"
             f"R:R {rec['r_multiple']}:1 · confidence {rec['confidence']:.0%}\n"
-            f"Valid until {rec['valid_until'][:16]} UTC\n"
-            f"{rec['explain_en'] or ''}"
+            f"Valid until {str(rec['valid_until'])[:16]}Z\n{rec.get('explain_en') or ''}"
         )
     else:
         title = f"【{badge}】{rec['code']} {rec['name']}"
         body = (
             f"入场 {entry}｜止损 {stop}｜目标 {target}｜{rec['qty']} 股\n"
             f"盈亏比 {rec['r_multiple']}:1 · 信心 {rec['confidence']:.0%}\n"
-            f"有效期至 {rec['valid_until'][:16]} UTC\n"
-            f"{rec['explain_zh'] or ''}"
+            f"有效期至 {str(rec['valid_until'])[:16]}Z\n{rec.get('explain_zh') or ''}"
         )
         if url:
             body += "\n点链接回执：买没买、成交多少"
@@ -44,26 +64,23 @@ def render(rec: dict, locale: str, base_url: str) -> Message:
 
 
 def queue(rec_id: int, locale: str = "zh-CN") -> int:
-    """Create pending notifications for every configured channel."""
     conn = connect()
     try:
-        cfg = config_service.all_values(conn)
-        channels = [c for c in cfg.get("notify.channels", []) if c.get("enabled")]
+        cfg = settings_schema.read_all(conn)
+        channels = configured_channels(cfg)
         rec = conn.execute("SELECT * FROM recommendation WHERE id=?", (rec_id,)).fetchone()
         if not rec or not channels:
             return 0
-        base = cfg.get("receipt.public_base") or ""
-        message = render(dict(rec), locale, base)
+        message = render(dict(rec), locale, cfg.get("receipt.public_base") or "")
         count = 0
-        for channel in channels:
+        for code, _ in channels:
             conn.execute(
-                """
-                INSERT OR IGNORE INTO notification (rec_id, channel, locale, payload)
-                VALUES (?,?,?,?)
-                """,
-                (rec_id, channel["code"], locale, json.dumps({
-                    "title": message.title, "body": message.body, "url": message.url,
-                }, ensure_ascii=False)),
+                "INSERT OR IGNORE INTO notification (rec_id, channel, locale, payload)"
+                " VALUES (?,?,?,?)",
+                (rec_id, code, locale, json.dumps(
+                    {"title": message.title, "body": message.body, "url": message.url},
+                    ensure_ascii=False,
+                )),
             )
             count += 1
         conn.commit()
@@ -73,22 +90,18 @@ def queue(rec_id: int, locale: str = "zh-CN") -> int:
 
 
 async def dispatch(limit: int = 20) -> dict:
-    """Send pending notifications, marking failures for retry."""
     conn = connect()
     sent = failed = 0
     try:
-        cfg = config_service.all_values(conn)
-        channel_cfg = {c["code"]: c for c in cfg.get("notify.channels", [])}
+        cfg = settings_schema.read_all(conn)
+        channels = dict(configured_channels(cfg))
         rows = conn.execute(
             "SELECT * FROM notification WHERE status='pending' ORDER BY id LIMIT ?", (limit,)
         ).fetchall()
         for row in rows:
             code = row["channel"]
-            conf = channel_cfg.get(code)
-            if not conf:
-                conn.execute("UPDATE notification SET status='skipped' WHERE id=?", (row["id"],))
-                continue
-            channel = build_channel(code, conf)
+            conf = channels.get(code)
+            channel = build_channel(code, conf) if conf else None
             if channel is None:
                 conn.execute("UPDATE notification SET status='skipped' WHERE id=?", (row["id"],))
                 continue
@@ -106,8 +119,8 @@ async def dispatch(limit: int = 20) -> dict:
                 continue
             sent += 1
             conn.execute(
-                "UPDATE notification SET status='sent', sent_at=datetime('now'), attempts=attempts+1"
-                " WHERE id=?",
+                "UPDATE notification SET status='sent', sent_at=datetime('now'),"
+                " attempts=attempts+1 WHERE id=?",
                 (row["id"],),
             )
         conn.commit()

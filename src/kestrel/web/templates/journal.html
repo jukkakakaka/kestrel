@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}{{ t('nav.journal') }} · {{ t('app.name') }}{% endblock %}
+
+{% block content %}
+<div class="kpi">
+  <div class="k"><div class="v">{{ stats.open }}</div><div class="l">{{ t('j.open') }}</div></div>
+  <div class="k"><div class="v">{{ '%.0f'|format(stats.win_rate * 100) }}%</div><div class="l">{{ t('j.win_rate') }}</div></div>
+  <div class="k"><div class="v">{{ '%.2f'|format(stats.rr) }}</div><div class="l">{{ t('j.rr') }}</div></div>
+  <div class="k"><div class="v {{ 'up' if stats.net_cny >= 0 else 'down' }}">¥{{ '%.0f'|format(stats.net_cny) }}</div><div class="l">{{ t('j.net') }}</div></div>
+</div>
+
+<section class="panel">
+  <div class="panel-head">
+    <h1>{{ t('nav.journal') }}</h1>
+    <div class="actions"><a class="btn ghost" href="/ipo">{{ t('j.ipo_link') }}</a></div>
+  </div>
+
+  <form method="post" action="/journal/add" class="grid g5">
+    <div class="field"><label>{{ t('dash.market') }}</label>
+      <select name="market"><option value="HK">HK</option><option value="US">US</option><option value="CN">CN</option></select></div>
+    <div class="field"><label>{{ t('dash.code') }}</label><input name="code" required placeholder="00700"></div>
+    <div class="field"><label>{{ t('j.name') }}</label><input name="name" placeholder="腾讯控股"></div>
+    <div class="field"><label>{{ t('scan.qty') }}</label><input name="qty" type="number" step="1" required placeholder="100"></div>
+    <div class="field"><label>{{ t('j.entry') }}</label><input name="entry_price" type="number" step="0.001" required placeholder="400"></div>
+    <div class="field"><label>{{ t('scan.stop') }}</label><input name="stop_price" type="number" step="0.001" placeholder="380"></div>
+    <div class="field"><label>{{ t('scan.target') }}</label><input name="target_price" type="number" step="0.001" placeholder="440"></div>
+    <div class="field"><label>&nbsp;</label><button class="btn" style="width:100%">{{ t('action.add') }}</button></div>
+  </form>
+</section>
+
+<section class="panel" style="margin-top:16px">
+  <h2 class="sub-h">{{ t('j.open_positions') }}</h2>
+  {% if open_trades %}
+  <table class="grid">
+    <thead><tr><th>{{ t('dash.market') }}</th><th>{{ t('dash.code') }}</th><th class="num">{{ t('scan.qty') }}</th>
+      <th class="num">{{ t('j.entry') }}</th><th class="num">{{ t('scan.stop') }}</th><th class="num">R</th><th></th></tr></thead>
+    <tbody>
+    {% for tr in open_trades %}
+    <tr>
+      <td><span class="tag tag-{{ tr.market|lower }}">{{ tr.market }}</span></td>
+      <td class="mono"><strong>{{ tr.code }}</strong> <span class="muted">{{ tr.name }}</span></td>
+      <td class="num mono">{{ tr.qty }}</td>
+      <td class="num mono">{{ tr.entry_price|money(3) }}</td>
+      <td class="num mono down">{{ tr.stop_price|money(3) if tr.stop_price else '—' }}</td>
+      <td class="num mono">{% if tr.stop_price %}{{ ((tr.entry_price - tr.stop_price) / 1e6 * tr.qty)|round(1) }}{% else %}—{% endif %}</td>
+      <td>
+        <form method="post" action="/journal/{{ tr.id }}/close" class="close-form">
+          <input name="exit_price" type="number" step="0.001" placeholder="{{ t('j.exit') }}" required>
+          <input name="review" placeholder="{{ t('j.review') }}">
+          <label class="tiny"><input type="checkbox" name="rule_break"> {{ t('j.broke') }}</label>
+          <button class="btn sm">{{ t('j.close') }}</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="empty">{{ t('j.no_open') }}</p>{% endif %}
+</section>
+
+<section class="panel" style="margin-top:16px">
+  <h2 class="sub-h">{{ t('j.closed') }}</h2>
+  {% if closed %}
+  <table class="grid">
+    <thead><tr><th>{{ t('dash.code') }}</th><th class="num">{{ t('j.entry') }} → {{ t('j.exit') }}</th>
+      <th class="num">{{ t('j.pnl') }}</th><th class="num">%</th><th>{{ t('j.review') }}</th><th></th></tr></thead>
+    <tbody>
+    {% for tr in closed %}
+    {% set p = pnl(tr) %}
+    <tr>
+      <td class="mono"><strong>{{ tr.code }}</strong> {% if tr.rule_break %}<span class="tag tag-cn">{{ t('j.broke') }}</span>{% endif %}</td>
+      <td class="num mono">{{ tr.entry_price|money(3) }} → {{ tr.exit_price|money(3) }}</td>
+      <td class="num mono {{ 'up' if p.net >= 0 else 'down' }}">{{ '%.2f'|format(p.net) }}</td>
+      <td class="num mono {{ 'up' if p.ret >= 0 else 'down' }}">{{ '%.2f'|format(p.ret * 100) }}%</td>
+      <td class="tiny">{{ tr.review or '—' }}</td>
+      <td><form method="post" action="/journal/{{ tr.id }}/delete"><button class="link danger">×</button></form></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="empty">{{ t('j.no_closed') }}</p>{% endif %}
+</section>
+
+{% if stats.broken or stats.clean %}
+<div class="panel" style="margin-top:16px">
+  <h2 class="sub-h">{{ t('j.discipline') }}</h2>
+  <table class="grid">
+    <tbody>
+      <tr><td>{{ t('j.clean') }}</td><td class="num">{{ stats.clean }}</td>
+          <td class="num {{ 'up' if stats.clean_pnl >= 0 else 'down' }}">¥{{ '%.0f'|format(stats.clean_pnl) }}</td></tr>
+      <tr><td>{{ t('j.broken') }}</td><td class="num">{{ stats.broken }}</td>
+          <td class="num {{ 'up' if stats.broken_pnl >= 0 else 'down' }}">¥{{ '%.0f'|format(stats.broken_pnl) }}</td></tr>
+    </tbody>
+  </table>
+  <p class="hint">{{ t('j.discipline_hint') }}</p>
+</div>
+{% endif %}
+{% endblock %}
