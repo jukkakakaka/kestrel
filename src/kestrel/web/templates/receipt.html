@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}" data-theme="{{ theme }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ t('receipt.title') }} · {{ t('app.name') }}</title>
+  <link rel="icon" href="/static/favicon/favicon-32.png" sizes="32x32">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script>
+    (function () {
+      var saved = document.documentElement.getAttribute('data-theme');
+      var mql = window.matchMedia('(prefers-color-scheme: dark)');
+      var mode = saved === 'auto' ? (mql.matches ? 'dark' : 'light') : saved;
+      document.documentElement.setAttribute('data-mode', mode);
+    })();
+  </script>
+</head>
+<body>
+<main class="wrap receipt-wrap">
+  {% if not rec %}
+  <div class="panel">
+    <h1>{{ t('receipt.invalid') }}</h1>
+    <p class="hint">{{ t('receipt.invalid_hint') }}</p>
+  </div>
+  {% elif done %}
+  <div class="panel receipt-done">
+    <div class="done-mark">✓</div>
+    <h1>{{ t('receipt.thanks') }}</h1>
+    <p class="hint">{{ t('receipt.recorded') }}</p>
+    <a class="btn" href="/scan">{{ t('receipt.back') }}</a>
+  </div>
+  {% else %}
+  <div class="panel">
+    <div class="receipt-head">
+      <span class="tag tag-{{ rec.market|lower }}">{{ rec.market }}</span>
+      <span class="mono">{{ rec.code }}</span>
+      <strong>{{ rec.name }}</strong>
+    </div>
+
+    <dl class="receipt-grid">
+      <div><dt>{{ t('scan.entry') }}</dt><dd class="mono">{{ rec.entry_low|money(3) }} – {{ rec.entry_high|money(3) }}</dd></div>
+      <div><dt>{{ t('scan.stop') }}</dt><dd class="mono down">{{ rec.stop|money(3) }}</dd></div>
+      <div><dt>{{ t('scan.target') }}</dt><dd class="mono up">{{ rec.target1|money(3) }}</dd></div>
+      <div><dt>{{ t('scan.qty') }}</dt><dd class="mono">{{ rec.qty }}</dd></div>
+    </dl>
+
+    <form method="post" class="receipt-form">
+      <label class="field-label">{{ t('receipt.fill_price') }}</label>
+      <input type="text" inputmode="decimal" name="fill_price" placeholder="{{ rec.entry_low|money(3) }}">
+
+      <label class="field-label">{{ t('receipt.note') }}</label>
+      <input type="text" name="note" placeholder="{{ t('receipt.note_ph') }}">
+
+      <div class="receipt-actions">
+        <button class="btn ok" name="action" value="executed">{{ t('receipt.executed') }}</button>
+        <button class="btn ghost" name="action" value="partial">{{ t('receipt.partial') }}</button>
+        <button class="btn ghost danger" name="action" value="skipped">{{ t('receipt.skipped') }}</button>
+      </div>
+    </form>
+
+    {% if existing %}
+    <p class="hint">{{ t('receipt.already') }}: {{ existing.action }} · {{ existing.created_at }}</p>
+    {% endif %}
+  </div>
+  {% endif %}
+</main>
+</body>
+</html>

@@ -90,4 +90,28 @@
     refreshBtn.addEventListener('click', load);
     load();
   }
+
+  var scanBtn = document.getElementById('scan-btn');
+  var scanStatus = document.getElementById('scan-status');
+  if (scanBtn) {
+    scanBtn.addEventListener('click', function () {
+      scanBtn.disabled = true;
+      scanBtn.textContent = scanBtn.getAttribute('data-running') || '…';
+      if (scanStatus) {
+        scanStatus.classList.remove('hidden');
+        scanStatus.textContent = scanBtn.getAttribute('data-running') || '…';
+      }
+      fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (res.ok) {
+            location.reload();
+          } else {
+            if (scanStatus) scanStatus.textContent = res.error || 'failed';
+            scanBtn.disabled = false;
+          }
+        })
+        .catch(function () { scanBtn.disabled = false; });
+    });
+  }
 })();

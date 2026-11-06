@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import UTC
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -30,7 +31,18 @@ STATIC = WEB_DIR / "static"
 def _templates():
     from fastapi.templating import Jinja2Templates
 
-    return Jinja2Templates(directory=str(TEMPLATES))
+    tpl = Jinja2Templates(directory=str(TEMPLATES))
+    tpl.env.filters["money"] = _money
+    return tpl
+
+
+def _money(value, places: int = 2) -> str:
+    if value is None:
+        return "—"
+    try:
+        return f"{int(value) / 1_000_000:,.{places}f}"
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def _persist_quotes(quotes) -> None:
@@ -154,7 +166,7 @@ def create_app() -> FastAPI:
                 "INSERT OR IGNORE INTO symbol (market, code, name, currency, lot_size)"
                 " VALUES (?, ?, ?, ?, ?)",
                 (market, code, code, {"CN": "CNY", "HK": "HKD", "US": "USD"}[market],
-                 1000 if market == "HK" else 100),
+                 100 if market in ("HK", "CN") else 1),
             )
             sid = conn.execute(
                 "SELECT id FROM symbol WHERE market=? AND code=?", (market, code)
@@ -227,6 +239,144 @@ def create_app() -> FastAPI:
     async def settings_page(request: Request):
         return templates.TemplateResponse(
             request=request, name="settings.html", context=_ctx(request)
+        )
+
+    @app.get("/scan", response_class=HTMLResponse)
+    async def scan_page(request: Request):
+        from kestrel.services import config as config_service
+        from kestrel.services import scan as scan_service
+
+        scan_service.expire_stale()
+        recs = scan_service.active_recommendations(50)
+        conn = connect()
+        try:
+            last = config_service.get(conn, "scan.last", None)
+        finally:
+            conn.close()
+        return templates.TemplateResponse(
+            request=request, name="scan.html", context=_ctx(request, recs=recs, last=last)
+        )
+
+    @app.post("/api/scan", response_class=JSONResponse)
+    async def api_scan(request: Request):
+        from kestrel.notify import dispatcher
+        from kestrel.services import scan as scan_service
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        markets = body.get("markets") if isinstance(body, dict) else None
+        result = await scan_service.run_scan(trigger="manual", markets=markets)
+        if result.get("ok"):
+            queued = 0
+            for rec in scan_service.active_recommendations(10):
+                queued += dispatcher.queue(rec["id"])
+            result["queued"] = queued
+            result["notify"] = await dispatcher.dispatch()
+        return result
+
+    @app.get("/api/recommendations", response_class=JSONResponse)
+    async def api_recommendations():
+        from kestrel.services import scan as scan_service
+
+        return {"ok": True, "items": scan_service.active_recommendations(50)}
+
+    @app.get("/r/{code}", response_class=HTMLResponse)
+    async def receipt_page(request: Request, code: str):
+        conn = connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT r.*, t.code AS token_code, t.expires_at, t.uses, t.max_uses
+                FROM receipt_token t JOIN recommendation r ON r.id = t.rec_id
+                WHERE t.code = ?
+                """,
+                (code,),
+            ).fetchone()
+            existing = None
+            if row:
+                existing = conn.execute(
+                    "SELECT * FROM receipt WHERE rec_id=? ORDER BY id DESC LIMIT 1",
+                    (row["id"],),
+                ).fetchone()
+        finally:
+            conn.close()
+        return templates.TemplateResponse(
+            request=request,
+            name="receipt.html",
+            context=_ctx(request, rec=dict(row) if row else None, code=code,
+                         existing=dict(existing) if existing else None),
+        )
+
+    @app.post("/r/{code}", response_class=HTMLResponse)
+    async def receipt_submit(request: Request, code: str):
+        from datetime import datetime
+
+        from kestrel.core.money import to_micro
+
+        form = await request.form()
+        action = str(form.get("action") or "skipped")
+        fill_raw = str(form.get("fill_price") or "").strip()
+        note = str(form.get("note") or "").strip()
+
+        conn = connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT r.*, t.code AS token_code, t.expires_at, t.uses, t.max_uses
+                FROM receipt_token t JOIN recommendation r ON r.id = t.rec_id
+                WHERE t.code = ?
+                """,
+                (code,),
+            ).fetchone()
+            if row is None:
+                return templates.TemplateResponse(
+                    request=request, name="receipt.html",
+                    context=_ctx(request, rec=None, code=code, existing=None),
+                )
+
+            fill_price = None
+            deviation_pct = deviation_r = None
+            if action in ("executed", "partial") and fill_raw:
+                try:
+                    fill_price = to_micro(fill_raw)
+                    entry = row["entry_low"]
+                    stop = row["stop"]
+                    if entry:
+                        deviation_pct = (fill_price - entry) / entry * 100
+                    if entry and stop and entry > stop:
+                        deviation_r = (fill_price - entry) / (entry - stop)
+                except Exception:
+                    fill_price = None
+
+            conn.execute("BEGIN")
+            conn.execute(
+                """
+                INSERT INTO receipt
+                    (rec_id, token_code, action, fill_price, fill_qty, filled_at,
+                     deviation_pct, deviation_r, note, source)
+                VALUES (?,?,?,?,?,?,?,?,?, 'link')
+                """,
+                (
+                    row["id"], code, action, fill_price, row["qty"],
+                    datetime.now(UTC).isoformat(timespec="seconds"),
+                    deviation_pct, deviation_r, note or None,
+                ),
+            )
+            conn.execute(
+                "UPDATE receipt_token SET uses = uses + 1 WHERE code = ?", (code,)
+            )
+            status = {"executed": "executed", "partial": "executed", "skipped": "skipped"}[action]
+            conn.execute("UPDATE recommendation SET status=? WHERE id=?", (status, row["id"]))
+            conn.execute("COMMIT")
+        finally:
+            conn.close()
+
+        rec = dict(row) if row else None
+        return templates.TemplateResponse(
+            request=request, name="receipt.html",
+            context=_ctx(request, rec=rec, code=code, existing=None, done=action),
         )
 
     return app

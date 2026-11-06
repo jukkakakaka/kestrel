@@ -1,0 +1,54 @@
+"""Small typed wrapper over the ``config_kv`` table."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from typing import Any
+
+DEFAULTS: dict[str, Any] = {
+    "account.capital": 10000.0,
+    "account.currency": "CNY",
+    "risk.per_trade_pct": 2.0,
+    "risk.max_total_exposure_pct": 60.0,
+    "scan.auto_enabled": False,
+    "scan.interval_minutes": 60,
+    "scan.markets": ["CN", "HK", "US"],
+    "scan.min_score": 0.55,
+    "broker.HK": "fosun_hk",
+    "broker.US": "fosun_us",
+    "broker.CN": "cn_generic",
+    "notify.channels": [],
+    "notify.locale": "zh-CN",
+    "receipt.public_base": "",
+}
+
+
+def get(conn: sqlite3.Connection, key: str, default: Any = None) -> Any:
+    row = conn.execute("SELECT value FROM config_kv WHERE key=?", (key,)).fetchone()
+    if row is None:
+        return DEFAULTS.get(key, default)
+    try:
+        return json.loads(row["value"])
+    except json.JSONDecodeError:
+        return DEFAULTS.get(key, default)
+
+
+def put(conn: sqlite3.Connection, key: str, value: Any) -> None:
+    conn.execute(
+        """
+        INSERT INTO config_kv (key, value, updated_at) VALUES (?, ?, datetime('now'))
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+        """,
+        (key, json.dumps(value, ensure_ascii=False)),
+    )
+
+
+def all_values(conn: sqlite3.Connection) -> dict[str, Any]:
+    merged = dict(DEFAULTS)
+    for row in conn.execute("SELECT key, value FROM config_kv").fetchall():
+        try:
+            merged[row["key"]] = json.loads(row["value"])
+        except json.JSONDecodeError:
+            continue
+    return merged
