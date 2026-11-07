@@ -371,5 +371,8 @@
   "settings.custom_source": "添加自定义数据源",
   "settings.custom_source_meta": "行情接口返回 JSON 就能接",
   "settings.custom_source_hint": "如果内置的三个源都不好用（被限流、字段不对），把你自己的接口填进来。它会被优先使用。",
-  "settings.custom_source_fields": "字段路径用点号表示层级，例如 data.quote.price、items.0.last。如果返回的是纯文本数字，路径留空即可。"
+  "settings.custom_source_fields": "字段路径用点号表示层级，例如 data.quote.price、items.0.last。如果返回的是纯文本数字，路径留空即可。",
+  "settings.preset": "从预设开始",
+  "settings.preset_none": "不用预设，我自己填",
+  "settings.preset_help": "选一个服务商，下面的地址和字段会自动填好，你只需要补 API Key。"
 }

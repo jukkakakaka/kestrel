@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from kestrel.db.engine import connect
 from kestrel.services import backtest
 from kestrel.services import bars as bars_service
-from kestrel.strategies.base import registry
+from kestrel.services import rules as rule_service
 
 log = logging.getLogger(__name__)
 
@@ -101,13 +101,14 @@ def evaluate(max_symbols: int = 120, history: int = 500) -> dict:
             "strategies": {},
         }
 
+    rules = rule_service.registry()
     report: dict[str, dict] = {}
-    for code in registry():
+    for code in rules:
         trades: list[dict] = []
         per_symbol: list[dict] = []
         for sym, bars in series:
             try:
-                result = backtest.run(bars, code)
+                result = backtest.run(bars, code, registry_override=rules)
             except Exception as exc:  # noqa: BLE001
                 log.warning("backtest failed %s %s: %s", code, sym["code"], exc)
                 continue
@@ -178,7 +179,7 @@ def enabled_strategies() -> dict[str, bool]:
     if not report or not report.get("strategies"):
         # No evidence yet: allow everything rather than silently going dark,
         # but the scan labels the result as unproven.
-        return {code: True for code in registry()}
+        return {code: True for code in rule_service.registry()}
     return {code: bool(stats.get("usable")) for code, stats in report["strategies"].items()}
 
 

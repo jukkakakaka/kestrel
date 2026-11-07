@@ -649,6 +649,7 @@ def create_app() -> FastAPI:
 
     @app.get("/settings", response_class=HTMLResponse)
     async def settings_page(request: Request):
+        from kestrel.datasources import presets as preset_service
         from kestrel.datasources import registry as source_registry
         from kestrel.services import channels as channel_service
         from kestrel.services import config as config_service
@@ -670,6 +671,7 @@ def create_app() -> FastAPI:
                 values=values,
                 glossary=glossary,
                 sources=source_registry.list_all(),
+                presets=preset_service.PRESETS,
                 channels=channel_service.all_channels(),
                 pool=universe_service.pool_summary(),
                 saved=request.query_params.get("saved"),
@@ -897,12 +899,13 @@ def create_app() -> FastAPI:
         return RedirectResponse("/cost", status_code=301)
 
     def _sim_context(request: Request, **extra):
-        from kestrel.services import backtest, edge
+        from kestrel.services import backtest
+        from kestrel.services import rules as rule_service
 
-        report = edge.cached()
-        if report and report.get("strategies"):
-            for stats in report["strategies"].values():
-                stats["sentence"] = edge.describe(stats)
+        report = {"ok": True, "rules": rule_service.all_rules()}
+        report["symbols"] = len({r["code"] for r in report["rules"]})
+        validated = [r for r in report["rules"] if r.get("validation")]
+        report["validated"] = len(validated)
         conn = connect()
         try:
             symbols = [
@@ -1148,6 +1151,64 @@ def create_app() -> FastAPI:
 
         markets = [market.upper()] if market else ["CN", "HK", "US"]
         return {"ok": True, "items": universe_service.pool_symbols(markets, limit)}
+
+    # ---------------------------------------------------------------- rules
+
+    @app.get("/rules", response_class=HTMLResponse)
+    async def rules_page(request: Request):
+        from kestrel.services import rules as rule_service
+        from kestrel.strategies.spec import FIELDS
+
+        return templates.TemplateResponse(
+            request=request,
+            name="rules.html",
+            context=_ctx(request, rules=rule_service.all_rules(), fields=sorted(FIELDS)),
+        )
+
+    @app.post("/api/rules/save", response_class=JSONResponse)
+    async def api_rule_save(request: Request):
+        from kestrel.services import rules as rule_service
+        from kestrel.strategies.spec import RuleError
+
+        body = await request.json()
+        try:
+            code = rule_service.save(body or {})
+        except RuleError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return {"ok": True, "code": code}
+
+    @app.post("/api/rules/{code}/toggle", response_class=JSONResponse)
+    async def api_rule_toggle(code: str, request: Request):
+        from kestrel.services import rules as rule_service
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        return {"ok": rule_service.set_enabled(code, bool((body or {}).get("enabled")))}
+
+    @app.post("/api/rules/{code}/delete", response_class=JSONResponse)
+    async def api_rule_delete(code: str):
+        from kestrel.services import rules as rule_service
+
+        return {"ok": rule_service.delete(code)}
+
+    @app.post("/api/rules/validate", response_class=JSONResponse)
+    async def api_rules_validate(request: Request):
+        from kestrel.services import rules as rule_service
+        from kestrel.strategies.spec import RuleError
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        code = str((body or {}).get("code") or "").strip()
+        try:
+            if code:
+                return rule_service.validate(code)
+            return {"ok": True, "results": rule_service.validate_all()}
+        except RuleError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
     # ---------------------------------------------------------------- backup
 

@@ -159,6 +159,8 @@
   </section>
 </div>
 
+<script id="preset-data" type="application/json">{{ presets | tojson }}</script>
+
 <div data-pane="sources" class="hidden">
   <section class="card">
     <div class="card-head">
@@ -200,6 +202,18 @@
     </div>
     <div class="card-body">
       <p class="hint" style="margin-bottom:14px;">{{ t('settings.custom_source_hint') }}</p>
+
+      <div class="field" style="margin-bottom:16px;">
+        <label>{{ t('settings.preset') }}</label>
+        <select id="cs-preset">
+          <option value="">{{ t('settings.preset_none') }}</option>
+          {% for p in presets %}
+          <option value="{{ p.key }}">{{ p.label }}{% if p.verified %} ✓{% endif %}</option>
+          {% endfor %}
+        </select>
+        <span class="help" id="cs-preset-note">{{ t('settings.preset_help') }}</span>
+      </div>
+
       <div class="grid g2">
         <div class="field"><label>名称</label><input id="cs-label" placeholder="我的券商行情"></div>
         <div class="field"><label>覆盖市场</label>
@@ -208,13 +222,21 @@
         <div class="field" style="grid-column:1 / -1;">
           <label>URL 模板</label>
           <input id="cs-url" placeholder="https://example.com/quote?symbol={code}">
-          <span class="help">支持占位符 {code} / {market} / {symbol}</span>
+          <span class="help">占位符：{code} {market} {symbol} {yf_symbol} {key}</span>
+        </div>
+        <div class="field"><label>API Key</label><input id="cs-key" type="password" placeholder="付费源填这里"></div>
+        <div class="field"><label>请求方式</label>
+          <select id="cs-method"><option>GET</option><option>POST</option></select>
+        </div>
+        <div class="field" style="grid-column:1 / -1;">
+          <label>POST 请求体（仅 POST 用）</label>
+          <input id="cs-body" placeholder='{"codes":"{code}","token":"{key}"}'>
         </div>
         <div class="field"><label>价格字段路径</label><input id="cs-price" value="price" placeholder="data.last"></div>
         <div class="field"><label>昨收字段路径</label><input id="cs-prev" placeholder="data.prevClose"></div>
         <div class="field"><label>涨跌幅字段路径</label><input id="cs-change" placeholder="data.changePct"></div>
         <div class="field"><label>名称字段路径</label><input id="cs-name" placeholder="data.name"></div>
-        <div class="field"><label>换算系数</label><input id="cs-scale" value="1" placeholder="1000"><span class="help">返回的是整数毫单位就填 1000</span></div>
+        <div class="field"><label>换算系数</label><input id="cs-scale" value="1" placeholder="1000"></div>
         <div class="field"><label>测试用代码</label><input id="cs-test-code" placeholder="AAPL"></div>
         <div class="field"><label>测试用市场</label>
           <select id="cs-test-market"><option>US</option><option>HK</option><option>CN</option></select>
@@ -223,11 +245,13 @@
       <div class="row-actions">
         <button class="btn ghost" id="cs-test">先测一下</button>
         <button class="btn" id="cs-save">保存数据源</button>
+        <button class="btn subtle" id="cs-add-builtin">把 Yahoo 设为内置备用源</button>
         <span class="tiny" id="cs-msg"></span>
       </div>
       <p class="tiny muted" style="margin-top:10px;">{{ t('settings.custom_source_fields') }}</p>
     </div>
   </section>
+
   <p class="hint">{{ t('settings.sources_hint') }}</p>
 </div>
 
@@ -522,6 +546,8 @@
 
   /* ---- custom data source ---- */
   var csMsg = document.getElementById('cs-msg');
+  var PRESETS = JSON.parse(document.getElementById('preset-data').textContent || '[]');
+
   function collectSource() {
     return {
       label: document.getElementById('cs-label').value.trim(),
@@ -532,8 +558,29 @@
       change_path: document.getElementById('cs-change').value.trim(),
       name_path: document.getElementById('cs-name').value.trim(),
       scale: parseFloat(document.getElementById('cs-scale').value || '1'),
+      api_key: document.getElementById('cs-key').value.trim(),
+      method: document.getElementById('cs-method').value,
+      body: document.getElementById('cs-body').value.trim(),
       enabled: true
     };
+  }
+
+  var presetSel = document.getElementById('cs-preset');
+  if (presetSel) {
+    presetSel.addEventListener('change', function () {
+      var preset = PRESETS.find(function (p) { return p.key === presetSel.value; });
+      var note = document.getElementById('cs-preset-note');
+      if (!preset) { note.textContent = ''; return; }
+      document.getElementById('cs-label').value = preset.label;
+      document.getElementById('cs-markets').value = preset.markets || '';
+      document.getElementById('cs-url').value = preset.url || '';
+      document.getElementById('cs-price').value = preset.price_path || '';
+      document.getElementById('cs-prev').value = preset.prev_close_path || '';
+      document.getElementById('cs-change').value = preset.change_path || '';
+      document.getElementById('cs-name').value = preset.name_path || '';
+      document.getElementById('cs-scale').value = preset.scale || 1;
+      note.textContent = (preset.note || '') + (preset.docs ? '  文档：' + preset.docs : '');
+    });
   }
 
   var csTest = document.getElementById('cs-test');
@@ -569,6 +616,33 @@
         .then(function (res) {
           if (res.ok) { location.reload(); }
           else { csMsg.textContent = res.error; }
+        });
+    });
+  }
+
+  var addBuiltin = document.getElementById('cs-add-builtin');
+  if (addBuiltin) {
+    addBuiltin.addEventListener('click', function () {
+      var preset = PRESETS.find(function (p) { return p.key === 'yahoo'; });
+      if (!preset) return;
+      fetch('/api/datasources/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: preset.label,
+          markets: preset.markets,
+          url: preset.url,
+          price_path: preset.price_path,
+          prev_close_path: preset.prev_close_path,
+          change_path: preset.change_path,
+          name_path: preset.name_path,
+          scale: preset.scale,
+          enabled: true
+        })
+      }).then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (res.ok) { location.reload(); }
+          else { csMsg.textContent = res.error || '保存失败'; }
         });
     });
   }

@@ -25,8 +25,8 @@ from kestrel.planning import builder
 from kestrel.receipts import tokens
 from kestrel.services import bars as bars_service
 from kestrel.services import config as config_service
+from kestrel.services import rules as rule_service
 from kestrel.services import universe as universe_service
-from kestrel.strategies.base import registry
 
 log = logging.getLogger(__name__)
 
@@ -205,13 +205,10 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
         await _resolve_missing(symbols)
         bars_map, skipped = await _load_bars(conn, symbols)
 
-        strategies = registry()
-        # Only strategies that have demonstrated positive expectancy across the
-        # universe may publish advice. A rule that backtests as a loser does not
-        # become a good idea because the chart looks nice today.
-        from kestrel.services import edge as edge_service
-
-        allowed = edge_service.enabled_strategies()
+        strategies = rule_service.registry()
+        # Only enabled rules may publish advice. Validation switches off the ones
+        # measured as having no edge; the user can override on the rules page.
+        allowed = {code: True for code in strategies}
         signals = plans = 0
         near: list[dict] = []
         rejected: list[dict] = []

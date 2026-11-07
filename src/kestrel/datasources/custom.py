@@ -22,18 +22,36 @@ log = logging.getLogger(__name__)
 
 _NUM = re.compile(r"-?\d+(?:\.\d+)?")
 
+# A path is a sequence of keys and indices:
+#   data.quote.price          -> {"data": {"quote": {"price": ...}}}
+#   items[0].last             -> list access
+#   Global Quote["05. price"] -> Alpha Vantage's keys contain spaces and dots
+_PATH_TOKEN = re.compile(r"""\[(?:'([^']*)'|"([^"]*)"|([^\]]*))\]|([^.\[\]]+)""")
+
+
+def _path_tokens(path: str) -> list[str]:
+    tokens: list[str] = []
+    for match in _PATH_TOKEN.finditer(path):
+        single, double, bare, plain = match.groups()
+        token = next((v for v in (single, double, bare, plain) if v is not None), "")
+        token = token.strip()
+        if token:
+            tokens.append(token)
+    return tokens
+
 
 def _dig(payload, path: str):
-    """Walk a dotted path like ``data.quote.price`` or ``items.0.last``."""
+    """Walk a path like ``data.quote.price``, ``items[0].last`` or ``["05. price"]``."""
     if not path:
         return None
     node = payload
-    for part in path.split("."):
+    for part in _path_tokens(path):
         if isinstance(node, list):
-            if not part.isdigit():
+            try:
+                index = int(part)
+            except ValueError:
                 return None
-            index = int(part)
-            if index >= len(node):
+            if index < 0 or index >= len(node):
                 return None
             node = node[index]
         elif isinstance(node, dict):
@@ -43,6 +61,17 @@ def _dig(payload, path: str):
         else:
             return None
     return node
+
+
+def _yahoo_symbol(market: str, code: str) -> str:
+    """Yahoo wants 0700.HK / 600519.SS / 000001.SZ instead of a bare ticker."""
+    if market == "HK":
+        # we store 00700; Yahoo wants four digits
+        digits = code.lstrip("0") or "0"
+        return f"{digits.zfill(4)}.HK"
+    if market == "CN":
+        return f"{code}.SS" if code.startswith(("6", "9", "5")) else f"{code}.SZ"
+    return code
 
 
 def _to_decimal(value) -> Decimal | None:
@@ -76,6 +105,9 @@ class CustomProvider:
         self.name_path = str(config.get("name_path") or "name")
         self.currency = str(config.get("currency") or "")
         self.timeout = float(config.get("timeout") or 8.0)
+        self.api_key = str(config.get("api_key") or "")
+        self.method = str(config.get("method") or "GET").upper()
+        self.body_template = str(config.get("body") or "")
         # Some endpoints return integers scaled by 10^n (Eastmoney uses milli-units).
         try:
             self.scale = Decimal(str(config.get("scale") or 1)) or Decimal("1")
@@ -87,11 +119,15 @@ class CustomProvider:
         return not self.markets or market.upper() in self.markets
 
     def _url_for(self, market: str, code: str) -> str:
-        return (
+        market = market.upper()
+        url = (
             self.url_template.replace("{code}", code)
-            .replace("{market}", market.upper())
-            .replace("{symbol}", f"{market.upper()}:{code}")
+            .replace("{market}", market)
+            .replace("{symbol}", f"{market}:{code}")
+            .replace("{yf_symbol}", _yahoo_symbol(market, code))
+            .replace("{key}", self.api_key)
         )
+        return url
 
     async def fetch(self, symbols: list[tuple[str, str]]) -> dict[str, Quote]:
         out: dict[str, Quote] = {}
@@ -106,7 +142,17 @@ class CustomProvider:
                 if not url.startswith("http"):
                     continue
                 try:
-                    resp = await client.get(url)
+                    if self.method == "POST":
+                        payload_body = (
+                            self.body_template.replace("{code}", code).replace("{key}", self.api_key)
+                        )
+                        resp = await client.post(
+                            url,
+                            content=payload_body or None,
+                            headers={"Content-Type": "application/json"},
+                        )
+                    else:
+                        resp = await client.get(url)
                     resp.raise_for_status()
                     body = resp.text
                 except Exception as exc:  # noqa: BLE001
@@ -200,6 +246,10 @@ def save(payload: dict) -> str:
         "currency": str(payload.get("currency") or "").strip(),
         "timeout": payload.get("timeout") or 8,
         "scale": payload.get("scale") or 1,
+        "api_key": str(payload.get("api_key") or "").strip(),
+        "method": str(payload.get("method") or "GET").upper(),
+        "body": str(payload.get("body") or "").strip(),
+        "headers": payload.get("headers") or {},
     }
 
     conn = connect()

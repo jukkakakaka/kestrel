@@ -371,5 +371,8 @@
   "settings.custom_source": "Add a custom source",
   "settings.custom_source_meta": "Any JSON endpoint will do",
   "settings.custom_source_hint": "If the three built-ins stop working, point the app at your own endpoint. Custom sources are tried first.",
-  "settings.custom_source_fields": "Paths use dots, e.g. data.quote.price or items.0.last. Leave blank for a plain-text number."
+  "settings.custom_source_fields": "Paths use dots, e.g. data.quote.price or items.0.last. Leave blank for a plain-text number.",
+  "settings.preset": "Start from a preset",
+  "settings.preset_none": "No preset — I'll fill it in",
+  "settings.preset_help": "Pick a provider and the URL and field paths fill themselves in. You only add the key."
 }

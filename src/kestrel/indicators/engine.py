@@ -96,14 +96,24 @@ def compute(series: Series) -> dict:
     low20 = min(series.low[-21:-1]) if len(series.low) >= 21 else min(series.low)
     high60 = max(series.high[-61:-1]) if len(series.high) >= 61 else max(series.high)
 
+    def ret(days: int) -> float | None:
+        if len(close) <= days:
+            return None
+        past = close[-1 - days]
+        return ((last - past) / past * 100) if past else None
+
+    macd_fast, macd_slow = ema(close, 12), ema(close, 26)
+    day_range = series.high[-1] - series.low[-1]
+
     return {
         "last": last,
         "sma5": ma5,
         "sma10": ma10,
         "sma20": ma20,
         "sma60": ma60,
-        "ema12": ema(close, 12),
-        "ema26": ema(close, 26),
+        "ema12": macd_fast,
+        "ema26": macd_slow,
+        "macd": (macd_fast - macd_slow) if macd_fast and macd_slow else None,
         "rsi14": r,
         "atr14": a,
         "atr_pct": (a / last * 100) if a and last else None,
@@ -113,7 +123,18 @@ def compute(series: Series) -> dict:
         "high60": high60,
         "dist_sma20": ((last - ma20) / ma20 * 100) if ma20 else None,
         "dist_sma60": ((last - ma60) / ma60 * 100) if ma60 else None,
+        # where price sits inside the recent range: 0 = at the low, 100 = at the high
+        "dist_high20": ((last - high20) / high20 * 100) if high20 else None,
+        "range_pos20": (
+            (last - low20) / (high20 - low20) * 100 if high20 and low20 and high20 > low20 else None
+        ),
+        "ret5": ret(5),
+        "ret20": ret(20),
+        "ret60": ret(60),
+        # close position inside today's candle: 1 = closed at the high
+        "close_pos": ((last - series.low[-1]) / day_range) if day_range else 0.5,
         "slope20": slope(close, 20),
+        "ma_stack": bool(ma5 and ma20 and ma60 and ma5 > ma20 > ma60),
         "trend_up": bool(ma20 and ma60 and ma20 > ma60 and last > ma60),
         "bars": len(close),
     }

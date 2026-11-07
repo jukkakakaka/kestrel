@@ -14,79 +14,41 @@
 
 <div class="notice">{{ t('sim.what') }}</div>
 
-{% if report and report.ok %}
+{% if report and report.rules %}
 <div id="edge-report">
-  <div class="kpi" style="grid-template-columns: repeat(3, minmax(0,1fr));">
-    {% for code, s in report.strategies.items() %}
+  <div class="kpi" style="grid-template-columns: repeat(4, minmax(0,1fr));">
+    {% for r in report.rules[:8] %}
     <div class="k">
       <div class="v" style="font-size:15px;">
-        {{ t('strategy.' + code) }}
-        {% if s.usable %}<span class="badge ok-badge" style="font-size:11px;">{{ t('sim.v_ok') }}</span>
-        {% elif s.verdict == 'insufficient' %}<span class="badge wait" style="font-size:11px;">{{ t('sim.v_unknown') }}</span>
-        {% else %}<span class="badge avoid" style="font-size:11px;">{{ t('sim.v_bad') }}</span>{% endif %}
+        {{ r.name }}
+        {% if r.last_verdict == '有优势' %}<span class="badge ok-badge" style="font-size:11px;">有优势</span>
+        {% elif r.last_verdict == '无优势' %}<span class="badge avoid" style="font-size:11px;">无优势</span>
+        {% elif r.last_verdict %}<span class="badge wait" style="font-size:11px;">{{ r.last_verdict }}</span>
+        {% else %}<span class="badge wait" style="font-size:11px;">未验证</span>{% endif %}
       </div>
       <div class="l" style="margin-top:8px;font-size:12.5px;line-height:1.7;">
-        <div>{{ t('sim.trades') }} <b class="mono">{{ s.trades }}</b> ·
-             {{ t('sim.winrate') }} <b class="mono">{{ '%.0f'|format(s.win_rate * 100) }}%</b></div>
-        <div>{{ t('sim.expectancy') }}
-          <b class="mono {{ 'up' if s.expectancy > 0 else 'down' }}">{{ '%+.2f'|format(s.expectancy) }}R</b></div>
-        <div class="muted">{{ t('sim.max_streak') }} {{ s.max_loss_streak }} 次</div>
+        {% if r.validation and r.validation.folds %}
+          {% set f = r.validation.folds[-1] %}
+          <div>最近一折：<b class="mono">{{ f.n }}</b> 笔 · 胜率 <b class="mono">{{ '%.0f'|format(f.win) }}%</b></div>
+          <div>每笔 <b class="mono {{ 'up' if f.exp > 0 else 'down' }}">{{ '%+.2f'|format(f.exp) }}R</b>
+               超额 <b class="mono {{ 'up' if f.edge > 0 else 'down' }}">{{ '%+.2f'|format(f.edge) }}</b></div>
+        {% else %}
+          <div class="muted">还没有验证结果</div>
+        {% endif %}
       </div>
-      <p class="tiny" style="margin-top:10px;color:var(--ink-2);line-height:1.75;">{{ s.sentence }}</p>
     </div>
     {% endfor %}
   </div>
 
-  <section class="card">
-    <div class="card-head">
-      <h2>{{ t('sim.detail') }}</h2>
-      <span class="meta">
-        {{ report.symbols }} 只标的 · {{ report.bars }} 根日线 · {{ t('sim.generated') }} {{ report.generated_at[5:16] }}
-      </span>
-    </div>
-    <div class="card-body tight">
-      <table class="grid">
-        <thead>
-          <tr>
-            <th>{{ t('sim.strategy') }}</th>
-            <th class="num">{{ t('sim.trades') }}</th>
-            <th class="num">{{ t('sim.winrate') }}</th>
-            <th class="num">{{ t('sim.avg_win') }}</th>
-            <th class="num">{{ t('sim.avg_loss') }}</th>
-            <th class="num">{{ t('sim.expectancy') }}</th>
-            <th class="num">{{ t('sim.pf') }}</th>
-            <th class="num">{{ t('sim.dd') }}</th>
-            <th>{{ t('sim.best') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for code, s in report.strategies.items() %}
-          <tr>
-            <td><b>{{ t('strategy.' + code) }}</b></td>
-            <td class="num mono">{{ s.trades }}</td>
-            <td class="num mono">{{ '%.1f'|format(s.win_rate * 100) }}%</td>
-            <td class="num mono up">{{ '%+.2f'|format(s.avg_win) }}R</td>
-            <td class="num mono down">{{ '%+.2f'|format(s.avg_loss) }}R</td>
-            <td class="num mono {{ 'up' if s.expectancy > 0 else 'down' }}">{{ '%+.3f'|format(s.expectancy) }}R</td>
-            <td class="num mono">{{ '%.2f'|format(s.profit_factor) }}</td>
-            <td class="num mono down">{{ '%.1f'|format(s.max_drawdown_r) }}R</td>
-            <td class="tiny muted">
-              {% for b in s.best %}{{ b.code }} {{ '%+.1f'|format(b.total_r) }}R{% if not loop.last %} · {% endif %}{% endfor %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <p class="hint">{{ t('sim.gate') }}</p>
+  <p class="hint" style="margin:6px 0 14px;">
+    完整数据、逐折明细和规则编辑在 <a href="/rules">规则</a> 页。
+  </p>
 </div>
 {% else %}
 <div class="card">
   <div class="empty">
     <strong>{{ t('sim.none_title') }}</strong>
-    {{ report.error if report and report.error else t('sim.none') }}
+    {{ t('sim.none') }}
   </div>
 </div>
 {% endif %}

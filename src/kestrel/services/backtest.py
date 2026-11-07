@@ -17,8 +17,15 @@ class LookaheadError(RuntimeError):
     pass
 
 
-def run(bars: list[dict], strategy_code: str, max_hold: int = 15, min_bars: int = 60) -> dict:
-    strategy = registry().get(strategy_code)
+def run(
+    bars: list[dict],
+    strategy_code: str,
+    max_hold: int = 15,
+    min_bars: int = 60,
+    registry_override: dict | None = None,
+) -> dict:
+    source = registry_override if registry_override is not None else registry()
+    strategy = source.get(strategy_code)
     if strategy is None:
         raise ValueError(f"unknown strategy {strategy_code}")
     if len(bars) <= min_bars:
@@ -43,6 +50,10 @@ def run(bars: list[dict], strategy_code: str, max_hold: int = 15, min_bars: int 
             if stop >= entry:
                 continue
             risk = entry - stop
+            # Same band the live planner enforces. A 0.3% stop turns every
+            # result into a 30R outlier and makes the statistics meaningless.
+            if not (0.015 * entry <= risk <= 0.15 * entry):
+                continue
             position = {
                 "index": i,
                 "entry": entry,

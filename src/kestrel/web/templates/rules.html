@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+{% block title %}规则 · {{ t('app.name') }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>选股规则</h1>
+    <div class="sub">规则是数据，不是代码。任何人都能加一条，然后由验证器决定它值不值得用。</div>
+  </div>
+  <div class="page-actions">
+    <button class="btn ghost" id="validate-all">全部重新验证</button>
+    <button class="btn" id="new-rule">写一条新规则</button>
+  </div>
+</div>
+
+<div id="rule-flash" class="notice hidden"></div>
+
+<div class="notice">
+  判定看的是<strong>超额收益</strong>：同样的入场点、同样的持有天数、不设止损，能跑赢它才算有本事。
+  只看「赚了多少钱」没有意义——牛市里随便买都赚。
+</div>
+
+{% for r in rules %}
+<article class="advice">
+  <header class="advice-head">
+    <span class="sym">{{ r.name }}</span>
+    <span class="code">{{ r.code }}</span>
+    {% if r.builtin %}<span class="tag">内置</span>{% endif %}
+    {% if r.last_verdict == '有优势' %}<span class="badge ok-badge">有优势</span>
+    {% elif r.last_verdict == '无优势' %}<span class="badge avoid">无优势</span>
+    {% elif r.last_verdict %}<span class="badge wait">{{ r.last_verdict }}</span>
+    {% else %}<span class="badge wait">未验证</span>{% endif %}
+    <span class="spacer"></span>
+    <label class="switch" title="启用后才会产生建议">
+      <input type="checkbox" class="rule-toggle" data-code="{{ r.code }}" {% if r.enabled %}checked{% endif %}>
+      <span></span>
+    </label>
+  </header>
+
+  <div class="advice-verdict">
+    <b>条件：</b>{{ r.summary }}
+    {% if r.note %}<div class="muted" style="font-size:12px;margin-top:4px;">{{ r.note }}</div>{% endif %}
+  </div>
+
+  {% if r.validation and r.validation.folds %}
+  <div class="advice-figs" style="grid-template-columns: repeat({{ r.validation.folds|length }}, minmax(0,1fr));">
+    {% for f in r.validation.folds %}
+    <div>
+      <span class="k">第 {{ f.fold }} 折 · {{ f.n }} 笔</span>
+      <span class="v {{ 'up' if f.exp > 0 else 'down' }}">{{ '%+.3f' % f.exp }}R</span>
+      <div class="tiny muted" style="margin-top:2px;">
+        不动持有 {{ '%+.3f' % f.bench }} · 超额
+        <span class="{{ 'up' if f.edge > 0 else 'down' }}">{{ '%+.3f' % f.edge }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <footer class="advice-foot">
+    <span class="deadline">
+      {% if r.last_validated %}上次验证 {{ r.last_validated[:16] }}{% else %}还没验证过{% endif %}
+    </span>
+    <button class="btn sm ghost" data-validate="{{ r.code }}">验证这一条</button>
+    <button class="btn sm ghost" data-edit="{{ r.code }}">改</button>
+    <button class="btn sm ghost" data-copy="{{ r.code }}">复制一份</button>
+    {% if not r.builtin %}<button class="btn sm danger" data-del="{{ r.code }}">删除</button>{% endif %}
+  </footer>
+</article>
+{% endfor %}
+
+<section class="card" id="editor" style="display:none;">
+  <div class="card-head">
+    <h2 id="editor-title">规则编辑器</h2>
+    <span class="meta">保存前会先编译，写错立刻告诉你错在哪</span>
+  </div>
+  <div class="card-body">
+    <div class="grid g2" style="margin-bottom:12px;">
+      <div class="field"><label>名称</label><input id="ed-name" placeholder="我的回踩规则"></div>
+      <div class="field"><label>备注（为什么这么设计）</label><input id="ed-note" placeholder=""></div>
+    </div>
+    <div class="field">
+      <label>规则 JSON</label>
+      <textarea id="ed-spec" rows="16" style="font-family:var(--mono);font-size:12.5px;line-height:1.7;padding:12px;width:100%;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);color:var(--ink);"></textarea>
+      <span class="help">
+        可用指标：<span class="mono" style="font-size:11px;">{{ fields | join(', ') }}</span>
+      </span>
+    </div>
+    <div class="row-actions">
+      <button class="btn" id="ed-save">保存并验证</button>
+      <button class="btn ghost" id="ed-cancel">取消</button>
+      <span class="tiny" id="ed-msg"></span>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head"><h2>规则怎么写</h2></div>
+  <div class="card-body">
+    <p class="hint" style="margin-bottom:10px;">
+      一条规则就是「所有条件都满足才进场」。score 里的 bonus 只在条件成立时加分，
+      用来排序——分高的排前面，但不会改变「是否进场」。
+    </p>
+    <pre class="mono" style="font-size:12px;line-height:1.75;background:var(--surface-2);padding:14px;border-radius:9px;overflow:auto;">{
+  "code": "my_rule",
+  "name": "我的规则",
+  "conditions": [
+    {"left": "ma_stack", "op": "is_true"},
+    {"left": "dist_sma20", "op": "between", "value": [-2, 0.5]},
+    {"left": "rsi14", "op": "between", "value": [40, 60]}
+  ],
+  "score": {
+    "base": 0.45,
+    "bonus": [
+      {"when": {"left": "vol_ratio", "op": "<", "right": 1.1}, "add": 0.15}
+    ]
+  },
+  "stop":   {"field": "low20"},
+  "target": {"field": "high20"}
+}</pre>
+    <p class="hint" style="margin-top:10px;">
+      操作符：<span class="mono">&gt; &gt;= &lt; &lt;= between is_true is_false</span>。
+      <span class="mono">right</span> 既可以写数字，也可以写另一个指标名（比如 <span class="mono">"high20"</span>），
+      表示两者比较。
+    </p>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var RULES = {{ rules | map(attribute='spec') | list | tojson }};
+  var META = {};
+  {% for r in rules %}
+  META["{{ r.code }}"] = {{ {'code': r.code, 'name': r.name, 'note': r.note, 'spec': r.spec} | tojson }};
+  {% endfor %}
+
+  var flash = document.getElementById('rule-flash');
+  function say(msg, kind) {
+    flash.className = 'notice ' + (kind || '');
+    flash.textContent = msg;
+    flash.classList.remove('hidden');
+  }
+
+  var editor = document.getElementById('editor');
+  var ta = document.getElementById('ed-spec');
+  var msg = document.getElementById('ed-msg');
+
+  function openEditor(meta) {
+    document.getElementById('ed-name').value = meta && meta.name ? meta.name : '';
+    document.getElementById('ed-note').value = meta && meta.note ? meta.note : '';
+    var spec = meta && meta.spec ? meta.spec : {
+      code: 'my_rule', name: '我的规则',
+      conditions: [{ left: 'ma_stack', op: 'is_true' }],
+      score: { base: 0.45, bonus: [] },
+      stop: { field: 'low20' }, target: { field: 'high20' }
+    };
+    ta.value = JSON.stringify(spec, null, 2);
+    msg.textContent = '';
+    editor.style.display = '';
+    editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  document.getElementById('new-rule').addEventListener('click', function () { openEditor(null); });
+  document.getElementById('ed-cancel').addEventListener('click', function () { editor.style.display = 'none'; });
+
+  document.querySelectorAll('[data-edit]').forEach(function (b) {
+    b.addEventListener('click', function () { openEditor(META[b.getAttribute('data-edit')]); });
+  });
+
+  document.querySelectorAll('[data-copy]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var meta = JSON.parse(JSON.stringify(META[b.getAttribute('data-copy')]));
+      meta.spec.code = meta.code + '_copy';
+      meta.spec.name = meta.name + ' 副本';
+      meta.name = meta.spec.name;
+      openEditor(meta);
+    });
+  });
+
+  document.getElementById('ed-save').addEventListener('click', function () {
+    var raw = ta.value;
+    var parsed;
+    try { parsed = JSON.parse(raw); }
+    catch (e) { msg.textContent = 'JSON 语法错误：' + e.message; return; }
+    msg.textContent = '保存中…';
+    fetch('/api/rules/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ spec: parsed, note: document.getElementById('ed-note').value })
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.ok) { msg.textContent = res.error; return; }
+        msg.textContent = '已保存，正在验证…';
+        return fetch('/api/rules/validate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: res.code })
+        }).then(function () { location.reload(); });
+      });
+  });
+
+  document.querySelectorAll('.rule-toggle').forEach(function (el) {
+    el.addEventListener('change', function () {
+      fetch('/api/rules/' + el.getAttribute('data-code') + '/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: el.checked })
+      }).then(function () { say(el.checked ? '已启用，下次扫描会用这条规则。' : '已停用，建议里不会再出现它。', 'ok'); });
+    });
+  });
+
+  document.querySelectorAll('[data-validate]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var code = b.getAttribute('data-validate');
+      b.disabled = true;
+      b.textContent = '验证中…';
+      fetch('/api/rules/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code })
+      }).then(function () { location.reload(); });
+    });
+  });
+
+  var all = document.getElementById('validate-all');
+  if (all) {
+    all.addEventListener('click', function () {
+      all.disabled = true;
+      all.textContent = '验证全部…';
+      fetch('/api/rules/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      }).then(function () { location.reload(); });
+    });
+  }
+
+  document.querySelectorAll('[data-del]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      if (!confirm('删除这条规则？内置规则不能删，只能停用。')) return;
+      fetch('/api/rules/' + b.getAttribute('data-del') + '/delete', { method: 'POST' })
+        .then(function () { location.reload(); });
+    });
+  });
+})();
+</script>
+{% endblock %}
