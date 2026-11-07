@@ -64,6 +64,7 @@ def list_sources() -> list[dict]:
 def build():
     """Construct the provider chain from the current configuration."""
     from kestrel.datasources.chain import QuoteChain
+    from kestrel.datasources.custom import CustomProvider, load_custom
     from kestrel.datasources.eastmoney import EastmoneyProvider
     from kestrel.datasources.sina import SinaProvider
     from kestrel.datasources.tencent import TencentProvider
@@ -74,6 +75,13 @@ def build():
         "sina": SinaProvider,
     }
     providers = []
+    # custom sources go first: the user added them for a reason
+    try:
+        for config in load_custom():
+            providers.append(CustomProvider(config))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("cannot load custom sources: %s", exc)
+
     for item in SOURCES:
         if not is_enabled(item["key"]):
             continue
@@ -82,6 +90,30 @@ def build():
         except Exception as exc:  # noqa: BLE001
             log.warning("cannot build source %s: %s", item["key"], exc)
     if not providers:
-        # never end up with zero sources: fall back to the primary
         providers = [EastmoneyProvider()]
     return QuoteChain(providers=providers)
+
+
+def list_all() -> list[dict]:
+    """Built-ins plus user-defined sources, for the settings table."""
+    from kestrel.datasources.custom import load_custom
+
+    out = []
+    for item in SOURCES:
+        row = dict(item)
+        row["enabled"] = is_enabled(item["key"])
+        row["builtin"] = True
+        out.append(row)
+    for cfg in load_custom():
+        out.append(
+            {
+                "key": cfg.get("key"),
+                "label": cfg.get("label"),
+                "markets": cfg.get("markets") or "全部",
+                "kind": "custom",
+                "note": cfg.get("url", ""),
+                "enabled": True,
+                "builtin": False,
+            }
+        )
+    return out

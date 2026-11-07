@@ -1,73 +1,199 @@
 {% extends "base.html" %}
-{% block title %}{{ t('bt.title') }} · {{ t('app.name') }}{% endblock %}
+{% block title %}{{ t('sim.title') }} · {{ t('app.name') }}{% endblock %}
 
 {% block content %}
-<section class="panel">
-  <div class="panel-head"><h1>{{ t('bt.title') }}</h1></div>
-  <p class="hint">{{ t('bt.intro') }}</p>
-
-  <form method="post" action="/backtest" class="grid g4" style="margin-top:14px">
-    <div class="field"><label>{{ t('dash.market') }}</label>
-      <select name="market">
-        <option value="HK" {% if form.market=='HK' %}selected{% endif %}>HK</option>
-        <option value="US" {% if form.market=='US' %}selected{% endif %}>US</option>
-        <option value="CN" {% if form.market=='CN' %}selected{% endif %}>CN</option>
-      </select></div>
-    <div class="field"><label>{{ t('dash.code') }}</label><input name="code" value="{{ form.code }}" required></div>
-    <div class="field"><label>{{ t('bt.strategy') }}</label>
-      <select name="strategy">
-        {% for code, label in [('trend_pullback', t('bt.s1')), ('breakout_20', t('bt.s2')), ('mean_reversion', t('bt.s3'))] %}
-        <option value="{{ code }}" {% if form.strategy==code %}selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-      </select></div>
-    <div class="field"><label>&nbsp;</label><button class="btn" style="width:100%">{{ t('bt.run') }}</button></div>
-  </form>
-
-  {% if error %}<div class="notice">{{ error }}</div>{% endif %}
-
-  {% if result %}
-  <div class="kpi" style="margin-top:18px">
-    <div class="k"><div class="v">{{ result.stats.count }}</div><div class="l">{{ t('bt.trades') }}</div></div>
-    <div class="k"><div class="v">{{ '%.0f'|format(result.stats.win_rate * 100) }}%</div><div class="l">{{ t('j.win_rate') }}</div></div>
-    <div class="k"><div class="v">{{ '%.2f'|format(result.stats.avg_r) }}</div><div class="l">{{ t('bt.avg_r') }}</div></div>
-    <div class="k"><div class="v">{{ '%.1f'|format(result.stats.total_r) }}R</div><div class="l">{{ t('bt.total_r') }}</div></div>
+<div class="page-head">
+  <div>
+    <h1>{{ t('sim.title') }}</h1>
+    <div class="sub">{{ t('sim.sub') }}</div>
   </div>
-  {% if result.trades %}
-  <table class="grid" style="margin-top:14px">
-    <thead><tr><th>#</th><th class="num">{{ t('j.entry') }}</th><th class="num">{{ t('scan.stop') }}</th>
-      <th class="num">{{ t('j.exit') }}</th><th class="num">{{ t('bt.bars') }}</th><th class="num">R</th></tr></thead>
-    <tbody>
-    {% for tr in result.trades[-15:] %}
-    <tr><td class="mono">{{ loop.index }}</td>
-      <td class="num mono">{{ '%.3f'|format(tr.entry) }}</td>
-      <td class="num mono down">{{ '%.3f'|format(tr.stop) }}</td>
-      <td class="num mono">{{ '%.3f'|format(tr.exit) }}</td>
-      <td class="num mono">{{ tr.bars }}</td>
-      <td class="num mono {{ 'up' if tr.r >= 0 else 'down' }}">{{ '%.2f'|format(tr.r) }}</td></tr>
+  <div class="page-actions">
+    <button class="btn ghost" id="recheck">{{ t('sim.recheck') }}</button>
+  </div>
+</div>
+
+<div class="notice">{{ t('sim.what') }}</div>
+
+{% if report and report.ok %}
+<div id="edge-report">
+  <div class="kpi" style="grid-template-columns: repeat(3, minmax(0,1fr));">
+    {% for code, s in report.strategies.items() %}
+    <div class="k">
+      <div class="v" style="font-size:15px;">
+        {{ t('strategy.' + code) }}
+        {% if s.usable %}<span class="badge ok-badge" style="font-size:11px;">{{ t('sim.v_ok') }}</span>
+        {% elif s.verdict == 'insufficient' %}<span class="badge wait" style="font-size:11px;">{{ t('sim.v_unknown') }}</span>
+        {% else %}<span class="badge avoid" style="font-size:11px;">{{ t('sim.v_bad') }}</span>{% endif %}
+      </div>
+      <div class="l" style="margin-top:8px;font-size:12.5px;line-height:1.7;">
+        <div>{{ t('sim.trades') }} <b class="mono">{{ s.trades }}</b> ·
+             {{ t('sim.winrate') }} <b class="mono">{{ '%.0f'|format(s.win_rate * 100) }}%</b></div>
+        <div>{{ t('sim.expectancy') }}
+          <b class="mono {{ 'up' if s.expectancy > 0 else 'down' }}">{{ '%+.2f'|format(s.expectancy) }}R</b></div>
+        <div class="muted">{{ t('sim.max_streak') }} {{ s.max_loss_streak }} 次</div>
+      </div>
+      <p class="tiny" style="margin-top:10px;color:var(--ink-2);line-height:1.75;">{{ s.sentence }}</p>
+    </div>
     {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
-  {% endif %}
+  </div>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>{{ t('sim.detail') }}</h2>
+      <span class="meta">
+        {{ report.symbols }} 只标的 · {{ report.bars }} 根日线 · {{ t('sim.generated') }} {{ report.generated_at[5:16] }}
+      </span>
+    </div>
+    <div class="card-body tight">
+      <table class="grid">
+        <thead>
+          <tr>
+            <th>{{ t('sim.strategy') }}</th>
+            <th class="num">{{ t('sim.trades') }}</th>
+            <th class="num">{{ t('sim.winrate') }}</th>
+            <th class="num">{{ t('sim.avg_win') }}</th>
+            <th class="num">{{ t('sim.avg_loss') }}</th>
+            <th class="num">{{ t('sim.expectancy') }}</th>
+            <th class="num">{{ t('sim.pf') }}</th>
+            <th class="num">{{ t('sim.dd') }}</th>
+            <th>{{ t('sim.best') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for code, s in report.strategies.items() %}
+          <tr>
+            <td><b>{{ t('strategy.' + code) }}</b></td>
+            <td class="num mono">{{ s.trades }}</td>
+            <td class="num mono">{{ '%.1f'|format(s.win_rate * 100) }}%</td>
+            <td class="num mono up">{{ '%+.2f'|format(s.avg_win) }}R</td>
+            <td class="num mono down">{{ '%+.2f'|format(s.avg_loss) }}R</td>
+            <td class="num mono {{ 'up' if s.expectancy > 0 else 'down' }}">{{ '%+.3f'|format(s.expectancy) }}R</td>
+            <td class="num mono">{{ '%.2f'|format(s.profit_factor) }}</td>
+            <td class="num mono down">{{ '%.1f'|format(s.max_drawdown_r) }}R</td>
+            <td class="tiny muted">
+              {% for b in s.best %}{{ b.code }} {{ '%+.1f'|format(b.total_r) }}R{% if not loop.last %} · {% endif %}{% endfor %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <p class="hint">{{ t('sim.gate') }}</p>
+</div>
+{% else %}
+<div class="card">
+  <div class="empty">
+    <strong>{{ t('sim.none_title') }}</strong>
+    {{ report.error if report and report.error else t('sim.none') }}
+  </div>
+</div>
+{% endif %}
+
+<section class="card">
+  <div class="card-head">
+    <h2>{{ t('sim.single') }}</h2>
+    <span class="meta">{{ t('sim.single_meta') }}</span>
+  </div>
+  <div class="card-body">
+    <form method="post" action="/sim">
+      <div class="grid g3">
+        <div class="field">
+          <label>{{ t('sim.symbol') }}</label>
+          <select name="symbol">
+            {% for s in symbols %}
+            <option value="{{ s.market }}/{{ s.code }}"
+              {% if form.symbol == s.market ~ '/' ~ s.code %}selected{% endif %}>
+              {{ s.name }} · {{ s.code }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>{{ t('sim.strategy') }}</label>
+          <select name="strategy">
+            {% for code, label in strategy_options %}
+            <option value="{{ code }}" {% if form.strategy == code %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field" style="justify-content:flex-end;">
+          <button class="btn block">{{ t('sim.run') }}</button>
+        </div>
+      </div>
+    </form>
+
+    {% if error %}
+    <div class="notice err" style="margin-top:14px;">{{ error }}</div>
+    {% endif %}
+
+    {% if result %}
+    <div class="divider"></div>
+    {% set st = result.stats %}
+    {% if st.count %}
+    <p style="font-size:14px;line-height:1.8;">
+      {{ t('sim.result_intro', n=st.count, win=(st.win_rate * 100) | round | int,
+           total=(st.total_r | round(1)), avg=(st.avg_r | round(2))) }}
+    </p>
+    <div class="kpi" style="margin-top:14px;">
+      <div class="k"><div class="v mono">{{ st.count }}</div><div class="l">{{ t('sim.trades') }}</div></div>
+      <div class="k"><div class="v mono">{{ '%.0f'|format(st.win_rate * 100) }}%</div><div class="l">{{ t('sim.winrate') }}</div></div>
+      <div class="k"><div class="v mono {{ 'up' if st.total_r >= 0 else 'down' }}">{{ '%+.1f'|format(st.total_r) }}R</div><div class="l">{{ t('sim.total_r') }}</div></div>
+      <div class="k"><div class="v mono {{ 'up' if st.avg_r >= 0 else 'down' }}">{{ '%+.2f'|format(st.avg_r) }}R</div><div class="l">{{ t('sim.expectancy') }}</div></div>
+    </div>
+    {% else %}
+    <p class="empty">{{ t('sim.no_trades') }}</p>
+    {% endif %}
+    {% endif %}
+  </div>
 </section>
 
-<section class="panel" style="margin-top:16px">
-  <h2 class="sub-h">{{ t('bt.history') }}</h2>
+<section class="card">
+  <div class="card-head"><h2>{{ t('sim.history') }}</h2></div>
   {% if runs %}
-  <table class="grid">
-    <thead><tr><th>{{ t('dash.code') }}</th><th>{{ t('bt.strategy') }}</th><th class="num">{{ t('bt.trades') }}</th>
-      <th class="num">{{ t('j.win_rate') }}</th><th class="num">{{ t('bt.avg_r') }}</th><th class="num">MaxDD</th></tr></thead>
-    <tbody>
-    {% for r in runs %}
-    <tr><td class="mono">{{ r.market }} {{ r.code }}</td><td>{{ r.strategy }}</td>
-      <td class="num mono">{{ r.trades }}</td>
-      <td class="num mono">{{ '%.0f'|format((r.win_rate or 0) * 100) }}%</td>
-      <td class="num mono">{{ '%.2f'|format(r.avg_r or 0) }}</td>
-      <td class="num mono down">{{ '%.1f'|format(r.max_dd or 0) }}R</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% else %}<p class="empty">{{ t('bt.empty') }}</p>{% endif %}
-  <p class="hint">{{ t('bt.hint') }}</p>
+  <div class="card-body tight">
+    <table class="grid">
+      <thead><tr><th>{{ t('sim.col_date') }}</th><th>{{ t('sim.symbol') }}</th><th>{{ t('sim.strategy') }}</th>
+        <th class="num">{{ t('sim.trades') }}</th><th class="num">{{ t('sim.winrate') }}</th>
+        <th class="num">{{ t('sim.expectancy') }}</th></tr></thead>
+      <tbody>
+        {% for r in runs %}
+        <tr>
+          <td class="mono muted">{{ r.created_at[:16] }}</td>
+          <td>{{ r.market }} {{ r.code }}</td>
+          <td>{{ t('strategy.' + r.strategy) }}</td>
+          <td class="num mono">{{ r.trades }}</td>
+          <td class="num mono">{{ '%.0f'|format(r.win_rate * 100) }}%</td>
+          <td class="num mono {{ 'up' if r.avg_r > 0 else 'down' }}">{{ '%+.2f'|format(r.avg_r) }}R</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">{{ t('sim.empty') }}</div>
+  {% endif %}
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var btn = document.getElementById('recheck');
+  if (!btn) return;
+  btn.addEventListener('click', function () {
+    var original = btn.textContent;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spin"></span><span class="label">计算中</span>';
+    fetch('/api/edge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.ok) { location.reload(); }
+        else { alert(res.error || '计算失败'); }
+      })
+      .finally(function () { btn.disabled = false; btn.textContent = original; });
+  });
+})();
+</script>
 {% endblock %}

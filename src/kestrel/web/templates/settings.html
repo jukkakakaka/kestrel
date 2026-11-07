@@ -175,17 +175,57 @@
           <tr>
             <td><b>{{ s.label }}</b><div class="tiny muted mono">{{ s.key }}</div></td>
             <td class="tiny">{{ s.markets }}</td>
-            <td class="tiny muted">{{ s.note }}</td>
+            <td class="tiny muted" style="word-break:break-all;">{{ s.note }}</td>
             <td>
+              {% if s.builtin %}
               <label class="switch">
                 <input type="checkbox" class="src-toggle" data-src="{{ s.key }}" {% if s.enabled %}checked{% endif %}>
                 <span></span>
               </label>
+              {% else %}
+              <button class="btn danger sm" data-src-del="{{ s.key }}">删除</button>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>{{ t('settings.custom_source') }}</h2>
+      <span class="meta">{{ t('settings.custom_source_meta') }}</span>
+    </div>
+    <div class="card-body">
+      <p class="hint" style="margin-bottom:14px;">{{ t('settings.custom_source_hint') }}</p>
+      <div class="grid g2">
+        <div class="field"><label>名称</label><input id="cs-label" placeholder="我的券商行情"></div>
+        <div class="field"><label>覆盖市场</label>
+          <input id="cs-markets" placeholder="US,HK（留空=全部）">
+        </div>
+        <div class="field" style="grid-column:1 / -1;">
+          <label>URL 模板</label>
+          <input id="cs-url" placeholder="https://example.com/quote?symbol={code}">
+          <span class="help">支持占位符 {code} / {market} / {symbol}</span>
+        </div>
+        <div class="field"><label>价格字段路径</label><input id="cs-price" value="price" placeholder="data.last"></div>
+        <div class="field"><label>昨收字段路径</label><input id="cs-prev" placeholder="data.prevClose"></div>
+        <div class="field"><label>涨跌幅字段路径</label><input id="cs-change" placeholder="data.changePct"></div>
+        <div class="field"><label>名称字段路径</label><input id="cs-name" placeholder="data.name"></div>
+        <div class="field"><label>换算系数</label><input id="cs-scale" value="1" placeholder="1000"><span class="help">返回的是整数毫单位就填 1000</span></div>
+        <div class="field"><label>测试用代码</label><input id="cs-test-code" placeholder="AAPL"></div>
+        <div class="field"><label>测试用市场</label>
+          <select id="cs-test-market"><option>US</option><option>HK</option><option>CN</option></select>
+        </div>
+      </div>
+      <div class="row-actions">
+        <button class="btn ghost" id="cs-test">先测一下</button>
+        <button class="btn" id="cs-save">保存数据源</button>
+        <span class="tiny" id="cs-msg"></span>
+      </div>
+      <p class="tiny muted" style="margin-top:10px;">{{ t('settings.custom_source_fields') }}</p>
     </div>
   </section>
   <p class="hint">{{ t('settings.sources_hint') }}</p>
@@ -479,6 +519,67 @@
       reader.readAsText(file);
     });
   }
+
+  /* ---- custom data source ---- */
+  var csMsg = document.getElementById('cs-msg');
+  function collectSource() {
+    return {
+      label: document.getElementById('cs-label').value.trim(),
+      markets: document.getElementById('cs-markets').value.trim(),
+      url: document.getElementById('cs-url').value.trim(),
+      price_path: document.getElementById('cs-price').value.trim(),
+      prev_close_path: document.getElementById('cs-prev').value.trim(),
+      change_path: document.getElementById('cs-change').value.trim(),
+      name_path: document.getElementById('cs-name').value.trim(),
+      scale: parseFloat(document.getElementById('cs-scale').value || '1'),
+      enabled: true
+    };
+  }
+
+  var csTest = document.getElementById('cs-test');
+  if (csTest) {
+    csTest.addEventListener('click', function () {
+      var payload = collectSource();
+      payload.code = document.getElementById('cs-test-code').value.trim();
+      payload.market = document.getElementById('cs-test-market').value;
+      if (!payload.code) { csMsg.textContent = '先填一个测试代码。'; return; }
+      csMsg.textContent = '正在请求…';
+      fetch('/api/datasources/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function (r) { return r.json(); })
+        .then(function (res) {
+          csMsg.textContent = res.ok
+            ? '通了：价格 ' + res.price + (res.change_pct !== null ? '，涨跌 ' + res.change_pct.toFixed(2) + '%' : '')
+            : '失败：' + res.error;
+        });
+    });
+  }
+
+  var csSave = document.getElementById('cs-save');
+  if (csSave) {
+    csSave.addEventListener('click', function () {
+      var payload = collectSource();
+      fetch('/api/datasources/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (res.ok) { location.reload(); }
+          else { csMsg.textContent = res.error; }
+        });
+    });
+  }
+
+  document.querySelectorAll('[data-src-del]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      if (!confirm('删除这个自定义数据源？')) return;
+      fetch('/api/datasources/custom/' + btn.getAttribute('data-src-del') + '/delete', { method: 'POST' })
+        .then(function () { location.reload(); });
+    });
+  });
 })();
 </script>
 {% endblock %}

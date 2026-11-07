@@ -669,7 +669,7 @@ def create_app() -> FastAPI:
                 request,
                 values=values,
                 glossary=glossary,
-                sources=source_registry.list_sources(),
+                sources=source_registry.list_all(),
                 channels=channel_service.all_channels(),
                 pool=universe_service.pool_summary(),
                 saved=request.query_params.get("saved"),
@@ -691,7 +691,40 @@ def create_app() -> FastAPI:
         finally:
             conn.close()
         request.app.state.chain = source_registry.build()
-        return {"ok": True, "sources": source_registry.list_sources()}
+        return {"ok": True, "sources": source_registry.list_all()}
+
+    @app.post("/api/datasources/custom", response_class=JSONResponse)
+    async def api_datasource_custom(request: Request):
+        from kestrel.datasources import custom as custom_service
+        from kestrel.datasources import registry as source_registry
+
+        body = await request.json()
+        try:
+            key = custom_service.save(body or {})
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        request.app.state.chain = source_registry.build()
+        return {"ok": True, "key": key}
+
+    @app.post("/api/datasources/custom/{key}/delete", response_class=JSONResponse)
+    async def api_datasource_custom_delete(key: str, request: Request):
+        from kestrel.datasources import custom as custom_service
+        from kestrel.datasources import registry as source_registry
+
+        ok = custom_service.delete(key)
+        request.app.state.chain = source_registry.build()
+        return {"ok": ok}
+
+    @app.post("/api/datasources/test", response_class=JSONResponse)
+    async def api_datasource_test(request: Request):
+        from kestrel.datasources import custom as custom_service
+
+        body = await request.json()
+        market = str((body or {}).get("market") or "US").upper()
+        code = str((body or {}).get("code") or "").strip()
+        if not code:
+            return {"ok": False, "error": "填一个代码再试，比如 AAPL"}
+        return await custom_service.try_source(body or {}, market, code)
 
     @app.post("/settings/{section}")
     async def settings_save(request: Request, section: str):
@@ -863,15 +896,53 @@ def create_app() -> FastAPI:
 
         return RedirectResponse("/cost", status_code=301)
 
+    def _sim_context(request: Request, **extra):
+        from kestrel.services import backtest, edge
+
+        report = edge.cached()
+        if report and report.get("strategies"):
+            for stats in report["strategies"].values():
+                stats["sentence"] = edge.describe(stats)
+        conn = connect()
+        try:
+            symbols = [
+                dict(r)
+                for r in conn.execute(
+                    """
+                    SELECT DISTINCT s.market, s.code, s.name FROM symbol s
+                    LEFT JOIN watchlist w ON w.symbol_id = s.id
+                    WHERE s.is_pool = 1 OR w.id IS NOT NULL
+                    ORDER BY (w.id IS NULL), s.market, s.code
+                    LIMIT 200
+                    """
+                ).fetchall()
+            ]
+        finally:
+            conn.close()
+        from kestrel.strategies.base import registry
+
+        labels = {
+            "trend_pullback": "趋势回踩",
+            "breakout_20": "20 日突破",
+            "mean_reversion": "超跌反弹",
+        }
+        options = [(code, labels.get(code, code)) for code in registry()]
+        return _ctx(
+            request=request,
+            report=report,
+            symbols=symbols,
+            strategy_options=options,
+            runs=backtest.recent(20),
+            result=None,
+            error=None,
+            form={"symbol": (symbols[0]["market"] + "/" + symbols[0]["code"]) if symbols else "",
+                  "strategy": "trend_pullback"},
+            **extra,
+        )
+
     @app.get("/sim", response_class=HTMLResponse)
     async def sim_page(request: Request):
-        from kestrel.services import backtest
-
-        return templates.TemplateResponse(
-            request=request, name="sim.html",
-            context=_ctx(request, runs=backtest.recent(20), result=None, error=None,
-                         form={"market": "HK", "code": "00700", "strategy": "trend_pullback"}),
-        )
+        return templates.TemplateResponse(request=request, name="sim.html", context=_sim_context(request))
 
     @app.get("/backtest")
     async def backtest_redirect():
@@ -879,15 +950,26 @@ def create_app() -> FastAPI:
 
         return RedirectResponse("/sim", status_code=301)
 
-    @app.post("/backtest", response_class=HTMLResponse)
-    async def backtest_run(request: Request):
+    @app.post("/sim", response_class=HTMLResponse)
+    async def sim_run(request: Request):
         from kestrel.services import backtest
         from kestrel.services import bars as bars_service
+        from kestrel.strategies.base import registry
 
         form = await request.form()
-        market = str(form.get("market", "HK")).upper()
-        code = str(form.get("code", "")).strip()
+        raw = str(form.get("symbol", "")).strip()
         strategy = str(form.get("strategy", "trend_pullback"))
+        if "/" not in raw:
+            return templates.TemplateResponse(
+                request=request, name="sim.html",
+                context=_sim_context(error="先选一只标的。"),
+            )
+        market, code = raw.split("/", 1)
+        market = market.upper()
+
+        if strategy not in registry():
+            strategy = "trend_pullback"
+
         error = None
         result = None
         conn = connect()
@@ -896,31 +978,40 @@ def create_app() -> FastAPI:
                 "SELECT id FROM symbol WHERE market=? AND code=?", (market, code)
             ).fetchone()
             if row is None:
-                conn.execute(
-                    "INSERT OR IGNORE INTO symbol (market, code, name, currency, lot_size)"
-                    " VALUES (?,?,?,?,?)",
-                    (market, code, code,
-                     {"CN": "CNY", "HK": "HKD", "US": "USD"}.get(market, "USD"),
-                     100 if market in ("HK", "CN") else 1),
-                )
-                conn.commit()
-                row = conn.execute(
-                    "SELECT id FROM symbol WHERE market=? AND code=?", (market, code)
-                ).fetchone()
-            bars = await bars_service.get_bars(conn, row["id"], market, code, limit=600)
-            if len(bars) < 80:
-                error = "历史数据不足（少于 80 根日线）"
+                error = "找不到这只标的，先去行情页加进自选。"
             else:
-                result = backtest.run(bars, strategy)
-                backtest.save(market, code, strategy, result, str(bars[0]["date"]),
-                              str(bars[-1]["date"]))
+                bars = await bars_service.get_bars(conn, row["id"], market, code, limit=600)
+                if len(bars) < 80:
+                    error = "历史数据不足（少于 80 根日线），没法跑。"
+                else:
+                    result = backtest.run(bars, strategy)
+                    backtest.save(market, code, strategy, result,
+                                  str(bars[0]["date"]), str(bars[-1]["date"]))
         finally:
             conn.close()
+
         return templates.TemplateResponse(
             request=request, name="sim.html",
-            context=_ctx(request, runs=backtest.recent(20), result=result, error=error,
-                         form={"market": market, "code": code, "strategy": strategy}),
+            context=_sim_context(result=result, error=error,
+                                 form={"symbol": f"{market}/{code}", "strategy": strategy}),
         )
+
+    @app.post("/api/edge", response_class=JSONResponse)
+    async def api_edge(request: Request):
+        from kestrel.services import edge
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        limit = int((body or {}).get("symbols") or 120)
+        return edge.evaluate(max_symbols=limit)
+
+    @app.get("/api/edge", response_class=JSONResponse)
+    async def api_edge_get():
+        from kestrel.services import edge
+
+        return edge.cached() or {"ok": False, "error": "还没算过"}
 
     @app.get("/api/glossary", response_class=JSONResponse)
     async def api_glossary(request: Request):

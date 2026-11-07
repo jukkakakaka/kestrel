@@ -49,7 +49,7 @@ def _headline_zh(action: str, plan, ind: dict, name: str) -> str:
 
 STRATEGY_NAME = {
     "trend_pullback": "趋势回踩",
-    "breakout_20d": "20 日突破",
+    "breakout_20": "20 日突破",
     "mean_reversion": "超跌反弹",
 }
 
@@ -206,6 +206,12 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
         bars_map, skipped = await _load_bars(conn, symbols)
 
         strategies = registry()
+        # Only strategies that have demonstrated positive expectancy across the
+        # universe may publish advice. A rule that backtests as a loser does not
+        # become a good idea because the chart looks nice today.
+        from kestrel.services import edge as edge_service
+
+        allowed = edge_service.enabled_strategies()
         signals = plans = 0
         near: list[dict] = []
         rejected: list[dict] = []
@@ -224,6 +230,8 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
             best = None
             best_any = None
             for strategy in strategies.values():
+                if not allowed.get(strategy.code, True):
+                    continue
                 result = strategy.evaluate(ind)
                 if result is None:
                     continue
@@ -339,6 +347,16 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
             )
 
         duration = int((time.perf_counter() - started) * 1000)
+        # The page must reflect the newest scan, not a pile of older runs. Any
+        # advice for a symbol this scan looked at but no longer likes is retired.
+        conn.execute(
+            """
+            UPDATE recommendation SET status='superseded'
+            WHERE status='active' AND scan_id <> ?
+              AND symbol_id IN (SELECT id FROM symbol WHERE is_pool=1)
+            """,
+            (scan_id,),
+        )
         conn.execute(
             "UPDATE scan_run SET finished_at=?, scanned=?, signals=?, plans=?, status='ok',"
             " skipped=?, rejected=?, duration_ms=? WHERE id=?",
@@ -369,6 +387,7 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
             "min_score": min_score,
             "universe": mode,
             "pool": pool_counts,
+            "allowed": allowed,
             "duration_ms": duration,
             "finished_at": datetime.now(UTC).isoformat(timespec="seconds"),
         }
