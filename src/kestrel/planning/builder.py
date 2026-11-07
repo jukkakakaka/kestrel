@@ -53,11 +53,18 @@ def _round(value: Decimal, digits: str = "0.001") -> Decimal:
 
 
 def valid_until(market: str) -> str:
-    """Plans expire at the close of the current session in the market's timezone."""
-    now = datetime.now(ZoneInfo(TZ.get(market.upper(), "UTC")))
-    close = datetime.combine(now.date(), time(16, 0), tzinfo=now.tzinfo)
-    if now >= close:
-        close = datetime.combine(now.date() + timedelta(days=1), time(16, 0), tzinfo=now.tzinfo)
+    """Plans expire at the close of the next tradable session in market time.
+
+    Rolling forward past weekends matters more than it looks: a plan built on a
+    Saturday used to expire at that Saturday's 16:00, so it died a few hours
+    later without a single session in which the user could act on it.
+    Holidays are not modelled - the worst case is one extra day of validity.
+    """
+    tz = ZoneInfo(TZ.get(market.upper(), "UTC"))
+    now = datetime.now(tz)
+    close = datetime.combine(now.date(), time(16, 0), tzinfo=tz)
+    while close <= now or close.weekday() >= 5:  # Sat=5, Sun=6
+        close = datetime.combine(close.date() + timedelta(days=1), time(16, 0), tzinfo=tz)
     return close.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")
 
 

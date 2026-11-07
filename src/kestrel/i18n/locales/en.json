@@ -41,7 +41,7 @@
   "scan.diag": "Last scan: {total} in watchlist, {scanned} evaluated, {signals} signals, {plans} plans. Threshold {min}%.",
   "scan.blocked_lot": "{n} signal(s) were dropped because one lot already exceeds the risk budget. That is a capital constraint, not a strategy failure.",
   "scan.near": "Almost triggered:",
-  "scan.hint": "Plans expire at the close. Confirm execution on the receipt page so the system can track plan-vs-fill deviation.",
+  "scan.hint": "Plans expire at the next session close. Confirm execution on the receipt page so the system can track plan-vs-fill deviation.",
   "receipt.title": "Receipt",
   "receipt.invalid": "Link invalid or expired",
   "receipt.invalid_hint": "Go back to Kestrel and generate a new plan.",

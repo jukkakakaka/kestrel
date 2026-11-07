@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from kestrel.indicators.engine import Series, compute
-from kestrel.planning.builder import build, build_ex
+from kestrel.planning.builder import build, build_ex, valid_until
 from kestrel.strategies.base import Breakout20
 
 LOT = 100
@@ -133,3 +134,17 @@ def test_rejection_reason_is_specific():
     )
     assert plan is None
     assert why == "lot_too_big", "the caller needs to tell capital problems from bad setups"
+
+
+def test_valid_until_lands_on_a_weekday_close():
+    """A plan built at the weekend must survive until Monday, not die in hours."""
+    for market, tz_name in (
+        ("US", "America/New_York"),
+        ("HK", "Asia/Hong_Kong"),
+        ("CN", "Asia/Shanghai"),
+    ):
+        moment = datetime.fromisoformat(valid_until(market))
+        local = moment.astimezone(ZoneInfo(tz_name))
+        assert local.weekday() < 5, f"{market} expiry fell on a weekend"
+        assert local > datetime.now(ZoneInfo(tz_name)), f"{market} expiry is in the past"
+        assert (local.hour, local.minute) == (16, 0)

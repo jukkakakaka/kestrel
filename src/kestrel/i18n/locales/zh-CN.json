@@ -41,7 +41,7 @@
   "scan.diag": "上次扫描：自选 {total} 只，实际看了 {scanned} 只，{signals} 个信号，{plans} 个计划。触发门槛 {min}%。",
   "scan.blocked_lot": "有 {n} 个信号因为「买一手就超过风险预算」被放弃了。这不是策略问题，是资金量的问题。",
   "scan.near": "差一点触发的：",
-  "scan.hint": "建议在当日收盘后失效。执行后请在手机回执页确认，系统会记录建议与真实成交的偏差。",
+  "scan.hint": "建议在下一个交易日收盘后失效。执行后请在手机回执页确认，系统会记录建议与真实成交的偏差。",
   "receipt.title": "回执",
   "receipt.invalid": "链接无效或已过期",
   "receipt.invalid_hint": "请回到 Kestrel 重新生成建议。",
