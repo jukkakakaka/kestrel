@@ -13,7 +13,59 @@ from kestrel.services import settings_schema
 
 log = logging.getLogger(__name__)
 
-CHANNEL_KEYS = ("ntfy", "webhook", "weclawbot", "smtp")
+CHANNEL_KEYS = ("workbuddy", "weclawbot", "ntfy", "webhook", "smtp")
+
+
+async def send_test(channel: str | None = None) -> dict:
+    """Send one message and report exactly what happened, per channel.
+
+    A settings page without a test button is a guessing game: the user cannot
+    tell "configured" from "working".
+    """
+    from kestrel.services import channels as channel_service
+
+    conn = connect()
+    try:
+        cfg = settings_schema.read_all(conn)
+        active = dict(configured_channels(cfg))
+    finally:
+        conn.close()
+
+    targets = [channel] if channel else list(active.keys())
+    if not targets:
+        return {
+            "ok": False,
+            "error": "还没有启用任何推送渠道。先在下面填好并打开开关。",
+            "results": [],
+        }
+
+    message = Message(
+        title="Kestrel 测试消息",
+        body="如果你看到这条，说明推送链路是通的。这条不是交易建议。",
+        url="",
+    )
+
+    results = []
+    for code in targets:
+        conf = active.get(code)
+        if conf is None:
+            conf = channel_service.config_for(code)
+            if not conf:
+                results.append({"channel": code, "ok": False, "error": "未配置"})
+                continue
+        try:
+            impl = build_channel(code, conf)
+            if impl is None:
+                results.append({"channel": code, "ok": False, "error": "未知渠道"})
+                continue
+            await impl.send(message)
+            channel_service.mark_result(code, ok=True)
+            results.append({"channel": code, "ok": True})
+        except Exception as exc:  # noqa: BLE001
+            channel_service.mark_result(code, ok=False, error=str(exc))
+            results.append({"channel": code, "ok": False, "error": str(exc)[:200]})
+
+    return {"ok": any(r["ok"] for r in results), "results": results}
 
 
 def configured_channels(cfg: dict) -> list[tuple[str, dict]]:

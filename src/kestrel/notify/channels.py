@@ -128,6 +128,39 @@ class SmtpChannel:
             smtp.send_message(mail)
 
 
+class WorkBuddyChannel:
+    """Hand messages to WorkBuddy through a shared outbox folder.
+
+    There is no inbound webhook for an in-app WeChat bot, so the daemon writes a
+    JSON file and a WorkBuddy automation picks it up. The file *is* the channel:
+    if the automation is missing the message simply sits there, which is a much
+    better failure mode than a silent drop.
+    """
+
+    code = "workbuddy"
+
+    def __init__(self, outbox: str) -> None:
+        self.outbox = outbox
+
+    async def send(self, message: Message) -> None:
+        import json
+        import uuid
+        from datetime import datetime
+        from pathlib import Path
+
+        folder = Path(self.outbox).expanduser()
+        folder.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        name = f"{stamp}-{uuid.uuid4().hex[:6]}.json"
+        payload = {
+            "title": message.title,
+            "body": message.body,
+            "url": message.url,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        (folder / name).write_text(json.dumps(payload, ensure_ascii=False, indent=2), "utf-8")
+
+
 def _ascii(text: str) -> str:
     """ntfy headers must be ASCII; fall back to RFC 2047 when needed."""
     try:
@@ -144,6 +177,8 @@ def build_channel(code: str, cfg: dict):
         return WebhookChannel(cfg.get("url", ""), cfg.get("token", ""))
     if code == "weclawbot":
         return WeClawBotChannel(cfg.get("base_url", ""), cfg.get("bot_id", ""), cfg.get("api_token", ""))
+    if code == "workbuddy":
+        return WorkBuddyChannel(cfg.get("outbox", ""))
     if code == "smtp":
         return SmtpChannel(
             cfg.get("host", ""), cfg.get("port", 587), cfg.get("user", ""),

@@ -153,6 +153,16 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     print(f"\n可用 {ok} 只，修复 {fixed} 只，无法识别 {bad} 只。")
     if bad:
         print("无法识别的标的会让扫描跳过它们。删掉重加，或换成正确的代码。")
+
+    # normalise exchange labels that older versions stored as market codes
+    conn3 = connect()
+    try:
+        conn3.execute("UPDATE symbol SET exchange='上交所' WHERE market='CN' AND secid LIKE '1.%'")
+        conn3.execute("UPDATE symbol SET exchange='深交所' WHERE market='CN' AND secid LIKE '0.%'")
+        conn3.execute("UPDATE symbol SET exchange='港交所' WHERE market='HK' AND secid IS NOT NULL")
+        conn3.commit()
+    finally:
+        conn3.close()
     return 0
 
 

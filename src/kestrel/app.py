@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -36,7 +36,104 @@ def _templates():
     tpl.env.filters["cur"] = _cur
     tpl.env.filters["cny"] = _cny
     tpl.env.filters["when"] = _when
+    tpl.env.filters["src_url"] = _src_url
+    tpl.env.filters["pct"] = _pct
+    tpl.env.filters["px"] = _px
     return tpl
+
+
+_PX_DIGITS = {"CN": 2, "HK": 3, "US": 2}
+
+
+def _px(value, market: str = "US") -> str:
+    """Price with the decimal count that market actually quotes in."""
+    if value is None:
+        return "—"
+    digits = _PX_DIGITS.get(str(market).upper(), 2)
+    try:
+        return f"{int(value) / 1_000_000:,.{digits}f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _pct(value, places: int = 2) -> str:
+    """Signed percentage, used for both quote changes and returns."""
+    try:
+        number = float(0 if value is None else value)
+    except (TypeError, ValueError):
+        return "—"
+    return f"{'+' if number >= 0 else ''}{number:.{places}f}%"
+
+
+def _chart_geometry(bars: list[dict], width: int = 760, height: int = 240) -> dict:
+    """Scale a bar series into SVG coordinates for the detail page."""
+    if not bars:
+        return {"line": "", "area": "", "min": 0, "max": 0, "bars": []}
+    highs = [float(b["high"]) for b in bars]
+    lows = [float(b["low"]) for b in bars]
+    top, bottom = max(highs), min(lows)
+    span = (top - bottom) or 1.0
+    pad = 12
+    step = (width - pad * 2) / max(1, len(bars) - 1)
+
+    def y_of(value: float) -> float:
+        return pad + (top - value) / span * (height - pad * 2)
+
+    points = []
+    candles = []
+    for index, bar in enumerate(bars):
+        x = pad + index * step
+        close_y = y_of(float(bar["close"]))
+        points.append(f"{x:.1f},{close_y:.1f}")
+        candles.append(
+            {
+                "x": round(x, 1),
+                "open": round(y_of(float(bar["open"])), 1),
+                "close": round(close_y, 1),
+                "high": round(y_of(float(bar["high"])), 1),
+                "low": round(y_of(float(bar["low"])), 1),
+                "up": float(bar["close"]) >= float(bar["open"]),
+            }
+        )
+    line = " ".join(points)
+    area = f"{pad},{height - pad} {line} {pad + (len(bars) - 1) * step:.1f},{height - pad}"
+    return {
+        "line": line,
+        "area": area,
+        "min": bottom,
+        "max": top,
+        "width": width,
+        "height": height,
+        "bars": candles,
+    }
+
+
+def _src_url(source: str, market: str, code: str) -> str:
+    """Where the number came from, so the user can go verify it."""
+    market = (market or "").upper()
+    code = str(code or "")
+    source = (source or "eastmoney").lower()
+
+    if market == "CN":
+        prefix = "sh" if code.startswith(("6", "9", "5")) else "sz"
+        if source == "tencent":
+            return f"https://gu.qq.com/{prefix}{code}"
+        if source == "sina":
+            return f"https://finance.sina.com.cn/realstock/company/{prefix}{code}/nc.shtml"
+        return f"https://quote.eastmoney.com/{prefix}{code}.html"
+
+    if market == "HK":
+        if source == "tencent":
+            return f"https://gu.qq.com/hk{code}"
+        if source == "sina":
+            return f"https://stock.finance.sina.com.cn/hkstock/quotes/{code}.html"
+        return f"https://quote.eastmoney.com/hk/{code}.html"
+
+    if source == "tencent":
+        return f"https://gu.qq.com/us{code}"
+    if source == "sina":
+        return f"https://stock.finance.sina.com.cn/usstock/quotes/{code}.html"
+    return f"https://quote.eastmoney.com/us/{code}.html"
 
 
 def _money(value, places: int = 2) -> str:
@@ -150,6 +247,12 @@ async def lifespan(app: FastAPI):
     seeded = resolver.load_from_db()
     if seeded:
         log.info("resolved %d cached security ids", seeded)
+    from kestrel.fees import plans as plan_service
+
+    plan_service.hydrate()
+    from kestrel.services import glossary as glossary_service
+
+    glossary_service.seed()
     from kestrel.scheduler import service as scheduler_service
 
     app.state.scheduler = scheduler_service.start()
@@ -188,6 +291,8 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request):
+        from kestrel.services import calendar as calendar_service
+
         conn = connect()
         try:
             rows = conn.execute(
@@ -203,7 +308,13 @@ def create_app() -> FastAPI:
         finally:
             conn.close()
         return templates.TemplateResponse(
-            request=request, name="dashboard.html", context=_ctx(request, items=[dict(r) for r in rows])
+            request=request,
+            name="market.html",
+            context=_ctx(
+                request,
+                items=[dict(r) for r in rows],
+                markets=calendar_service.all_status(),
+            ),
         )
 
     @app.post("/api/watchlist", response_class=JSONResponse)
@@ -339,8 +450,8 @@ def create_app() -> FastAPI:
             "stale": len(data) < len(symbols),
         }
 
-    @app.get("/scan", response_class=HTMLResponse)
-    async def scan_page(request: Request):
+    @app.get("/advice", response_class=HTMLResponse)
+    async def advice_page(request: Request):
         from kestrel.services import config as config_service
         from kestrel.services import scan as scan_service
 
@@ -349,16 +460,70 @@ def create_app() -> FastAPI:
         conn = connect()
         try:
             last = config_service.get(conn, "scan.last", None)
+            auto = bool(config_service.get(conn, "scan.auto_enabled", False))
+            interval = int(config_service.get(conn, "scan.interval_minutes", 60) or 60)
+            markets = config_service.get(conn, "scan.markets", ["CN", "HK", "US"])
+            universe = str(config_service.get(conn, "scan.universe", "both"))
             ui = {
                 "learning": bool(config_service.get(conn, "ui.learning_mode", True)),
                 "glossary": bool(config_service.get(conn, "ui.glossary", True)),
             }
         finally:
             conn.close()
+
+        next_run = None
+        if auto and last and last.get("finished_at"):
+            from datetime import datetime, timedelta
+
+            from kestrel.core.clock import utcnow
+
+            try:
+                base = datetime.fromisoformat(str(last["finished_at"]).replace("Z", "+00:00"))
+            except ValueError:
+                base = utcnow()
+            next_run = base + timedelta(minutes=interval)
+
         return templates.TemplateResponse(
-            request=request, name="scan.html",
-            context=_ctx(request, recs=recs, last=last, ui=ui),
+            request=request,
+            name="advice.html",
+            context=_ctx(
+                request,
+                recs=recs,
+                last=last,
+                ui=ui,
+                auto=auto,
+                interval=interval,
+                next_run=next_run,
+                markets=markets,
+                universe=universe,
+                history=scan_service.history(20),
+                scans=scan_service.recent_scans(6),
+            ),
         )
+
+    @app.get("/scan")
+    async def scan_redirect():
+        from fastapi.responses import RedirectResponse
+
+        return RedirectResponse("/advice", status_code=301)
+
+    @app.post("/advice/{rec_id}/decide", response_class=JSONResponse)
+    async def advice_decide(rec_id: int, request: Request):
+        from kestrel.services import scan as scan_service
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        decision = str((body or {}).get("decision", "")).strip()
+        note = str((body or {}).get("note", "")).strip()
+        fill = (body or {}).get("fill_price")
+        try:
+            fill_price = float(fill) if fill not in (None, "") else None
+        except (TypeError, ValueError):
+            fill_price = None
+        ok = scan_service.decide(rec_id, decision, note, fill_price)
+        return {"ok": ok}
 
     @app.post("/api/scan", response_class=JSONResponse)
     async def api_scan(request: Request):
@@ -484,23 +649,49 @@ def create_app() -> FastAPI:
 
     @app.get("/settings", response_class=HTMLResponse)
     async def settings_page(request: Request):
-        from kestrel.services import settings_schema
+        from kestrel.datasources import registry as source_registry
+        from kestrel.services import channels as channel_service
+        from kestrel.services import config as config_service
+        from kestrel.services import universe as universe_service
 
         conn = connect()
         try:
-            values = settings_schema.read_all(conn)
+            values = config_service.all_values(conn)
             glossary = [
-                dict(r) for r in conn.execute(
-                    "SELECT * FROM glossary ORDER BY key"
-                ).fetchall()
+                dict(r) for r in conn.execute("SELECT * FROM glossary ORDER BY key").fetchall()
             ]
         finally:
             conn.close()
         return templates.TemplateResponse(
-            request=request, name="settings.html",
-            context=_ctx(request, sections=settings_schema.SECTIONS, values=values,
-                         glossary=glossary, saved=request.query_params.get("saved")),
+            request=request,
+            name="settings.html",
+            context=_ctx(
+                request,
+                values=values,
+                glossary=glossary,
+                sources=source_registry.list_sources(),
+                channels=channel_service.all_channels(),
+                pool=universe_service.pool_summary(),
+                saved=request.query_params.get("saved"),
+            ),
         )
+
+    @app.post("/api/datasources", response_class=JSONResponse)
+    async def api_datasources(request: Request):
+        from kestrel.datasources import registry as source_registry
+        from kestrel.services import config as config_service
+
+        body = await request.json()
+        items = (body or {}).get("items") or {}
+        conn = connect()
+        try:
+            for key, enabled in items.items():
+                config_service.put(conn, f"datasource.{key}.enabled", bool(enabled))
+            conn.commit()
+        finally:
+            conn.close()
+        request.app.state.chain = source_registry.build()
+        return {"ok": True, "sources": source_registry.list_sources()}
 
     @app.post("/settings/{section}")
     async def settings_save(request: Request, section: str):
@@ -623,13 +814,14 @@ def create_app() -> FastAPI:
         journal.delete_ipo(ipo_id)
         return RedirectResponse("/ipo", status_code=303)
 
-    @app.get("/fees", response_class=HTMLResponse)
-    async def fees_page(request: Request):
+    @app.get("/cost", response_class=HTMLResponse)
+    async def cost_page(request: Request):
         from decimal import Decimal
 
-        from kestrel.fees.calculator import PLANS, quote_fees
+        from kestrel.fees import plans as plan_service
+        from kestrel.fees.calculator import quote_fees
 
-        market = request.query_params.get("market", "HK")
+        market = request.query_params.get("market", "HK").upper()
         amount = request.query_params.get("amount", "10000")
         shares = request.query_params.get("shares", "100")
         broker = request.query_params.get("broker") or None
@@ -638,31 +830,54 @@ def create_app() -> FastAPI:
             buy = quote_fees(market, Decimal(amount), Decimal(shares), False, broker)
             sell = quote_fees(market, Decimal(amount), Decimal(shares), True, broker)
             total = buy.total + sell.total
+            cost_amount = Decimal(amount) or Decimal("1")
             result = {
                 "buy": buy.as_dict(),
                 "sell": sell.as_dict(),
                 "total": f"{total:,.2f}",
-                "breakeven_pct": f"{(total / Decimal(amount) * 100):.3f}"
-                if Decimal(amount)
-                else "0",
+                "breakeven_pct": f"{(total / cost_amount * 100):.3f}",
+                "breakeven_price": f"{(Decimal(amount) + total) / (Decimal(shares) or Decimal('1')):.3f}",
             }
         except Exception:
             result = None
+
+        plan_list = plan_service.list_plans()
         return templates.TemplateResponse(
-            request=request, name="fees.html",
-            context=_ctx(request, plans=list(PLANS.values()), result=result, market=market,
-                         amount=amount, shares=shares, broker=broker or ""),
+            request=request,
+            name="cost.html",
+            context=_ctx(
+                request,
+                plans=plan_list,
+                plan_market={},
+                result=result,
+                market=market,
+                amount=amount,
+                shares=shares,
+                broker=broker or "",
+            ),
         )
 
-    @app.get("/backtest", response_class=HTMLResponse)
-    async def backtest_page(request: Request):
+    @app.get("/fees")
+    async def fees_redirect():
+        from fastapi.responses import RedirectResponse
+
+        return RedirectResponse("/cost", status_code=301)
+
+    @app.get("/sim", response_class=HTMLResponse)
+    async def sim_page(request: Request):
         from kestrel.services import backtest
 
         return templates.TemplateResponse(
-            request=request, name="backtest.html",
+            request=request, name="sim.html",
             context=_ctx(request, runs=backtest.recent(20), result=None, error=None,
                          form={"market": "HK", "code": "00700", "strategy": "trend_pullback"}),
         )
+
+    @app.get("/backtest")
+    async def backtest_redirect():
+        from fastapi.responses import RedirectResponse
+
+        return RedirectResponse("/sim", status_code=301)
 
     @app.post("/backtest", response_class=HTMLResponse)
     async def backtest_run(request: Request):
@@ -702,7 +917,7 @@ def create_app() -> FastAPI:
         finally:
             conn.close()
         return templates.TemplateResponse(
-            request=request, name="backtest.html",
+            request=request, name="sim.html",
             context=_ctx(request, runs=backtest.recent(20), result=result, error=error,
                          form={"market": market, "code": code, "strategy": strategy}),
         )
@@ -738,6 +953,280 @@ def create_app() -> FastAPI:
         finally:
             conn.close()
         return RedirectResponse("/settings#glossary", status_code=303)
+
+    # ---------------------------------------------------------------- stock
+
+    @app.get("/stock/{market}/{code}", response_class=HTMLResponse)
+    async def stock_page(request: Request, market: str, code: str):
+        from kestrel.indicators.engine import Series, compute
+        from kestrel.services import bars as bars_service
+        from kestrel.services import calendar as calendar_service
+
+        market = market.upper()
+        conn = connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM symbol WHERE market=? AND code=?", (market, code)
+            ).fetchone()
+            if row is None:
+                return templates.TemplateResponse(
+                    request=request,
+                    name="stock.html",
+                    context=_ctx(request, sym=None, code=code, market=market),
+                    status_code=404,
+                )
+            quote = conn.execute(
+                "SELECT * FROM quote_latest WHERE symbol_id=?", (row["id"],)
+            ).fetchone()
+            rec = conn.execute(
+                "SELECT * FROM recommendation WHERE symbol_id=? AND status='active'"
+                " ORDER BY id DESC LIMIT 1",
+                (row["id"],),
+            ).fetchone()
+            trade = conn.execute(
+                "SELECT * FROM trade WHERE market=? AND code=? AND status='open'"
+                " ORDER BY id DESC LIMIT 1",
+                (market, code),
+            ).fetchone()
+            bars = bars_service.cached_bars(conn, row["id"], 120)
+        finally:
+            conn.close()
+
+        ind = compute(Series.from_bars(bars)) if len(bars) >= 40 else None
+        chart = _chart_geometry(bars[-60:])
+        return templates.TemplateResponse(
+            request=request,
+            name="stock.html",
+            context=_ctx(
+                request,
+                sym=dict(row),
+                quote=dict(quote) if quote else None,
+                rec=dict(rec) if rec else None,
+                trade=dict(trade) if trade else None,
+                bars=bars[-60:],
+                chart=chart,
+                ind=ind,
+                status=calendar_service.status(market),
+            ),
+        )
+
+    @app.get("/api/market-status", response_class=JSONResponse)
+    async def api_market_status():
+        from kestrel.services import calendar as calendar_service
+
+        return {
+            "ok": True,
+            "markets": [
+                {
+                    "market": s.market,
+                    "name": s.name,
+                    "state": s.state,
+                    "label": s.label,
+                    "local_time": s.local_time,
+                    "seconds_to_open": s.seconds_to_open,
+                }
+                for s in calendar_service.all_status()
+            ],
+        }
+
+    # ---------------------------------------------------------------- pool
+
+    @app.post("/api/pool/refresh", response_class=JSONResponse)
+    async def api_pool_refresh(request: Request):
+        from kestrel.services import config as config_service
+        from kestrel.services import universe as universe_service
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        conn = connect()
+        try:
+            markets = (body or {}).get("markets") or config_service.get(
+                conn, "scan.markets", ["CN", "HK", "US"]
+            )
+            size = int((body or {}).get("size") or config_service.get(conn, "scan.pool_size", 30))
+        finally:
+            conn.close()
+        counts = await universe_service.refresh(markets, size)
+        return {"ok": True, "counts": counts, "total": universe_service.pool_summary()}
+
+    @app.get("/api/pool", response_class=JSONResponse)
+    async def api_pool(market: str = "", limit: int = 60):
+        from kestrel.services import universe as universe_service
+
+        markets = [market.upper()] if market else ["CN", "HK", "US"]
+        return {"ok": True, "items": universe_service.pool_symbols(markets, limit)}
+
+    # ---------------------------------------------------------------- backup
+
+    @app.get("/api/backup/export")
+    async def api_backup_export():
+        """Download a consistent snapshot of the whole database."""
+        import sqlite3
+        import tempfile
+
+        from fastapi.responses import FileResponse
+
+        from kestrel.settings import settings
+
+        with tempfile.NamedTemporaryFile(
+            prefix="kestrel-", suffix=".db", delete=False
+        ) as handle:
+            snapshot = handle.name
+
+        src = sqlite3.connect(str(settings.db_path))
+        dst = sqlite3.connect(snapshot)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M")
+        return FileResponse(
+            snapshot, filename=f"kestrel-backup-{stamp}.db", media_type="application/octet-stream"
+        )
+
+    @app.get("/api/backup/json", response_class=JSONResponse)
+    async def api_backup_json():
+        conn = connect()
+        try:
+            data = {}
+            for table in ("symbol", "watchlist", "trade", "ipo_ledger", "config_kv", "recommendation"):
+                rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+                data[table] = [dict(r) for r in rows]
+        finally:
+            conn.close()
+        return {"ok": True, "exported_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "tables": data}
+
+    @app.post("/api/backup/import", response_class=JSONResponse)
+    async def api_backup_import(request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"ok": False, "error": "不是有效的 JSON"}, status_code=400)
+        tables = (body or {}).get("tables")
+        if not isinstance(tables, dict):
+            return JSONResponse({"ok": False, "error": "缺少 tables 字段"}, status_code=400)
+
+        allowed = {"symbol", "watchlist", "trade", "ipo_ledger", "config_kv", "recommendation"}
+        conn = connect()
+        added = 0
+        try:
+            conn.execute("BEGIN")
+            for table, rows in tables.items():
+                if table not in allowed or not isinstance(rows, list):
+                    continue
+                for row in rows:
+                    if not isinstance(row, dict) or not row:
+                        continue
+                    cols = ",".join(row.keys())
+                    marks = ",".join("?" * len(row))
+                    try:
+                        conn.execute(
+                            f"INSERT OR IGNORE INTO {table} ({cols}) VALUES ({marks})",
+                            tuple(row.values()),
+                        )
+                        added += 1
+                    except Exception:  # noqa: BLE001, PERF203
+                        continue
+            conn.execute("COMMIT")
+        except Exception as exc:  # noqa: BLE001
+            conn.execute("ROLLBACK")
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        finally:
+            conn.close()
+        return {"ok": True, "rows": added}
+
+    # ---------------------------------------------------------------- broker plans
+
+    @app.get("/api/brokers", response_class=JSONResponse)
+    async def api_brokers(market: str = ""):
+        from kestrel.fees import plans as plan_service
+
+        return {"ok": True, "items": plan_service.list_plans(market or None)}
+
+    @app.post("/api/brokers", response_class=JSONResponse)
+    async def api_broker_save(request: Request):
+        from kestrel.fees import plans as plan_service
+
+        body = await request.json()
+        try:
+            key = plan_service.upsert(body or {})
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return {"ok": True, "key": key}
+
+    @app.post("/api/brokers/{key}/delete", response_class=JSONResponse)
+    async def api_broker_delete(key: str):
+        from kestrel.fees import plans as plan_service
+
+        return {"ok": plan_service.delete(key)}
+
+    # ---------------------------------------------------------------- notify test
+
+    @app.post("/api/notify/test", response_class=JSONResponse)
+    async def api_notify_test(request: Request):
+        from kestrel.notify import dispatcher
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        channel = str((body or {}).get("channel", "")).strip() or None
+        result = await dispatcher.send_test(channel)
+        return result
+
+    @app.post("/api/notify/config", response_class=JSONResponse)
+    async def api_notify_config(request: Request):
+        from kestrel.services import channels as channel_service
+
+        body = await request.json()
+        key = str((body or {}).get("key", "")).strip()
+        if not key:
+            return JSONResponse({"ok": False, "error": "missing key"}, status_code=400)
+        channel_service.save(key, body or {})
+        return {"ok": True}
+
+    # ---------------------------------------------------------------- trade import
+
+    @app.post("/api/journal/parse", response_class=JSONResponse)
+    async def api_journal_parse(request: Request):
+        from kestrel.services import statement
+
+        body = await request.json()
+        text = str((body or {}).get("text", ""))
+        parsed = statement.parse(text)
+        return {"ok": True, "rows": parsed}
+
+    @app.post("/api/journal/import", response_class=JSONResponse)
+    async def api_journal_import(request: Request):
+        from kestrel.services import statement
+
+        body = await request.json()
+        rows = (body or {}).get("rows") or []
+        saved = statement.save(rows)
+        return {"ok": True, "saved": saved}
+
+    # ---------------------------------------------------------------- settings extras
+
+    @app.post("/api/settings", response_class=JSONResponse)
+    async def api_settings_save(request: Request):
+        from kestrel.services import config as config_service
+
+        body = await request.json()
+        items = (body or {}).get("items") or {}
+        if not isinstance(items, dict):
+            return JSONResponse({"ok": False, "error": "items must be an object"}, status_code=400)
+        conn = connect()
+        try:
+            for key, value in items.items():
+                config_service.put(conn, str(key), value)
+            conn.commit()
+        finally:
+            conn.close()
+        return {"ok": True, "saved": len(items)}
 
     return app
 

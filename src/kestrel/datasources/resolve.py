@@ -71,6 +71,24 @@ def _has_cjk(text: str) -> bool:
     return any("\u4e00" <= ch <= "\u9fff" for ch in text)
 
 
+def _exchange_name(market: str, raw: str, secid: str) -> str:
+    """Eastmoney's ``JYS`` is a market code ("2") for A-shares; normalise it."""
+    if market == "CN":
+        return "上交所" if secid.startswith("1.") else "深交所"
+    if market == "HK":
+        return "港交所"
+    return (raw or "").strip()
+
+
+def _valid_code(market: str, code: str) -> bool:
+    """Reject codes that cannot belong to the market, before they reach the DB."""
+    if market == "CN":
+        return code.isdigit() and len(code) == 6
+    if market == "HK":
+        return code.isdigit() and 1 <= len(code) <= 5
+    return code.isalpha() and 1 <= len(code) <= 6
+
+
 def load_from_db() -> int:
     """Seed the cache from the symbol table. Safe to call more than once."""
     from kestrel.db.engine import connect
@@ -121,13 +139,15 @@ async def resolve(query: str, market: str | None = None, timeout: float = 8.0) -
         secid = str(item.get("QuoteID") or "").strip()
         if not code or not secid:
             continue
+        if not _valid_code(mkt, code):
+            continue
         name = str(item.get("Name") or code).strip()
         resolved = Resolved(
             market=mkt,
             code=code,
             name=name,
             secid=secid,
-            exchange=str(item.get("JYS") or "").strip(),
+            exchange=_exchange_name(mkt, str(item.get("JYS") or ""), secid),
             currency=_MARKET_CURRENCY[mkt],
             lot_size=100 if mkt in ("HK", "CN") else 1,
         )

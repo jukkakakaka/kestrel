@@ -138,6 +138,8 @@ def test_rejection_reason_is_specific():
 
 def test_valid_until_lands_on_a_weekday_close():
     """A plan built at the weekend must survive until Monday, not die in hours."""
+    from kestrel.services.calendar import SESSIONS
+
     for market, tz_name in (
         ("US", "America/New_York"),
         ("HK", "Asia/Hong_Kong"),
@@ -147,4 +149,5 @@ def test_valid_until_lands_on_a_weekday_close():
         local = moment.astimezone(ZoneInfo(tz_name))
         assert local.weekday() < 5, f"{market} expiry fell on a weekend"
         assert local > datetime.now(ZoneInfo(tz_name)), f"{market} expiry is in the past"
-        assert (local.hour, local.minute) == (16, 0)
+        # each market closes at its own time: A-shares 15:00, HK 16:00, US 16:00
+        assert local.time() == SESSIONS[market][-1][1], f"{market} expiry is not at the close"

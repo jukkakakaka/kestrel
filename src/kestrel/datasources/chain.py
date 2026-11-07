@@ -86,10 +86,17 @@ class QuoteChain:
 
 
 def default_chain() -> QuoteChain:
-    from kestrel.datasources.eastmoney import EastmoneyProvider
-    from kestrel.datasources.sina import SinaProvider
-    from kestrel.datasources.tencent import TencentProvider
+    """Build the chain from the user's data-source switches."""
+    from kestrel.datasources import registry
 
-    return QuoteChain(
-        providers=[EastmoneyProvider(), TencentProvider(), SinaProvider()]
-    )
+    try:
+        return registry.build()
+    except Exception as exc:  # noqa: BLE001 - never fail startup over config
+        log.warning("registry unavailable (%s), using built-in order", exc)
+        from kestrel.datasources.eastmoney import EastmoneyProvider
+        from kestrel.datasources.sina import SinaProvider
+        from kestrel.datasources.tencent import TencentProvider
+
+        return QuoteChain(
+            providers=[EastmoneyProvider(), TencentProvider(), SinaProvider()]
+        )

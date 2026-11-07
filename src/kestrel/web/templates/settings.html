@@ -1,75 +1,484 @@
 {% extends "base.html" %}
-{% block title %}{{ t('settings.title') }} · {{ t('app.name') }}{% endblock %}
+{% block title %}{{ t('nav.settings') }} · {{ t('app.name') }}{% endblock %}
 
 {% block content %}
-<section class="panel">
-  <div class="panel-head"><h1>{{ t('settings.title') }}</h1>
-    <div class="actions"><a class="btn ghost" href="/fees">{{ t('fees.title') }}</a></div></div>
-
-  {% if saved %}<div class="notice">{{ t('settings.saved') }}</div>{% endif %}
-
-  <div class="tabs">
-    {% for s in sections %}
-    <button class="tab {% if loop.first %}active{% endif %}" data-tab="{{ s.code }}">
-      {{ s.label_zh if locale.startswith('zh') else s.label_en }}
-    </button>
-    {% endfor %}
-    <button class="tab" data-tab="glossary">{{ t('settings.glossary') }}</button>
+<div class="page-head">
+  <div>
+    <h1>{{ t('nav.settings') }}</h1>
+    <div class="sub">{{ t('settings.sub') }}</div>
   </div>
+</div>
 
-  {% for s in sections %}
-  <form method="post" action="/settings/{{ s.code }}" class="settings-pane {% if not loop.first %}hidden{% endif %}" data-pane="{{ s.code }}">
-    {% for f in s.fields %}
-    <div class="setting-row">
-      <div class="setting-label">
-        <span>{{ f.label_zh if locale.startswith('zh') else f.label_en }}</span>
-        {% set help = f.help_zh if locale.startswith('zh') else f.help_en %}
-        {% if help %}<small>{{ help }}</small>{% endif %}
+<div id="save-flash" class="notice hidden"></div>
+
+<div class="tabs">
+  <button class="active" data-tab="general">{{ t('settings.tab_general') }}</button>
+  <button data-tab="scan">{{ t('settings.tab_scan') }}</button>
+  <button data-tab="sources">{{ t('settings.tab_sources') }}</button>
+  <button data-tab="engine">{{ t('settings.tab_engine') }}</button>
+  <button data-tab="notify">{{ t('settings.tab_notify') }}</button>
+  <button data-tab="data">{{ t('settings.tab_data') }}</button>
+  <button data-tab="glossary">{{ t('settings.tab_glossary') }}</button>
+</div>
+
+<div data-pane="general">
+  <section class="card">
+    <div class="card-head"><h2>{{ t('settings.general') }}</h2></div>
+    <div class="card-body">
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>{{ t('settings.capital') }}</span>
+          <small>{{ t('settings.capital_hint') }}</small>
+        </div>
+        <div class="setting-input">
+          <input data-key="account.capital" type="number" step="100" value="{{ values.get('account.capital') }}">
+        </div>
       </div>
-      <div class="setting-input">
-        {% if f.kind == 'switch' %}
-        <label class="switch">
-          <input type="checkbox" name="{{ f.key }}" {% if values.get(f.key) %}checked{% endif %}>
-          <span></span>
-        </label>
-        {% elif f.kind == 'select' %}
-        <select name="{{ f.key }}">
-          {% for value, label in f.options %}
-          <option value="{{ value }}" {% if values.get(f.key) == value %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-        {% elif f.kind == 'number' %}
-        <input type="number" step="{{ f.step }}" name="{{ f.key }}" value="{{ values.get(f.key) }}">
-        {% elif f.kind == 'password' %}
-        <input type="password" name="{{ f.key }}" value="{{ values.get(f.key) }}" autocomplete="off">
-        {% else %}
-        <input type="text" name="{{ f.key }}" value="{{ values.get(f.key) }}">
-        {% endif %}
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>{{ t('settings.risk') }}</span>
+          <small>{{ t('settings.risk_hint') }}</small>
+        </div>
+        <div class="setting-input">
+          <input data-key="risk.per_trade_pct" type="number" step="0.5" value="{{ values.get('risk.per_trade_pct') }}">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>{{ t('settings.learning') }}</span>
+          <small>{{ t('settings.learning_hint') }}</small>
+        </div>
+        <div class="setting-input">
+          <label class="switch">
+            <input type="checkbox" data-key="ui.learning_mode" {% if values.get('ui.learning_mode', True) %}checked{% endif %}>
+            <span></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>{{ t('settings.glossary_on') }}</span>
+          <small>{{ t('settings.glossary_hint') }}</small>
+        </div>
+        <div class="setting-input">
+          <label class="switch">
+            <input type="checkbox" data-key="ui.glossary" {% if values.get('ui.glossary', True) %}checked{% endif %}>
+            <span></span>
+          </label>
+        </div>
+      </div>
+      <div class="row-actions">
+        <button class="btn" data-save>{{ t('action.save') }}</button>
       </div>
     </div>
-    {% endfor %}
-    <div class="row-actions"><button class="btn">{{ t('action.save') }}</button></div>
-  </form>
-  {% endfor %}
+  </section>
+</div>
 
-  <div class="settings-pane hidden" data-pane="glossary" id="glossary">
-    <p class="hint">{{ t('settings.glossary_hint') }}</p>
-    <table class="grid">
-      <thead><tr><th>{{ t('settings.term') }}</th><th>{{ t('settings.explain') }}</th><th></th></tr></thead>
-      <tbody>
-      {% for g in glossary %}
-      <tr>
-        <td><strong>{{ g.term_zh if locale.startswith('zh') else g.term_en }}</strong></td>
-        <td class="tiny">{{ g.body_zh if locale.startswith('zh') else g.body_en }}</td>
-        <td>
-          <form method="post" action="/glossary/{{ g.key }}/toggle">
-            <button class="link">{{ t('settings.restore') if g.suppressed else t('settings.silence') }}</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
+<div data-pane="scan" class="hidden">
+  <section class="card">
+    <div class="card-head"><h2>{{ t('settings.scan_title') }}</h2></div>
+    <div class="card-body">
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>{{ t('settings.markets') }}</span>
+          <small>{{ t('settings.markets_hint') }}</small>
+        </div>
+        <div class="setting-input">
+          {% set mk = values.get('scan.markets', ['CN','HK','US']) %}
+          <label style="display:inline-flex;gap:6px;margin-right:12px;">
+            <input type="checkbox" data-multi="scan.markets" value="CN" {% if 'CN' in mk %}checked{% endif %}> A 股
+          </label>
+          <label style="display:inline-flex;gap:6px;margin-right:12px;">
+            <input type="checkbox" data-multi="scan.markets" value="HK" {% if 'HK' in mk %}checked{% endif %}> 港股
+          </label>
+          <label style="display:inline-flex;gap:6px;">
+            <input type="checkbox" data-multi="scan.markets" value="US" {% if 'US' in mk %}checked{% endif %}> 美股
+          </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>{{ t('settings.universe') }}</span>
+          <small>{{ t('settings.universe_hint') }}</small>
+        </div>
+        <div class="setting-input">
+          <select data-key="scan.universe">
+            {% for key, label in [('both','自选 + 候选池（推荐）'), ('pool','只看候选池'), ('watchlist','只看自选')] %}
+            <option value="{{ key }}" {% if values.get('scan.universe','both') == key %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>{{ t('settings.pool_size') }}</span>
+          <small>{{ t('settings.pool_size_hint') }}</small>
+        </div>
+        <div class="setting-input">
+          <input data-key="scan.pool_size" type="number" min="10" max="100" value="{{ values.get('scan.pool_size', 30) }}">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>{{ t('settings.min_score') }}</span>
+          <small>{{ t('settings.min_score_hint') }}</small>
+        </div>
+        <div class="setting-input">
+          <input data-key="scan.min_score" type="number" step="0.05" min="0.3" max="0.95" value="{{ values.get('scan.min_score', 0.55) }}">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>{{ t('settings.auto') }}</span>
+          <small>{{ t('settings.auto_hint') }}</small>
+        </div>
+        <div class="setting-input">
+          <label class="switch">
+            <input type="checkbox" data-key="scan.auto_enabled" {% if values.get('scan.auto_enabled') %}checked{% endif %}>
+            <span></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>{{ t('settings.interval') }}</span>
+          <small>{{ t('settings.interval_hint') }}</small>
+        </div>
+        <div class="setting-input">
+          <input data-key="scan.interval_minutes" type="number" min="5" step="5" value="{{ values.get('scan.interval_minutes', 60) }}">
+        </div>
+      </div>
+      <div class="row-actions">
+        <button class="btn" data-save>{{ t('action.save') }}</button>
+        <button class="btn ghost" id="refresh-pool">{{ t('settings.refresh_pool') }}</button>
+        <span class="tiny" id="pool-msg">
+          {% for m, n in pool.items() %}{{ m }} {{ n }} 只 {% endfor %}
+        </span>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div data-pane="sources" class="hidden">
+  <section class="card">
+    <div class="card-head">
+      <h2>{{ t('settings.sources_title') }}</h2>
+      <span class="meta">{{ t('settings.sources_meta') }}</span>
+    </div>
+    <div class="card-body tight">
+      <table class="grid">
+        <thead>
+          <tr><th>{{ t('settings.source_name') }}</th><th>{{ t('settings.source_markets') }}</th><th>{{ t('settings.source_note') }}</th><th style="width:90px;">{{ t('settings.source_on') }}</th></tr>
+        </thead>
+        <tbody>
+          {% for s in sources %}
+          <tr>
+            <td><b>{{ s.label }}</b><div class="tiny muted mono">{{ s.key }}</div></td>
+            <td class="tiny">{{ s.markets }}</td>
+            <td class="tiny muted">{{ s.note }}</td>
+            <td>
+              <label class="switch">
+                <input type="checkbox" class="src-toggle" data-src="{{ s.key }}" {% if s.enabled %}checked{% endif %}>
+                <span></span>
+              </label>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  <p class="hint">{{ t('settings.sources_hint') }}</p>
+</div>
+
+<div data-pane="engine" class="hidden">
+  <section class="card">
+    <div class="card-head"><h2>{{ t('settings.engine_title') }}</h2></div>
+    <div class="card-body">
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>{{ t('settings.engine_mode') }}</span>
+          <small>{{ t('settings.engine_mode_hint') }}</small>
+        </div>
+        <div class="setting-input">
+          <select data-key="agent.provider" id="engine-provider">
+            {% for key, label in [('rules','纯规则（免费，推荐）'), ('llm','大模型 API'), ('workbuddy','WorkBuddy 文件桥')] %}
+            <option value="{{ key }}" {% if values.get('agent.provider','rules') == key %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div id="engine-llm" class="hidden">
+        <div class="setting-row">
+          <div class="setting-label"><span>接口地址</span><small>任何 OpenAI 兼容端点都可以，比如 DeepSeek、通义、本地 Ollama。</small></div>
+          <div class="setting-input"><input data-key="agent.base_url" value="{{ values.get('agent.base_url','') }}" placeholder="https://api.deepseek.com/v1"></div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label"><span>模型名</span><small>例如 deepseek-chat、qwen-plus、llama3。</small></div>
+          <div class="setting-input"><input data-key="agent.model" value="{{ values.get('agent.model','') }}" placeholder="deepseek-chat"></div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label"><span>API Key</span><small>只存在本机数据库，不会上传。</small></div>
+          <div class="setting-input"><input data-key="agent.api_key" type="password" value="{{ values.get('agent.api_key','') }}"></div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label"><span>每天最多调用</span><small>超过就自动降级回纯规则，防止把额度烧穿。</small></div>
+          <div class="setting-input"><input data-key="agent.daily_budget" type="number" value="{{ values.get('agent.daily_budget', 200) }}"></div>
+        </div>
+      </div>
+
+      <div id="engine-workbuddy" class="hidden">
+        <div class="notice">
+          WorkBuddy 模式不需要接口地址：程序把任务写成文件放在 outbox，WorkBuddy 的定时任务读取后分析，再把结果写回来。
+          在「推送」页配好 outbox 目录，并在 WorkBuddy 里建一个定时任务即可。
+        </div>
+      </div>
+
+      <div id="engine-rules" class="notice">
+        纯规则模式不调用任何外部接口，所有判断都在本地算完。对 1 万本金的账户，这已经够用，也不需要任何 API Key。
+      </div>
+
+      <div class="row-actions"><button class="btn" data-save>{{ t('action.save') }}</button></div>
+    </div>
+  </section>
+</div>
+
+<div data-pane="notify" class="hidden">
+  {% for ch in channels %}
+  <section class="card">
+    <div class="card-head">
+      <h2>{{ ch.label }}</h2>
+      <label class="switch">
+        <input type="checkbox" class="ch-enable" data-ch="{{ ch.key }}" {% if ch.enabled %}checked{% endif %}>
+        <span></span>
+      </label>
+    </div>
+    <div class="card-body">
+      <p class="hint" style="margin-bottom:12px;">{{ ch.hint }}</p>
+      <div class="grid g2">
+        {% for f in ch.fields %}
+        <div class="field">
+          <label>{{ f.label }}</label>
+          <input data-ch-field="{{ ch.key }}" data-field="{{ f.key }}"
+                 type="{{ 'password' if f.kind == 'password' else ('number' if f.kind == 'number' else 'text') }}"
+                 value="{{ ch.config.get(f.key, '') }}" placeholder="{{ f.placeholder }}">
+        </div>
+        {% endfor %}
+      </div>
+      <div class="row-actions">
+        <button class="btn" data-ch-save="{{ ch.key }}">保存</button>
+        <button class="btn ghost" data-ch-test="{{ ch.key }}">发送测试消息</button>
+        <span class="tiny">
+          {% if ch.last_test %}<span class="down">上次测试成功 {{ ch.last_test[5:16] }}</span>{% endif %}
+          {% if ch.last_error %}<span class="up">上次失败：{{ ch.last_error }}</span>{% endif %}
+        </span>
+      </div>
+    </div>
+  </section>
+  {% endfor %}
+</div>
+
+<div data-pane="data" class="hidden">
+  <section class="card">
+    <div class="card-head"><h2>{{ t('settings.backup') }}</h2></div>
+    <div class="card-body">
+      <p class="hint" style="margin-bottom:14px;">{{ t('settings.backup_hint') }}</p>
+      <div class="row-actions">
+        <a class="btn" href="/api/backup/export">{{ t('settings.export_db') }}</a>
+        <a class="btn ghost" href="/api/backup/json" download="kestrel-backup.json">{{ t('settings.export_json') }}</a>
+        <button class="btn ghost" id="import-btn">{{ t('settings.import_json') }}</button>
+        <input type="file" id="import-file" accept=".json" class="hidden">
+      </div>
+      <p class="tiny muted" style="margin-top:12px;">{{ t('settings.backup_warn') }}</p>
+    </div>
+  </section>
+</div>
+
+<div data-pane="glossary" class="hidden">
+  <section class="card">
+    <div class="card-head">
+      <h2>{{ t('settings.glossary_title') }}</h2>
+      <span class="meta">{{ glossary|length }} {{ t('settings.terms') }}</span>
+    </div>
+    <div class="card-body tight">
+      <table class="grid">
+        <thead><tr><th>{{ t('settings.term') }}</th><th>{{ t('settings.meaning') }}</th><th style="width:110px;">{{ t('settings.show') }}</th></tr></thead>
+        <tbody>
+          {% for g in glossary %}
+          <tr>
+            <td><b>{{ g.term_zh }}</b><div class="tiny muted">{{ g.term_en }}</div></td>
+            <td class="tiny">{{ g.body_zh }}</td>
+            <td>
+              <form method="post" action="/glossary/{{ g.key }}/toggle">
+                <button class="btn sm {{ 'ghost' if g.suppressed else 'subtle' }}" type="submit">
+                  {{ t('settings.hidden') if g.suppressed else t('settings.showing') }}
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var flash = document.getElementById('save-flash');
+  function say(msg, kind) {
+    if (!flash) return;
+    flash.className = 'notice ' + (kind || '');
+    flash.textContent = msg;
+    flash.classList.remove('hidden');
+    setTimeout(function () { flash.classList.add('hidden'); }, 4000);
+  }
+
+  function collect(scope) {
+    var items = {};
+    scope.querySelectorAll('[data-key]').forEach(function (el) {
+      var key = el.getAttribute('data-key');
+      if (el.type === 'checkbox') {
+        items[key] = el.checked;
+      } else if (el.type === 'number') {
+        var n = parseFloat(el.value);
+        items[key] = isNaN(n) ? 0 : n;
+      } else {
+        items[key] = el.value;
+      }
+    });
+    scope.querySelectorAll('[data-multi]').forEach(function (el) {
+      var key = el.getAttribute('data-multi');
+      if (!items[key]) items[key] = [];
+      if (el.checked) items[key].push(el.value);
+    });
+    return items;
+  }
+
+  document.querySelectorAll('[data-save]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var pane = btn.closest('[data-pane]');
+      var items = collect(pane);
+      fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: items })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          say(res.ok ? '已保存，共 ' + res.saved + ' 项。' : '保存失败：' + res.error, res.ok ? 'ok' : 'err');
+        });
+    });
+  });
+
+  var provider = document.getElementById('engine-provider');
+  function syncEngine() {
+    var v = provider.value;
+    document.getElementById('engine-llm').classList.toggle('hidden', v !== 'llm');
+    document.getElementById('engine-workbuddy').classList.toggle('hidden', v !== 'workbuddy');
+    document.getElementById('engine-rules').classList.toggle('hidden', v !== 'rules');
+  }
+  if (provider) { provider.addEventListener('change', syncEngine); syncEngine(); }
+
+  document.querySelectorAll('.src-toggle').forEach(function (el) {
+    el.addEventListener('change', function () {
+      var items = {};
+      document.querySelectorAll('.src-toggle').forEach(function (x) {
+        items[x.getAttribute('data-src')] = x.checked;
+      });
+      fetch('/api/datasources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: items })
+      }).then(function (r) { return r.json(); })
+        .then(function (res) {
+          say(res.ok ? '数据源已更新，立即生效。' : '更新失败', res.ok ? 'ok' : 'err');
+        });
+    });
+  });
+
+  document.querySelectorAll('[data-ch-save]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var key = btn.getAttribute('data-ch-save');
+      var payload = { key: key };
+      var enable = document.querySelector('.ch-enable[data-ch="' + key + '"]');
+      payload.enabled = !!(enable && enable.checked);
+      document.querySelectorAll('[data-ch-field="' + key + '"]').forEach(function (input) {
+        payload[input.getAttribute('data-field')] = input.value;
+      });
+      fetch('/api/notify/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function (r) { return r.json(); })
+        .then(function (res) { say(res.ok ? '已保存' : '保存失败', res.ok ? 'ok' : 'err'); });
+    });
+  });
+
+  document.querySelectorAll('[data-ch-test]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var key = btn.getAttribute('data-ch-test');
+      btn.disabled = true;
+      var original = btn.textContent;
+      btn.textContent = '发送中…';
+      fetch('/api/notify/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: key })
+      }).then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (res.ok) {
+            say('测试消息已发出，去微信/手机看看有没有收到。', 'ok');
+          } else {
+            var detail = (res.results && res.results[0] && res.results[0].error) || res.error || '未知错误';
+            say('发送失败：' + detail, 'err');
+          }
+        })
+        .finally(function () { btn.disabled = false; btn.textContent = original; });
+    });
+  });
+
+  var poolBtn = document.getElementById('refresh-pool');
+  if (poolBtn) {
+    poolBtn.addEventListener('click', function () {
+      poolBtn.disabled = true;
+      var msg = document.getElementById('pool-msg');
+      msg.textContent = '正在拉取候选池…';
+      fetch('/api/pool/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          msg.textContent = Object.keys(res.total || {}).map(function (k) {
+            return k + ' ' + res.total[k] + ' 只';
+          }).join('  ');
+        })
+        .finally(function () { poolBtn.disabled = false; });
+    });
+  }
+
+  var importBtn = document.getElementById('import-btn');
+  var importFile = document.getElementById('import-file');
+  if (importBtn && importFile) {
+    importBtn.addEventListener('click', function () { importFile.click(); });
+    importFile.addEventListener('change', function () {
+      var file = importFile.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        fetch('/api/backup/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: reader.result
+        }).then(function (r) { return r.json(); })
+          .then(function (res) {
+            say(res.ok ? '导入完成，写入 ' + res.rows + ' 行。' : '导入失败：' + res.error, res.ok ? 'ok' : 'err');
+          });
+      };
+      reader.readAsText(file);
+    });
+  }
+})();
+</script>
 {% endblock %}

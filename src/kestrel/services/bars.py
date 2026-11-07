@@ -83,3 +83,31 @@ async def get_bars(
         _upsert(conn, symbol_id, bars)
         conn.commit()
     return _rows(conn, symbol_id, limit)
+
+
+def cached_bars(conn: sqlite3.Connection, symbol_id: int, limit: int = 260) -> list[dict]:
+    return _rows(conn, symbol_id, limit)
+
+
+def is_stale(bars: list[dict]) -> bool:
+    if not bars:
+        return True
+    return str(date.today() - timedelta(days=4)) > str(bars[-1]["date"])
+
+
+async def fetch_only(market: str, code: str, limit: int = 260) -> list[dict]:
+    """Network fetch with no database access, safe to run concurrently."""
+    try:
+        return await fetch_daily(market, code, limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("bar fetch failed for %s:%s (%s)", market, code, exc)
+        return []
+
+
+def save_bars(conn: sqlite3.Connection, symbol_id: int, bars: list[dict]) -> None:
+    if bars:
+        _upsert(conn, symbol_id, bars)
+
+
+def valid_count(bars: list[dict]) -> int:
+    return len(bars)

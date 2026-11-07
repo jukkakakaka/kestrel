@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+{% block title %}{{ t('nav.advice') }} · {{ t('app.name') }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ t('adv.title') }}</h1>
+    <div class="sub">
+      {% if auto %}
+        {{ t('adv.auto_on', n=interval) }} ·
+        {% if next_run %}{{ t('adv.next') }} {{ next_run.strftime('%m-%d %H:%M') }} UTC{% endif %}
+      {% else %}
+        {{ t('adv.auto_off') }}
+      {% endif %}
+      · {{ t('adv.scope') }}：{{ t('adv.scope_' + universe) }}
+    </div>
+  </div>
+  <div class="page-actions">
+    <button class="btn ghost" id="run-now">
+      <span class="label">{{ t('adv.run') }}</span>
+    </button>
+  </div>
+</div>
+
+<div id="scan-feedback" class="notice hidden"></div>
+
+<div class="tabs" role="tablist">
+  <button class="active" data-tab="today">{{ t('adv.tab_today') }} ({{ recs|length }})</button>
+  <button data-tab="history">{{ t('adv.tab_history') }} ({{ history|length }})</button>
+  <button data-tab="scans">{{ t('adv.tab_scans') }} ({{ scans|length }})</button>
+</div>
+
+<div data-pane="today">
+  {% if recs %}
+    {% for r in recs %}
+    <article class="advice" data-rec="{{ r.id }}">
+      <header class="advice-head">
+        <span class="tag tag-{{ r.market|lower }}">{{ r.market }}</span>
+        <span class="sym"><a href="/stock/{{ r.market }}/{{ r.code }}">{{ r.name }}</a></span>
+        <span class="code">{{ r.code }}</span>
+        {% if r.status == 'active' %}
+          <span class="badge buy">{{ t('adv.action_buy') }}</span>
+        {% elif r.status == 'executed' %}
+          <span class="badge ok-badge">{{ t('adv.done') }}</span>
+        {% else %}
+          <span class="badge avoid">{{ t('adv.ignored') }}</span>
+        {% endif %}
+        <span class="spacer"></span>
+        {% if r.sector %}<span class="tag">{{ r.sector }}</span>{% endif %}
+        <span class="muted" style="font-size:12px;">
+          {{ t('strategy.' + r.strategy) }} · {{ t('adv.strength') }} {{ (r.confidence * 100) | round | int }}%
+        </span>
+      </header>
+
+      <div class="advice-verdict">{{ r.headline }}</div>
+
+      <div class="advice-figs">
+        <div><span class="k">{{ t('adv.entry') }}</span><span class="v">{{ r.entry_low | cur(r.currency) }} – {{ r.entry_high | cur(r.currency) }}</span></div>
+        <div><span class="k">{{ t('adv.stop') }}</span><span class="v down">{{ r.stop | cur(r.currency) }}</span></div>
+        <div><span class="k">{{ t('adv.target') }}</span><span class="v up">{{ r.target1 | cur(r.currency) }}</span></div>
+        <div><span class="k">{{ t('adv.qty') }}</span><span class="v">{{ r.qty }}</span></div>
+        <div><span class="k">{{ t('adv.rr') }}</span><span class="v">{{ '%.1f'|format(r.r_multiple) }} : 1</span></div>
+        <div><span class="k">{{ t('adv.risk') }}</span><span class="v down">{{ r.risk_amount | cur(r.currency) }}{% if r.currency != 'CNY' %}<small class="muted" style="font-weight:400;"> ≈ {{ r.risk_amount | cny(r.currency) }}</small>{% endif %}</span></div>
+      </div>
+
+      {% if ui.learning and r.learn_zh %}
+      <div class="advice-body">
+        <details open>
+          <summary>{{ t('adv.learn') }}</summary>
+          <div class="learn">
+            {% for line in r.learn_zh.split('\n') %}
+              {% if '：' in line %}
+                <h4>{{ line.split('：')[0] }}</h4>
+                <p>{{ line.split('：', 1)[1] }}</p>
+              {% elif line.strip() %}
+                <p>{{ line }}</p>
+              {% endif %}
+            {% endfor %}
+            <h4>{{ t('adv.learn_terms') }}</h4>
+            <p>
+              <span class="gloss" data-term="entry_zone">入场区间</span>、
+              <span class="gloss" data-term="stop_loss">止损</span>、
+              <span class="gloss" data-term="target">目标价</span>、
+              <span class="gloss" data-term="rr">盈亏比</span>、
+              <span class="gloss" data-term="position">仓位</span>
+              —— 鼠标停上去看解释。
+            </p>
+          </div>
+        </details>
+      </div>
+      {% endif %}
+
+      <footer class="advice-foot">
+        <span class="deadline">
+          {{ t('adv.deadline') }} {{ r.valid_until | when }} {{ t('adv.beijing') }}
+        </span>
+        {% if r.status == 'active' %}
+          <button class="btn sm" data-decide="executed" data-rec="{{ r.id }}">{{ t('adv.did_buy') }}</button>
+          <button class="btn sm ghost" data-decide="skipped" data-rec="{{ r.id }}">{{ t('adv.skip') }}</button>
+        {% elif r.status == 'executed' %}
+          <span class="badge ok-badge">{{ t('adv.done') }}{% if r.fill_price %} @ {{ r.fill_price | cur(r.currency) }}{% endif %}</span>
+          <button class="btn sm ghost" data-decide="skipped" data-rec="{{ r.id }}">{{ t('adv.undo') }}</button>
+        {% endif %}
+      </footer>
+    </article>
+    {% endfor %}
+  {% else %}
+  <div class="card">
+    <div class="empty">
+      <strong>{{ t('adv.empty_title') }}</strong>
+      {{ t('adv.empty') }}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<div data-pane="history" class="hidden">
+  {% if history %}
+  <section class="card">
+    <div class="card-body tight">
+      <table class="grid">
+        <thead>
+          <tr>
+            <th>{{ t('adv.col_time') }}</th>
+            <th>{{ t('adv.col_symbol') }}</th>
+            <th>{{ t('adv.col_action') }}</th>
+            <th class="num">{{ t('adv.entry') }}</th>
+            <th class="num">{{ t('adv.stop') }}</th>
+            <th class="num">{{ t('adv.target') }}</th>
+            <th>{{ t('adv.col_result') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in history %}
+          <tr>
+            <td class="mono muted">{{ h.created_at[:16] }}</td>
+            <td><a href="/stock/{{ h.market }}/{{ h.code }}">{{ h.name }}</a> <span class="mono muted">{{ h.code }}</span></td>
+            <td><span class="badge {{ 'buy' if h.action == 'buy' else 'wait' }}">{{ t('adv.action_' + h.action) }}</span></td>
+            <td class="num mono">{{ h.entry_low | cur(h.currency) }}</td>
+            <td class="num mono down">{{ h.stop | cur(h.currency) }}</td>
+            <td class="num mono up">{{ h.target1 | cur(h.currency) }}</td>
+            <td>
+              {% if h.status == 'executed' %}<span class="badge ok-badge">{{ t('adv.done') }}</span>
+              {% elif h.status == 'skipped' %}<span class="badge avoid">{{ t('adv.ignored') }}</span>
+              {% else %}<span class="muted">{{ t('adv.status_' + h.status) }}</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% else %}
+  <div class="card"><div class="empty"><strong>还没有历史</strong>建议被处理或过期后会出现在这里。</div></div>
+  {% endif %}
+</div>
+
+<div data-pane="scans" class="hidden">
+  {% if scans %}
+  <section class="card">
+    <div class="card-body tight">
+      <table class="grid">
+        <thead>
+          <tr>
+            <th>{{ t('adv.col_time') }}</th>
+            <th>{{ t('adv.col_trigger') }}</th>
+            <th class="num">{{ t('adv.col_scanned') }}</th>
+            <th class="num">{{ t('adv.col_signals') }}</th>
+            <th class="num">{{ t('adv.col_plans') }}</th>
+            <th class="num">{{ t('adv.col_took') }}</th>
+            <th>{{ t('adv.col_notes') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in scans %}
+          <tr>
+            <td class="mono muted">{{ (s.finished_at or s.started_at)[:16] }}</td>
+            <td>{{ s.trigger }}</td>
+            <td class="num mono">{{ s.scanned or 0 }}</td>
+            <td class="num mono">{{ s.signals or 0 }}</td>
+            <td class="num mono">{{ s.plans or 0 }}</td>
+            <td class="num mono muted">{{ s.duration_ms or 0 }} ms</td>
+            <td class="tiny muted">
+              {% if s.skipped %}{{ t('adv.n_skipped', n=s.skipped|length) }}{% endif %}
+              {% if s.rejected %}{{ t('adv.n_rejected', n=s.rejected|length) }}{% endif %}
+              {% if s.status != 'ok' %}<span class="up">{{ s.status }}</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% else %}
+  <div class="card"><div class="empty"><strong>还没扫描过</strong>点右上角「立即扫描」。</div></div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var btn = document.getElementById('run-now');
+  var box = document.getElementById('scan-feedback');
+
+  function flash(msg, kind) {
+    if (!box) return;
+    box.className = 'notice ' + (kind || '');
+    box.textContent = msg;
+  }
+
+  if (btn) {
+    btn.addEventListener('click', function () {
+      var label = btn.querySelector('.label');
+      var original = label.textContent;
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spin"></span><span class="label">正在扫描</span>';
+      flash('正在刷新候选池并拉取日线，第一次会比较慢…');
+
+      fetch('/api/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (!res.ok) {
+            flash('扫描失败：' + (res.error || '未知错误'), 'err');
+            return;
+          }
+          var msg = '看了 ' + res.scanned + ' 只（候选池共 ' + res.total + ' 只），'
+            + res.signals + ' 个信号，生成 ' + res.plans + ' 条建议，用时 '
+            + (res.duration_ms / 1000).toFixed(1) + ' 秒。';
+          if (res.plans > 0) {
+            flash(msg + ' 下面就是新的建议。', 'ok');
+            setTimeout(function () { location.reload(); }, 1200);
+          } else if (res.rejected && res.rejected.length) {
+            flash(msg + ' 有信号但被风控否决了，展开下面看原因。', 'warn');
+          } else {
+            flash(msg + ' 当前没有符合条件的标的，这是正常的——不是每次都有机会。', 'warn');
+          }
+        })
+        .catch(function (e) { flash('扫描失败：' + e, 'err'); })
+        .finally(function () {
+          btn.disabled = false;
+          btn.innerHTML = '<span class="label">' + original + '</span>';
+        });
+    });
+  }
+
+  document.querySelectorAll('[data-decide]').forEach(function (el) {
+    el.addEventListener('click', function () {
+      var id = el.getAttribute('data-rec');
+      var decision = el.getAttribute('data-decide');
+      var body = { decision: decision };
+      if (decision === 'executed') {
+        var fill = prompt('实际成交价是多少？（留空表示按建议价）');
+        if (fill === null) return;
+        if (fill.trim()) body.fill_price = parseFloat(fill);
+      }
+      el.disabled = true;
+      fetch('/advice/' + id + '/decide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }).then(function () { location.reload(); });
+    });
+  });
+})();
+</script>
+{% endblock %}

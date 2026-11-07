@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}{{ sym.name if sym else code }} · {{ t('app.name') }}{% endblock %}
+
+{% block content %}
+{% if not sym %}
+<div class="card"><div class="empty"><strong>没有这只标的</strong>{{ market }} {{ code }} 不在本地数据库里，先去行情页添加。</div></div>
+{% else %}
+
+<div class="page-head">
+  <div>
+    <h1>
+      <span class="tag tag-{{ sym.market|lower }}">{{ sym.market }}</span>
+      {{ sym.name }} <span class="mono muted" style="font-size:15px;">{{ sym.code }}</span>
+    </h1>
+    <div class="sub">
+      {{ status.name }} · {{ status.label }} · 当地 {{ status.local_time }}
+      {% if sym.exchange %} · {{ sym.exchange }}{% endif %}
+    </div>
+  </div>
+  <div class="page-actions">
+    <a class="btn ghost" href="{{ (quote.source if quote else 'eastmoney') | src_url(sym.market, sym.code) }}"
+       target="_blank" rel="noopener">{{ t('stock.external') }} ↗</a>
+    <a class="btn ghost" href="/">{{ t('action.back') }}</a>
+  </div>
+</div>
+
+{% if quote %}
+<div class="kpi">
+  <div class="k"><div class="v mono {% if quote.change_pct is not none %}{{ 'up' if quote.change_pct >= 0 else 'down' }}{% endif %}">{{ quote.price | money(3) }}</div><div class="l">{{ t('stock.price') }}</div></div>
+  <div class="k"><div class="v mono {% if quote.change_pct is not none %}{{ 'up' if quote.change_pct >= 0 else 'down' }}{% endif %}">{{ quote.change_pct | pct }}</div><div class="l">{{ t('stock.change') }}</div></div>
+  {% if ind %}
+  <div class="k"><div class="v mono">{{ '%0.1f'|format(ind.rsi14) }}</div><div class="l">{{ t('stock.rsi') }}</div></div>
+  <div class="k"><div class="v mono">{{ '%0.2f'|format(ind.atr_pct) }}%</div><div class="l">{{ t('stock.atr') }}</div></div>
+  {% endif %}
+</div>
+{% endif %}
+
+<section class="card">
+  <div class="card-head">
+    <h2>{{ t('stock.chart') }}</h2>
+    <span class="meta">{{ t('stock.chart_meta') }}</span>
+  </div>
+  <div class="card-body">
+    {% if chart and chart.bars %}
+    <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" width="100%" height="240" style="display:block;">
+      <defs>
+        <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--brand-2)" stop-opacity=".18"/>
+          <stop offset="100%" stop-color="var(--brand-2)" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <polygon points="{{ chart.area }}" fill="url(#fill)"/>
+      <polyline points="{{ chart.line }}" fill="none" stroke="var(--brand-2)" stroke-width="1.8"/>
+      {% for b in chart.bars %}
+      <line x1="{{ b.x }}" y1="{{ b.high }}" x2="{{ b.x }}" y2="{{ b.low }}"
+            stroke="{{ 'var(--up)' if b.up else 'var(--down)' }}" stroke-width="1" opacity=".55"/>
+      {% endfor %}
+    </svg>
+    <div class="hint" style="margin-top:8px;">
+      {{ t('stock.range') }}：{{ chart.min | round(2) }} – {{ chart.max | round(2) }}
+    </div>
+    {% else %}
+    <div class="empty">还没有日线数据。这个标的可能没有被扫描过。</div>
+    {% endif %}
+  </div>
+</section>
+
+{% if rec %}
+<section class="card">
+  <div class="card-head">
+    <h2>{{ t('stock.advice') }}</h2>
+    <a class="btn sm ghost" href="/advice">{{ t('stock.goto_advice') }}</a>
+  </div>
+  <div class="card-body">
+    <p style="font-size:13.5px;margin-bottom:12px;">{{ rec.headline }}</p>
+    <div class="advice-figs" style="border:1px solid var(--line);border-radius:10px;">
+      <div><span class="k">{{ t('adv.entry') }}</span><span class="v">{{ rec.entry_low | cur(rec.currency) }}</span></div>
+      <div><span class="k">{{ t('adv.stop') }}</span><span class="v down">{{ rec.stop | cur(rec.currency) }}</span></div>
+      <div><span class="k">{{ t('adv.target') }}</span><span class="v up">{{ rec.target1 | cur(rec.currency) }}</span></div>
+      <div><span class="k">{{ t('adv.qty') }}</span><span class="v">{{ rec.qty }}</span></div>
+      <div><span class="k">{{ t('adv.rr') }}</span><span class="v">{{ '%.1f'|format(rec.r_multiple) }}:1</span></div>
+      <div><span class="k">{{ t('adv.risk') }}</span><span class="v down">{{ rec.risk_amount | cur(rec.currency) }}</span></div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% if trade %}
+<section class="card">
+  <div class="card-head"><h2>{{ t('stock.position') }}</h2></div>
+  <div class="card-body">
+    <table class="grid">
+      <tr><td>{{ t('journal.qty') }}</td><td class="mono">{{ trade.qty }}</td>
+          <td>{{ t('journal.entry') }}</td><td class="mono">{{ trade.entry_price | money(3) }}</td>
+          <td>{{ t('journal.stop') }}</td><td class="mono down">{{ trade.stop_price | money(3) if trade.stop_price else '—' }}</td>
+          <td>{{ t('journal.since') }}</td><td class="mono">{{ trade.opened_at[:10] }}</td></tr>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if ind %}
+<section class="card">
+  <div class="card-head"><h2>{{ t('stock.indicators') }}</h2></div>
+  <div class="card-body">
+    <div class="grid g4">
+      <div class="field"><label>MA20</label><div class="mono">{{ '%0.2f'|format(ind.sma20) }}</div></div>
+      <div class="field"><label>MA60</label><div class="mono">{{ '%0.2f'|format(ind.sma60) }}</div></div>
+      <div class="field"><label>RSI14</label><div class="mono">{{ '%0.1f'|format(ind.rsi14) }}</div></div>
+      <div class="field"><label>ATR%</label><div class="mono">{{ '%0.2f'|format(ind.atr_pct) }}%</div></div>
+      <div class="field"><label>20 日高</label><div class="mono">{{ '%0.2f'|format(ind.high20) }}</div></div>
+      <div class="field"><label>20 日低</label><div class="mono">{{ '%0.2f'|format(ind.low20) }}</div></div>
+      <div class="field"><label>距 MA20</label><div class="mono">{{ '%0.2f'|format(ind.dist_sma20) }}%</div></div>
+      <div class="field"><label>量比</label><div class="mono">{{ '%0.2f'|format(ind.vol_ratio) }}</div></div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% endif %}
+{% endblock %}

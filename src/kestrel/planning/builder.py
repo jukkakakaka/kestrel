@@ -7,9 +7,7 @@ may adjust stop/targets/confidence, never the size.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
 from decimal import Decimal
-from zoneinfo import ZoneInfo
 
 from kestrel.fees.calculator import round_trip
 from kestrel.strategies.base import StrategyResult
@@ -55,17 +53,12 @@ def _round(value: Decimal, digits: str = "0.001") -> Decimal:
 def valid_until(market: str) -> str:
     """Plans expire at the close of the next tradable session in market time.
 
-    Rolling forward past weekends matters more than it looks: a plan built on a
-    Saturday used to expire at that Saturday's 16:00, so it died a few hours
-    later without a single session in which the user could act on it.
-    Holidays are not modelled - the worst case is one extra day of validity.
+    Delegates to the trading calendar so a Saturday plan survives to Monday
+    instead of dying a few hours after it was made.
     """
-    tz = ZoneInfo(TZ.get(market.upper(), "UTC"))
-    now = datetime.now(tz)
-    close = datetime.combine(now.date(), time(16, 0), tzinfo=tz)
-    while close <= now or close.weekday() >= 5:  # Sat=5, Sun=6
-        close = datetime.combine(close.date() + timedelta(days=1), time(16, 0), tzinfo=tz)
-    return close.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")
+    from kestrel.services.calendar import next_session_close
+
+    return next_session_close(market)
 
 
 def build_ex(

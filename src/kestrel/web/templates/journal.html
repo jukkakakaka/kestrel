@@ -2,6 +2,16 @@
 {% block title %}{{ t('nav.journal') }} · {{ t('app.name') }}{% endblock %}
 
 {% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ t('nav.journal') }}</h1>
+    <div class="sub">{{ t('journal.sub') }}</div>
+  </div>
+  <div class="page-actions">
+    <a class="btn ghost" href="/journal?tab=import">{{ t('journal.tab_import') }}</a>
+  </div>
+</div>
+
 <div class="kpi">
   <div class="k"><div class="v">{{ stats.open }}</div><div class="l">{{ t('j.open') }}</div></div>
   <div class="k"><div class="v">{{ '%.0f'|format(stats.win_rate * 100) }}%</div><div class="l">{{ t('j.win_rate') }}</div></div>
@@ -9,90 +19,201 @@
   <div class="k"><div class="v {{ 'up' if stats.net_cny >= 0 else 'down' }}">¥{{ '%.0f'|format(stats.net_cny) }}</div><div class="l">{{ t('j.net') }}</div></div>
 </div>
 
-<section class="panel">
-  <div class="panel-head">
-    <h1>{{ t('nav.journal') }}</h1>
-    <div class="actions"><a class="btn ghost" href="/ipo">{{ t('j.ipo_link') }}</a></div>
-  </div>
-
-  <form method="post" action="/journal/add" class="grid g5">
-    <div class="field"><label>{{ t('dash.market') }}</label>
-      <select name="market"><option value="HK">HK</option><option value="US">US</option><option value="CN">CN</option></select></div>
-    <div class="field"><label>{{ t('dash.code') }}</label><input name="code" required placeholder="00700"></div>
-    <div class="field"><label>{{ t('j.name') }}</label><input name="name" placeholder="腾讯控股"></div>
-    <div class="field"><label>{{ t('scan.qty') }}</label><input name="qty" type="number" step="1" required placeholder="100"></div>
-    <div class="field"><label>{{ t('j.entry') }}</label><input name="entry_price" type="number" step="0.001" required placeholder="400"></div>
-    <div class="field"><label>{{ t('scan.stop') }}</label><input name="stop_price" type="number" step="0.001" placeholder="380"></div>
-    <div class="field"><label>{{ t('scan.target') }}</label><input name="target_price" type="number" step="0.001" placeholder="440"></div>
-    <div class="field"><label>&nbsp;</label><button class="btn" style="width:100%">{{ t('action.add') }}</button></div>
-  </form>
-</section>
-
-<section class="panel" style="margin-top:16px">
-  <h2 class="sub-h">{{ t('j.open_positions') }}</h2>
-  {% if open_trades %}
-  <table class="grid">
-    <thead><tr><th>{{ t('dash.market') }}</th><th>{{ t('dash.code') }}</th><th class="num">{{ t('scan.qty') }}</th>
-      <th class="num">{{ t('j.entry') }}</th><th class="num">{{ t('scan.stop') }}</th><th class="num">R</th><th></th></tr></thead>
-    <tbody>
-    {% for tr in open_trades %}
-    <tr>
-      <td><span class="tag tag-{{ tr.market|lower }}">{{ tr.market }}</span></td>
-      <td class="mono"><strong>{{ tr.code }}</strong> <span class="muted">{{ tr.name }}</span></td>
-      <td class="num mono">{{ tr.qty }}</td>
-      <td class="num mono">{{ tr.entry_price|money(3) }}</td>
-      <td class="num mono down">{{ tr.stop_price|money(3) if tr.stop_price else '—' }}</td>
-      <td class="num mono">{% if tr.stop_price %}{{ ((tr.entry_price - tr.stop_price) / 1e6 * tr.qty)|round(1) }}{% else %}—{% endif %}</td>
-      <td>
-        <form method="post" action="/journal/{{ tr.id }}/close" class="close-form">
-          <input name="exit_price" type="number" step="0.001" placeholder="{{ t('j.exit') }}" required>
-          <input name="review" placeholder="{{ t('j.review') }}">
-          <label class="tiny"><input type="checkbox" name="rule_break"> {{ t('j.broke') }}</label>
-          <button class="btn sm">{{ t('j.close') }}</button>
-        </form>
-      </td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% else %}<p class="empty">{{ t('j.no_open') }}</p>{% endif %}
-</section>
-
-<section class="panel" style="margin-top:16px">
-  <h2 class="sub-h">{{ t('j.closed') }}</h2>
-  {% if closed %}
-  <table class="grid">
-    <thead><tr><th>{{ t('dash.code') }}</th><th class="num">{{ t('j.entry') }} → {{ t('j.exit') }}</th>
-      <th class="num">{{ t('j.pnl') }}</th><th class="num">%</th><th>{{ t('j.review') }}</th><th></th></tr></thead>
-    <tbody>
-    {% for tr in closed %}
-    {% set p = pnl(tr) %}
-    <tr>
-      <td class="mono"><strong>{{ tr.code }}</strong> {% if tr.rule_break %}<span class="tag tag-cn">{{ t('j.broke') }}</span>{% endif %}</td>
-      <td class="num mono">{{ tr.entry_price|money(3) }} → {{ tr.exit_price|money(3) }}</td>
-      <td class="num mono {{ 'up' if p.net >= 0 else 'down' }}">{{ '%.2f'|format(p.net) }}</td>
-      <td class="num mono {{ 'up' if p.ret >= 0 else 'down' }}">{{ '%.2f'|format(p.ret * 100) }}%</td>
-      <td class="tiny">{{ tr.review or '—' }}</td>
-      <td><form method="post" action="/journal/{{ tr.id }}/delete"><button class="link danger">×</button></form></td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% else %}<p class="empty">{{ t('j.no_closed') }}</p>{% endif %}
-</section>
-
-{% if stats.broken or stats.clean %}
-<div class="panel" style="margin-top:16px">
-  <h2 class="sub-h">{{ t('j.discipline') }}</h2>
-  <table class="grid">
-    <tbody>
-      <tr><td>{{ t('j.clean') }}</td><td class="num">{{ stats.clean }}</td>
-          <td class="num {{ 'up' if stats.clean_pnl >= 0 else 'down' }}">¥{{ '%.0f'|format(stats.clean_pnl) }}</td></tr>
-      <tr><td>{{ t('j.broken') }}</td><td class="num">{{ stats.broken }}</td>
-          <td class="num {{ 'up' if stats.broken_pnl >= 0 else 'down' }}">¥{{ '%.0f'|format(stats.broken_pnl) }}</td></tr>
-    </tbody>
-  </table>
-  <p class="hint">{{ t('j.discipline_hint') }}</p>
+<div class="tabs">
+  <button class="active" data-tab="positions">{{ t('journal.tab_positions') }} ({{ open_trades|length }})</button>
+  <button data-tab="closed">{{ t('journal.tab_closed') }} ({{ closed|length }})</button>
+  <button data-tab="import">{{ t('journal.tab_import') }}</button>
 </div>
-{% endif %}
+
+<div data-pane="positions">
+  <section class="card">
+    <div class="card-head"><h2>{{ t('j.open_positions') }}</h2></div>
+    <div class="card-body">
+      <form method="post" action="/journal/add" class="grid g4">
+        <div class="field"><label>{{ t('dash.market') }}</label>
+          <select name="market"><option value="HK">港股</option><option value="US">美股</option><option value="CN">A 股</option></select></div>
+        <div class="field"><label>{{ t('dash.code') }}</label><input name="code" required placeholder="00700"></div>
+        <div class="field"><label>{{ t('j.name') }}</label><input name="name" placeholder="腾讯控股"></div>
+        <div class="field"><label>{{ t('scan.qty') }}</label><input name="qty" type="number" step="1" required placeholder="100"></div>
+        <div class="field"><label>{{ t('j.entry') }}</label><input name="entry_price" type="number" step="0.001" required placeholder="400"></div>
+        <div class="field"><label>{{ t('scan.stop') }}</label><input name="stop_price" type="number" step="0.001" placeholder="380"></div>
+        <div class="field"><label>{{ t('scan.target') }}</label><input name="target_price" type="number" step="0.001" placeholder="440"></div>
+        <div class="field"><label>&nbsp;</label><button class="btn block">{{ t('action.add') }}</button></div>
+      </form>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>{{ t('j.open_positions') }}</h2></div>
+    {% if open_trades %}
+    <div class="card-body tight">
+      <table class="grid">
+        <thead><tr><th>{{ t('dash.market') }}</th><th>{{ t('dash.code') }}</th><th class="num">{{ t('scan.qty') }}</th>
+          <th class="num">{{ t('j.entry') }}</th><th class="num">{{ t('scan.stop') }}</th><th class="num">R</th><th></th></tr></thead>
+        <tbody>
+        {% for tr in open_trades %}
+        <tr>
+          <td><span class="tag tag-{{ tr.market|lower }}">{{ tr.market }}</span></td>
+          <td><a href="/stock/{{ tr.market }}/{{ tr.code }}">{{ tr.name or tr.code }}</a> <span class="mono muted">{{ tr.code }}</span></td>
+          <td class="num mono">{{ tr.qty }}</td>
+          <td class="num mono">{{ tr.entry_price|money(3) }}</td>
+          <td class="num mono down">{{ tr.stop_price|money(3) if tr.stop_price else '—' }}</td>
+          <td class="num mono">{% if tr.stop_price %}{{ ((tr.entry_price - tr.stop_price) / 1e6 * tr.qty)|round(1) }}{% else %}—{% endif %}</td>
+          <td>
+            <form method="post" action="/journal/{{ tr.id }}/close" class="close-form">
+              <input name="exit_price" type="number" step="0.001" placeholder="{{ t('j.exit') }}" required>
+              <input name="review" placeholder="{{ t('j.review') }}">
+              <label class="tiny"><input type="checkbox" name="rule_break"> {{ t('j.broke') }}</label>
+              <button class="btn sm">{{ t('j.close') }}</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}<div class="empty">{{ t('j.no_open') }}</div>{% endif %}
+  </section>
+</div>
+
+<div data-pane="closed" class="hidden">
+  <section class="card">
+    <div class="card-head"><h2>{{ t('j.closed') }}</h2></div>
+    {% if closed %}
+    <div class="card-body tight">
+      <table class="grid">
+        <thead><tr><th>{{ t('dash.code') }}</th><th class="num">{{ t('j.entry') }} → {{ t('j.exit') }}</th>
+          <th class="num">{{ t('j.pnl') }}</th><th class="num">%</th><th>{{ t('j.review') }}</th><th></th></tr></thead>
+        <tbody>
+        {% for tr in closed %}
+        {% set p = pnl(tr) %}
+        <tr>
+          <td><a href="/stock/{{ tr.market }}/{{ tr.code }}">{{ tr.name or tr.code }}</a>
+              {% if tr.rule_break %}<span class="tag tag-cn">{{ t('j.broke') }}</span>{% endif %}</td>
+          <td class="num mono">{{ tr.entry_price|money(3) }} → {{ tr.exit_price|money(3) }}</td>
+          <td class="num mono {{ 'up' if p.net >= 0 else 'down' }}">{{ '%.2f'|format(p.net) }}</td>
+          <td class="num mono {{ 'up' if p.ret >= 0 else 'down' }}">{{ '%.2f'|format(p.ret * 100) }}%</td>
+          <td class="tiny">{{ tr.review or '—' }}</td>
+          <td><form method="post" action="/journal/{{ tr.id }}/delete"><button class="btn danger sm">删</button></form></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}<div class="empty">{{ t('j.no_closed') }}</div>{% endif %}
+  </section>
+
+  {% if stats.broken or stats.clean %}
+  <section class="card">
+    <div class="card-head"><h2>{{ t('j.discipline') }}</h2></div>
+    <div class="card-body">
+      <table class="grid">
+        <tbody>
+          <tr><td>{{ t('j.clean') }}</td><td class="num">{{ stats.clean }}</td>
+              <td class="num {{ 'up' if stats.clean_pnl >= 0 else 'down' }}">¥{{ '%.0f'|format(stats.clean_pnl) }}</td></tr>
+          <tr><td>{{ t('j.broken') }}</td><td class="num">{{ stats.broken }}</td>
+              <td class="num {{ 'up' if stats.broken_pnl >= 0 else 'down' }}">¥{{ '%.0f'|format(stats.broken_pnl) }}</td></tr>
+        </tbody>
+      </table>
+      <p class="hint" style="margin-top:10px;">{{ t('j.discipline_hint') }}</p>
+    </div>
+  </section>
+  {% endif %}
+</div>
+
+<div data-pane="import" class="hidden">
+  <section class="card">
+    <div class="card-head"><h2>{{ t('journal.tab_import') }}</h2></div>
+    <div class="card-body">
+      <p class="hint" style="margin-bottom:12px;">{{ t('journal.import_intro') }}</p>
+      <textarea id="stmt-text" rows="7" style="width:100%;font:inherit;font-size:13px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);"
+                placeholder="{{ t('journal.import_placeholder') }}"></textarea>
+      <div class="row-actions">
+        <button class="btn ghost" id="parse-btn">{{ t('journal.parse') }}</button>
+        <button class="btn" id="import-btn" disabled>{{ t('journal.import') }}</button>
+        <span class="tiny" id="parse-msg"></span>
+      </div>
+
+      <div id="parse-result" class="hidden" style="margin-top:18px;">
+        <table class="grid" id="parse-table">
+          <thead><tr><th>市场</th><th>代码</th><th>方向</th><th class="num">数量</th><th class="num">价格</th><th>日期</th><th>提示</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <p class="tiny muted" style="margin-top:16px;">{{ t('journal.ocr_missing') }}</p>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var parsed = [];
+
+  var parseBtn = document.getElementById('parse-btn');
+  var importBtn = document.getElementById('import-btn');
+  var text = document.getElementById('stmt-text');
+  var msg = document.getElementById('parse-msg');
+  var box = document.getElementById('parse-result');
+  var tbody = box ? box.querySelector('tbody') : null;
+
+  if (!parseBtn) return;
+
+  parseBtn.addEventListener('click', function () {
+    if (!text.value.trim()) { msg.textContent = '先粘贴点东西。'; return; }
+    fetch('/api/journal/parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text.value })
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        parsed = res.rows || [];
+        tbody.innerHTML = '';
+        if (!parsed.length) {
+          box.classList.add('hidden');
+          importBtn.disabled = true;
+          msg.textContent = '没解析出任何成交行。';
+          return;
+        }
+        parsed.forEach(function (row) {
+          var tr = document.createElement('tr');
+          var side = row.side === 'buy' ? '买入' : '卖出';
+          tr.innerHTML =
+            '<td>' + row.market + '</td>' +
+            '<td class="mono">' + row.code + '</td>' +
+            '<td>' + side + '</td>' +
+            '<td class="num mono">' + row.qty + '</td>' +
+            '<td class="num mono">' + row.price + '</td>' +
+            '<td class="mono">' + row.trade_date + '</td>' +
+            '<td class="tiny ' + (row.problems.length ? 'up' : 'muted') + '">' +
+              (row.problems.length ? row.problems.join('、') : '正常') + '</td>';
+          tbody.appendChild(tr);
+        });
+        box.classList.remove('hidden');
+        importBtn.disabled = false;
+        msg.textContent = '解析出 ' + parsed.length + ' 条，核对无误后写入。';
+      });
+  });
+
+  importBtn.addEventListener('click', function () {
+    importBtn.disabled = true;
+    fetch('/api/journal/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows: parsed })
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.ok) {
+          msg.textContent = '已写入 ' + res.saved + ' 条，正在跳转…';
+          setTimeout(function () { location.href = '/journal'; }, 900);
+        } else {
+          msg.textContent = '写入失败：' + res.error;
+          importBtn.disabled = false;
+        }
+      });
+  });
+})();
+</script>
 {% endblock %}
