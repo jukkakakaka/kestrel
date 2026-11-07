@@ -94,6 +94,25 @@
   </div>
 </section>
 
+<section class="card" id="for-ai">
+  <div class="card-head">
+    <h2>让别的 AI 帮你写规则</h2>
+    <span class="meta">机器可读 · 也可以直接喂给任何模型</span>
+  </div>
+  <div class="card-body">
+    <p class="hint" style="margin-bottom:12px;">
+      下面这段话把指标、操作符、语义、硬约束和两个范例都写进去了，粘给任何模型就能让它生成一条合规规则。
+      生成后回到上面「写一条新规则」粘贴，保存时会自动编译和验证。
+    </p>
+    <div class="row-actions" style="margin-top:0;margin-bottom:12px;">
+      <button class="btn sm" id="copy-prompt">复制提示词</button>
+      <a class="btn sm ghost" href="/api/rules/schema" target="_blank">查看 JSON Schema</a>
+      <span class="tiny" id="copy-msg"></span>
+    </div>
+    <pre id="ai-prompt" class="mono" style="font-size:11.5px;line-height:1.7;background:var(--surface-2);padding:14px;border-radius:9px;overflow:auto;max-height:320px;white-space:pre-wrap;">{{ ai_prompt }}</pre>
+  </div>
+</section>
+
 <section class="card">
   <div class="card-head"><h2>规则怎么写</h2></div>
   <div class="card-body">
@@ -234,6 +253,25 @@
         headers: { 'Content-Type': 'application/json' },
         body: '{}'
       }).then(function () { location.reload(); });
+    });
+  }
+
+  var copyBtn = document.getElementById('copy-prompt');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', function () {
+      var text = document.getElementById('ai-prompt').textContent;
+      var done = function () { document.getElementById('copy-msg').textContent = '已复制'; };
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(done);
+      } else {
+        var area = document.createElement('textarea');
+        area.value = text;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand('copy');
+        document.body.removeChild(area);
+        done();
+      }
     });
   }
 

@@ -16,6 +16,9 @@
     </div>
   </div>
   <div class="page-actions">
+    <button class="btn ghost" id="analyse-btn" {% if not engine.configured %}title="先去设置里配模型"{% endif %}>
+      <span class="label">让 AI 分析</span>
+    </button>
     <button class="btn ghost" id="run-now">
       <span class="label">{{ t('adv.run') }}</span>
     </button>
@@ -23,6 +26,29 @@
 </div>
 
 <div id="scan-feedback" class="notice hidden"></div>
+
+{% if analyst_runs %}
+<section class="card">
+  <div class="card-head">
+    <h2>最近一次 AI 分析</h2>
+    <span class="meta">
+      {{ analyst_runs[0].provider }}{% if analyst_runs[0].model %} · {{ analyst_runs[0].model }}{% endif %}
+      · {{ (analyst_runs[0].finished_at or analyst_runs[0].started_at)[:16] }}
+    </span>
+  </div>
+  <div class="card-body">
+    {% if analyst_runs[0].error %}
+      <div class="notice err">失败：{{ analyst_runs[0].error }}</div>
+    {% else %}
+      <p class="hint">
+        看了 {{ analyst_runs[0].symbols }} 只候选，AI 给出 {{ analyst_runs[0].picks }} 条，
+        通过风控 {{ analyst_runs[0].accepted }} 条。
+        {% if analyst_runs[0].duration_ms %}耗时 {{ (analyst_runs[0].duration_ms / 1000) | round(1) }} 秒。{% endif %}
+      </p>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
 
 <div class="tabs" role="tablist">
   <button class="active" data-tab="today">{{ t('adv.tab_today') }} ({{ recs|length }})</button>
@@ -38,6 +64,11 @@
         <span class="tag tag-{{ r.market|lower }}">{{ r.market }}</span>
         <span class="sym"><a href="/stock/{{ r.market }}/{{ r.code }}">{{ r.name }}</a></span>
         <span class="code">{{ r.code }}</span>
+        {% if r.source == 'ai' %}
+          <span class="badge wait" title="{{ r.ai_thesis or '' }}">AI 分析</span>
+        {% else %}
+          <span class="badge avoid" title="由规则计算">{{ t('strategy.' + r.strategy) }}</span>
+        {% endif %}
         {% if r.status == 'active' %}
           <span class="badge buy">{{ t('adv.action_buy') }}</span>
         {% elif r.status == 'executed' %}
@@ -48,7 +79,11 @@
         <span class="spacer"></span>
         {% if r.sector %}<span class="tag">{{ r.sector }}</span>{% endif %}
         <span class="muted" style="font-size:12px;">
-          {{ t('strategy.' + r.strategy) }} · {{ t('adv.strength') }} {{ (r.confidence * 100) | round | int }}%
+          {% if r.source == 'ai' %}
+            {{ r.ai_model or 'AI' }} · 信心 {{ r.ai_confidence or 0 }}
+          {% else %}
+            {{ t('adv.strength') }} {{ (r.confidence * 100) | round | int }}%
+          {% endif %}
         </span>
       </header>
 
@@ -135,7 +170,10 @@
           <tr>
             <td class="mono muted">{{ h.created_at[:16] }}</td>
             <td><a href="/stock/{{ h.market }}/{{ h.code }}">{{ h.name }}</a> <span class="mono muted">{{ h.code }}</span></td>
-            <td><span class="badge {{ 'buy' if h.action == 'buy' else 'wait' }}">{{ t('adv.action_' + h.action) }}</span></td>
+            <td>
+              <span class="badge {{ 'buy' if h.action == 'buy' else 'wait' }}">{{ t('adv.action_' + h.action) }}</span>
+              {% if h.source == 'ai' %}<span class="tiny muted">AI</span>{% else %}<span class="tiny muted">规则</span>{% endif %}
+            </td>
             <td class="num mono">{{ h.entry_low | cur(h.currency) }}</td>
             <td class="num mono down">{{ h.stop | cur(h.currency) }}</td>
             <td class="num mono up">{{ h.target1 | cur(h.currency) }}</td>
@@ -244,6 +282,45 @@
         .finally(function () {
           btn.disabled = false;
           btn.innerHTML = '<span class="label">' + original + '</span>';
+        });
+    });
+  }
+
+  var analyseBtn = document.getElementById('analyse-btn');
+  if (analyseBtn) {
+    analyseBtn.addEventListener('click', function () {
+      var label = analyseBtn.querySelector('.label');
+      analyseBtn.disabled = true;
+      analyseBtn.innerHTML = '<span class="spin"></span><span class="label">AI 分析中</span>';
+      flash('正在把候选股和指标交给模型，可能需要几十秒…');
+
+      fetch('/api/analyse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (!res.ok) {
+            flash('AI 分析失败：' + (res.error || '未知错误'), 'err');
+            return;
+          }
+          var msg = 'AI 看了 ' + res.candidates + ' 只，提出 ' + res.picks
+            + ' 条，通过风控 ' + res.accepted + ' 条。';
+          if (res.rejected && res.rejected.length) {
+            msg += ' 被拒绝：' + res.rejected.map(function (x) {
+              return (x.code || '?') + '（' + x.reason + '）';
+            }).join('；');
+          }
+          if (res.market_view) { msg += ' AI 的看法：' + res.market_view; }
+          if (res.pass_reason) { msg += ' 不选的理由：' + res.pass_reason; }
+          flash(msg, res.accepted ? 'ok' : 'warn');
+          if (res.accepted) { setTimeout(function () { location.reload(); }, 2200); }
+        })
+        .catch(function (e) { flash('AI 分析失败：' + e, 'err'); })
+        .finally(function () {
+          analyseBtn.disabled = false;
+          analyseBtn.innerHTML = '<span class="label">让 AI 分析</span>';
         });
     });
   }

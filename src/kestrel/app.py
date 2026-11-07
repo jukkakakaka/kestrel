@@ -452,6 +452,7 @@ def create_app() -> FastAPI:
 
     @app.get("/advice", response_class=HTMLResponse)
     async def advice_page(request: Request):
+        from kestrel.services import analyst as analyst_service
         from kestrel.services import config as config_service
         from kestrel.services import scan as scan_service
 
@@ -468,8 +469,17 @@ def create_app() -> FastAPI:
                 "learning": bool(config_service.get(conn, "ui.learning_mode", True)),
                 "glossary": bool(config_service.get(conn, "ui.glossary", True)),
             }
+            engine = {
+                "provider": str(config_service.get(conn, "agent.provider", "rules")),
+                "model": str(config_service.get(conn, "agent.model", "") or ""),
+                "configured": bool(
+                    config_service.get(conn, "agent.base_url", "")
+                    and config_service.get(conn, "agent.model", "")
+                ),
+            }
         finally:
             conn.close()
+        engine_info = engine
 
         next_run = None
         if auto and last and last.get("finished_at"):
@@ -498,6 +508,8 @@ def create_app() -> FastAPI:
                 universe=universe,
                 history=scan_service.history(20),
                 scans=scan_service.recent_scans(6),
+                analyst_runs=analyst_service.recent_runs(3),
+                engine=engine_info,
             ),
         )
 
@@ -1152,18 +1164,50 @@ def create_app() -> FastAPI:
         markets = [market.upper()] if market else ["CN", "HK", "US"]
         return {"ok": True, "items": universe_service.pool_symbols(markets, limit)}
 
+    # ---------------------------------------------------------------- analyst
+
+    @app.post("/api/analyse", response_class=JSONResponse)
+    async def api_analyse(request: Request):
+        from kestrel.services import analyst
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        markets = (body or {}).get("markets")
+        limit = int((body or {}).get("limit") or 40)
+        return await analyst.analyse(markets=markets, limit=limit)
+
+    @app.get("/api/analyst/runs", response_class=JSONResponse)
+    async def api_analyst_runs():
+        from kestrel.services import analyst
+
+        return {"ok": True, "runs": analyst.recent_runs(10)}
+
     # ---------------------------------------------------------------- rules
 
     @app.get("/rules", response_class=HTMLResponse)
     async def rules_page(request: Request):
         from kestrel.services import rules as rule_service
+        from kestrel.strategies.schema import prompt_for_ai
         from kestrel.strategies.spec import FIELDS
 
         return templates.TemplateResponse(
             request=request,
             name="rules.html",
-            context=_ctx(request, rules=rule_service.all_rules(), fields=sorted(FIELDS)),
+            context=_ctx(
+                request,
+                rules=rule_service.all_rules(),
+                fields=sorted(FIELDS),
+                ai_prompt=prompt_for_ai(),
+            ),
         )
+
+    @app.get("/api/rules/schema", response_class=JSONResponse)
+    async def api_rules_schema():
+        from kestrel.strategies.schema import schema_bundle
+
+        return schema_bundle()
 
     @app.post("/api/rules/save", response_class=JSONResponse)
     async def api_rule_save(request: Request):
