@@ -15,6 +15,21 @@
 
 <div id="rule-flash" class="notice hidden"></div>
 
+{% if engine.is_ai %}
+<div class="notice warn">
+  <strong>注意：当前建议由 {{ engine.label }} 产生，规则不直接参与选股。</strong>
+  这些规则仍在为 AI 提供「哪些路已经被验证过」的参考，也是你理解行情结构的工具；
+  可以随时在下方单独验证任何一条规则的实测表现。想改回让规则直接出建议：
+  <a href="/settings#engine">设置 → 分析引擎</a>。
+</div>
+{% else %}
+<div class="notice">
+  <strong>当前建议由规则引擎产生。</strong>
+  每条规则都按同一套流程验证：三折滚动、和「同样入场但不设止损」比较，
+  测下来没有超额收益的会被自动停用（仍保留，可随时重测）。
+</div>
+{% endif %}
+
 <div class="notice">
   判定看的是<strong>超额收益</strong>：同样的入场点、同样的持有天数、不设止损，能跑赢它才算有本事。
   只看「赚了多少钱」没有意义——牛市里随便买都赚。
@@ -69,30 +84,29 @@
 </article>
 {% endfor %}
 
-<section class="card" id="editor" style="display:none;">
-  <div class="card-head">
+<dialog id="editor" class="modal">
+  <form method="dialog" class="modal-head">
     <h2 id="editor-title">规则编辑器</h2>
-    <span class="meta">保存前会先编译，写错立刻告诉你错在哪</span>
-  </div>
-  <div class="card-body">
+    <button class="btn ghost sm" value="cancel">关闭</button>
+  </form>
+  <div class="modal-body">
     <div class="grid g2" style="margin-bottom:12px;">
       <div class="field"><label>名称</label><input id="ed-name" placeholder="我的回踩规则"></div>
       <div class="field"><label>备注（为什么这么设计）</label><input id="ed-note" placeholder=""></div>
     </div>
     <div class="field">
       <label>规则 JSON</label>
-      <textarea id="ed-spec" rows="16" style="font-family:var(--mono);font-size:12.5px;line-height:1.7;padding:12px;width:100%;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);color:var(--ink);"></textarea>
-      <span class="help">
-        可用指标：<span class="mono" style="font-size:11px;">{{ fields | join(', ') }}</span>
-      </span>
+      <textarea id="ed-spec" rows="18" spellcheck="false"
+        style="font-family:var(--mono);font-size:12.5px;line-height:1.7;padding:12px;width:100%;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);color:var(--ink);resize:vertical;"></textarea>
+      <span class="help">可用指标：<span class="mono" style="font-size:11px;">{{ fields | join(', ') }}</span></span>
     </div>
-    <div class="row-actions">
-      <button class="btn" id="ed-save">保存并验证</button>
-      <button class="btn ghost" id="ed-cancel">取消</button>
-      <span class="tiny" id="ed-msg"></span>
-    </div>
+    <p class="tiny" id="ed-msg" style="min-height:18px;"></p>
   </div>
-</section>
+  <div class="modal-foot">
+    <button class="btn ghost" id="ed-cancel">取消</button>
+    <button class="btn" id="ed-save">保存并验证</button>
+  </div>
+</dialog>
 
 <section class="card" id="for-ai">
   <div class="card-head">
@@ -177,12 +191,16 @@
     };
     ta.value = JSON.stringify(spec, null, 2);
     msg.textContent = '';
-    editor.style.display = '';
-    editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (typeof editor.showModal === 'function') { editor.showModal(); }
+    else { editor.setAttribute('open', ''); }
   }
 
   document.getElementById('new-rule').addEventListener('click', function () { openEditor(null); });
-  document.getElementById('ed-cancel').addEventListener('click', function () { editor.style.display = 'none'; });
+  function closeEditor() {
+    if (typeof editor.close === 'function') { editor.close(); }
+    else { editor.removeAttribute('open'); }
+  }
+  document.getElementById('ed-cancel').addEventListener('click', closeEditor);
 
   document.querySelectorAll('[data-edit]').forEach(function (b) {
     b.addEventListener('click', function () { openEditor(META[b.getAttribute('data-edit')]); });

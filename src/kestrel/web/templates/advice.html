@@ -6,23 +6,38 @@
   <div>
     <h1>{{ t('adv.title') }}</h1>
     <div class="sub">
-      {% if auto %}
-        {{ t('adv.auto_on', n=interval) }} ·
-        {% if next_run %}{{ t('adv.next') }} {{ next_run.strftime('%m-%d %H:%M') }} UTC{% endif %}
+      {% if engine.is_ai %}
+        <span class="badge wait">AI 决策</span>
       {% else %}
-        {{ t('adv.auto_off') }}
+        <span class="badge avoid">规则计算</span>
       {% endif %}
-      · {{ t('adv.scope') }}：{{ t('adv.scope_' + universe) }}
+      {{ engine.label }}{% if engine.model and engine.model != 'workbuddy' %} · {{ engine.model }}{% endif %}
+      {% if engine.pending %} · 队列 {{ engine.pending }} 条待处理{% endif %}
+      {% if not auto %} · 自动运行已关闭（每次都要手动点）{% endif %}
     </div>
   </div>
   <div class="page-actions">
-    <button class="btn ghost" id="analyse-btn" {% if not engine.configured %}title="先去设置里配模型"{% endif %}>
-      <span class="label">让 AI 分析</span>
-    </button>
-    <button class="btn ghost" id="run-now">
-      <span class="label">{{ t('adv.run') }}</span>
+    <button class="btn" id="run-btn"
+            {% if not engine.configured %}disabled{% endif %}
+            data-engine="{{ engine.provider }}">
+      <span class="label">{{ engine.button }}</span>
     </button>
   </div>
+</div>
+
+<div class="engine-banner">
+  {{ engine.banner }}
+  {% if engine.reason %}<br><strong class="up">{{ engine.reason }}</strong>{% endif %}
+  {% if engine.is_ai %}
+    <br><span class="muted">
+      规则引擎仍在后台为 AI 提供「哪些路已经被验证过」的参考，但不再直接产出建议。
+      想单独检验规则，去 <a href="/sim">快速模拟</a>；想改规则，去 <a href="/rules">规则</a>。
+    </span>
+  {% else %}
+    <br><span class="muted">
+      想换成 AI 选股：<a href="/settings#engine">设置 → 分析引擎</a>。
+    </span>
+  {% endif %}
 </div>
 
 <div id="scan-feedback" class="notice hidden"></div>
@@ -238,24 +253,29 @@
 {% block scripts %}
 <script>
 (function () {
-  var btn = document.getElementById('run-now');
+  var runBtn = document.getElementById('run-btn');
   var box = document.getElementById('scan-feedback');
 
-  function flash(msg, kind) {
+  function flash(msg, kind, sticky) {
     if (!box) return;
     box.className = 'notice ' + (kind || '');
     box.textContent = msg;
+    box.classList.remove('hidden');
+    if (!sticky) { setTimeout(function () { box.classList.add('hidden'); }, 9000); }
   }
 
-  if (btn) {
-    btn.addEventListener('click', function () {
-      var label = btn.querySelector('.label');
-      var original = label.textContent;
-      btn.disabled = true;
-      btn.innerHTML = '<span class="spin"></span><span class="label">正在扫描</span>';
-      flash('正在刷新候选池并拉取日线，第一次会比较慢…');
+  if (runBtn) {
+    runBtn.addEventListener('click', function () {
+      var engine = runBtn.getAttribute('data-engine');
+      var isAi = engine !== 'rules';
+      runBtn.disabled = true;
+      runBtn.innerHTML = '<span class="spin"></span><span class="label">'
+        + (isAi ? '分析中' : '扫描中') + '</span>';
+      flash(isAi
+        ? '正在把候选股、指标和账户信息交给分析引擎…'
+        : '正在按规则扫描候选池…', '', true);
 
-      fetch('/api/scan', {
+      fetch('/api/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}'
@@ -263,70 +283,31 @@
         .then(function (r) { return r.json(); })
         .then(function (res) {
           if (!res.ok) {
-            flash('扫描失败：' + (res.error || '未知错误'), 'err');
-            return;
-          }
-          var msg = '看了 ' + res.scanned + ' 只（候选池共 ' + res.total + ' 只），'
-            + res.signals + ' 个信号，生成 ' + res.plans + ' 条建议，用时 '
-            + (res.duration_ms / 1000).toFixed(1) + ' 秒。';
-          if (res.plans > 0) {
-            flash(msg + ' 下面就是新的建议。', 'ok');
-            setTimeout(function () { location.reload(); }, 1200);
-          } else if (res.rejected && res.rejected.length) {
-            flash(msg + ' 有信号但被风控否决了，展开下面看原因。', 'warn');
-          } else {
-            flash(msg + ' 当前没有符合条件的标的，这是正常的——不是每次都有机会。', 'warn');
-          }
-        })
-        .catch(function (e) { flash('扫描失败：' + e, 'err'); })
-        .finally(function () {
-          btn.disabled = false;
-          btn.innerHTML = '<span class="label">' + original + '</span>';
-        });
-    });
-  }
-
-  var analyseBtn = document.getElementById('analyse-btn');
-  if (analyseBtn) {
-    analyseBtn.addEventListener('click', function () {
-      var label = analyseBtn.querySelector('.label');
-      analyseBtn.disabled = true;
-      analyseBtn.innerHTML = '<span class="spin"></span><span class="label">AI 分析中</span>';
-      flash('正在把候选股和指标交给模型，可能需要几十秒…');
-
-      fetch('/api/analyse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{}'
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (res) {
-          if (!res.ok) {
-            flash('AI 分析失败：' + (res.error || '未知错误'), 'err');
+            flash('失败：' + (res.error || '未知错误'), 'err', true);
             return;
           }
           if (res.pending) {
             flash(res.message + ' 处理完刷新这一页就能看到。', 'warn', true);
             return;
           }
-          var msg = 'AI 看了 ' + res.candidates + ' 只，提出 ' + res.picks
-            + ' 条，通过风控 ' + res.accepted + ' 条。';
+          var msg = '看了 ' + (res.total || res.candidates || 0) + ' 只，'
+            + (res.plans !== undefined ? res.plans + ' 条建议' : res.accepted + ' 条通过风控');
           if (res.rejected && res.rejected.length) {
-            msg += ' 被拒绝：' + res.rejected.map(function (x) {
-              return (x.code || '?') + '（' + x.reason + '）';
-            }).join('；');
+            msg += '，' + res.rejected.length + ' 条被拒（' + res.rejected.map(function (x) {
+              return (x.code || '?') + '：' + x.reason;
+            }).join('；') + '）';
           }
-          if (res.market_view) { msg += ' AI 的看法：' + res.market_view; }
-          if (res.pass_reason) { msg += ' 不选的理由：' + res.pass_reason; }
-          flash(msg, res.accepted ? 'ok' : 'warn');
-          if (res.accepted) { setTimeout(function () { location.reload(); }, 2200); }
+          if (res.market_view) { msg += ' 判断：' + res.market_view; }
+          flash(msg, (res.plans || res.accepted) ? 'ok' : 'warn', true);
+          if (res.plans || res.accepted) { setTimeout(function () { location.reload(); }, 1600); }
         })
-        .catch(function (e) { flash('AI 分析失败：' + e, 'err'); })
+        .catch(function (e) { flash('失败：' + e, 'err', true); })
         .finally(function () {
-          analyseBtn.disabled = false;
-          analyseBtn.innerHTML = '<span class="label">让 AI 分析</span>';
+          runBtn.disabled = false;
+          runBtn.innerHTML = '<span class="label">' + runBtn.getAttribute('data-label') + '</span>';
         });
     });
+    runBtn.setAttribute('data-label', runBtn.querySelector('.label').textContent);
   }
 
   document.querySelectorAll('[data-decide]').forEach(function (el) {

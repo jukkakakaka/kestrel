@@ -474,17 +474,11 @@ def create_app() -> FastAPI:
                 "learning": bool(config_service.get(conn, "ui.learning_mode", True)),
                 "glossary": bool(config_service.get(conn, "ui.glossary", True)),
             }
-            engine = {
-                "provider": str(config_service.get(conn, "agent.provider", "rules")),
-                "model": str(config_service.get(conn, "agent.model", "") or ""),
-                "configured": bool(
-                    config_service.get(conn, "agent.base_url", "")
-                    and config_service.get(conn, "agent.model", "")
-                ),
-            }
         finally:
             conn.close()
-        engine_info = engine
+        from kestrel.services import engine as engine_service
+
+        engine_info = engine_service.status()
 
         next_run = None
         if auto and last and last.get("finished_at"):
@@ -917,9 +911,10 @@ def create_app() -> FastAPI:
 
     def _sim_context(request: Request, **extra):
         from kestrel.services import backtest
+        from kestrel.services import engine as engine_service
         from kestrel.services import rules as rule_service
 
-        report = {"ok": True, "rules": rule_service.all_rules()}
+        report = {"ok": True, "rules": rule_service.all_rules(), "engine": engine_service.status()}
         report["symbols"] = len({r["code"] for r in report["rules"]})
         validated = [r for r in report["rules"] if r.get("validation")]
         report["validated"] = len(validated)
@@ -957,6 +952,7 @@ def create_app() -> FastAPI:
             error=None,
             form={"symbol": (symbols[0]["market"] + "/" + symbols[0]["code"]) if symbols else "",
                   "strategy": "trend_pullback"},
+            engine=report.get("engine"),
             **extra,
         )
 
@@ -1171,17 +1167,34 @@ def create_app() -> FastAPI:
 
     # ---------------------------------------------------------------- analyst
 
-    @app.post("/api/analyse", response_class=JSONResponse)
-    async def api_analyse(request: Request):
-        from kestrel.services import analyst
+    @app.post("/api/run", response_class=JSONResponse)
+    async def api_run(request: Request):
+        """The only way advice is produced. The engine comes from settings."""
+        from kestrel.services import engine as engine_service
 
         try:
             body = await request.json()
         except Exception:
             body = {}
         markets = (body or {}).get("markets")
-        limit = int((body or {}).get("limit") or 40)
-        return await analyst.analyse(markets=markets, limit=limit)
+        return await engine_service.run(markets=markets)
+
+    @app.post("/api/analyse", response_class=JSONResponse)
+    async def api_analyse(request: Request):
+        """Deprecated alias kept so old shortcuts keep working."""
+        from kestrel.services import engine as engine_service
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        return await engine_service.run(markets=(body or {}).get("markets"))
+
+    @app.get("/api/engine", response_class=JSONResponse)
+    async def api_engine():
+        from kestrel.services import engine as engine_service
+
+        return {"ok": True, "engine": engine_service.status().as_dict()}
 
     @app.post("/api/analyst/ingest", response_class=JSONResponse)
     async def api_analyst_ingest():
@@ -1220,6 +1233,7 @@ def create_app() -> FastAPI:
 
     @app.get("/rules", response_class=HTMLResponse)
     async def rules_page(request: Request):
+        from kestrel.services import engine as engine_service
         from kestrel.services import rules as rule_service
         from kestrel.strategies.schema import prompt_for_ai
         from kestrel.strategies.spec import FIELDS
@@ -1232,6 +1246,7 @@ def create_app() -> FastAPI:
                 rules=rule_service.all_rules(),
                 fields=sorted(FIELDS),
                 ai_prompt=prompt_for_ai(),
+                engine=engine_service.status(),
             ),
         )
 

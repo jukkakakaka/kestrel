@@ -76,7 +76,10 @@
 
 <div data-pane="scan" class="hidden">
   <section class="card">
-    <div class="card-head"><h2>{{ t('settings.scan_title') }}</h2></div>
+    <div class="card-head">
+      <h2>{{ t('settings.scan_title') }}</h2>
+      <span class="meta">这些设置对规则引擎和 AI 都生效</span>
+    </div>
     <div class="card-body">
       <div class="setting-row">
         <div class="setting-label">
@@ -266,7 +269,7 @@
         </div>
         <div class="setting-input">
           <select data-key="agent.provider" id="engine-provider">
-            {% for key, label in [('rules','纯规则（免费，推荐）'), ('llm','大模型 API'), ('workbuddy','WorkBuddy 文件桥')] %}
+            {% for key, label in [('rules','规则引擎（本地计算，免费）'), ('llm','大模型（AI 选股，同步）'), ('workbuddy','WorkBuddy（AI 选股，排队异步）')] %}
             <option value="{{ key }}" {% if values.get('agent.provider','rules') == key %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
@@ -287,20 +290,33 @@
           <div class="setting-input"><input data-key="agent.api_key" type="password" value="{{ values.get('agent.api_key','') }}"></div>
         </div>
         <div class="setting-row">
-          <div class="setting-label"><span>每天最多调用</span><small>超过就自动降级回纯规则，防止把额度烧穿。</small></div>
+          <div class="setting-label"><span>每天最多调用</span><small>超过上限就停止调用并明确提示，不会偷偷退回规则引擎——否则你以为在用 AI，其实在用规则。</small></div>
           <div class="setting-input"><input data-key="agent.daily_budget" type="number" value="{{ values.get('agent.daily_budget', 200) }}"></div>
         </div>
       </div>
 
       <div id="engine-workbuddy" class="hidden">
         <div class="notice">
-          WorkBuddy 模式不需要接口地址：程序把任务写成文件放在 outbox，WorkBuddy 的定时任务读取后分析，再把结果写回来。
-          在「推送」页配好 outbox 目录，并在 WorkBuddy 里建一个定时任务即可。
+          <strong>WorkBuddy 模式不需要接口地址，也不需要 API Key。</strong>
+          程序把任务（候选股指标 + 你的账户 + 规则实测结果）写进队列，WorkBuddy 的定时任务读取后给出建议，
+          结果自动回填到操作建议页。因为是排队处理，点完之后要等一轮（通常几分钟），不是即时出结果。
+          <br><br>
+          队列位置：<span class="mono" style="font-size:12px;">data/bridge/pending</span>
+          ，处理结果写到 <span class="mono" style="font-size:12px;">data/bridge/done</span>。
+          需要先在 WorkBuddy 里建一个定时任务来消费队列。
         </div>
       </div>
 
       <div id="engine-rules" class="notice">
-        纯规则模式不调用任何外部接口，所有判断都在本地算完。对 1 万本金的账户，这已经够用，也不需要任何 API Key。
+        <strong>规则引擎</strong>：条件全部写死在规则里，可复现、可审计，每条规则都经过历史验证，
+        测下来没有优势的会自动停用。不调用任何外部接口，不花钱，秒出结果。
+        缺点是它只能表达你事先想到的情形——遇到规则没覆盖的行情，它不会告诉你。
+      </div>
+
+      <div id="engine-llm-note" class="notice hidden">
+        <strong>大模型模式</strong>：把候选股的完整指标、你的账户约束、以及每条规则的实测结果一起交给模型，
+        由它自己选股、给理由、定止损目标。本地代码会逐项校验它的数字，不合格的直接丢弃并记录原因；
+        仓位永远由本地按风险预算计算，不采用模型给的数量。点一次约消耗几万 token。
       </div>
 
       <div class="row-actions"><button class="btn" data-save>{{ t('action.save') }}</button></div>
@@ -444,6 +460,7 @@
     document.getElementById('engine-llm').classList.toggle('hidden', v !== 'llm');
     document.getElementById('engine-workbuddy').classList.toggle('hidden', v !== 'workbuddy');
     document.getElementById('engine-rules').classList.toggle('hidden', v !== 'rules');
+    document.getElementById('engine-llm-note').classList.toggle('hidden', v !== 'llm');
   }
   if (provider) { provider.addEventListener('change', syncEngine); syncEngine(); }
 

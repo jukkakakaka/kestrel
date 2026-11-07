@@ -4,97 +4,145 @@
 
 # Kestrel 隼
 
-**Watch. Then strike.** — a self-hosted, multi-market stock scanner and trading journal that keeps you honest.
+**Watch. Then strike.** — 自托管的多市场选股与交易台账，对你自己诚实。
 
-[中文说明](README.zh-CN.md) · [Architecture](docs/architecture.md) · [Fee model](docs/fee-model.md) · [Notifications](docs/notifications.md) · [Contributing](CONTRIBUTING.md)
+[中文说明](README.zh-CN.md) · [Architecture](docs/architecture.md) · [Fee model](docs/fee-model.md) · [Notifications](docs/notifications.md) · [UI map](docs/ui-map.md) · [Engines](docs/engines.md)
 
 ---
 
 ## Why
 
-Most tools help you *find* trades. Kestrel also asks the harder question afterwards:
-**did you actually follow your plan?**
+多数工具帮你**找到**交易。Kestrel 还追问一个更难的问题：**你照着计划做了吗？**
 
-Every recommendation carries an entry zone, a stop, a target, a position size, the
-fees, the break-even price and an expiry. It is pushed to your phone with a one-tap
-receipt page. Tap "executed", type the real fill, and the deviation between the plan and
-your behaviour becomes a number you can improve.
+每条建议都带入场区间、止损、目标、股数、费用、保本价和截止时间，推到手机上有一个一键回执页。
+点「已执行」、填真实成交价，计划与行为之间的偏差就变成一个可以改进的数字。
+
+但更重要的是：**它会告诉你自己的规则到底赚不赚钱**。三条内置规则在全池历史上跑下来，
+两条是亏钱的——它们被自动停用了，而不是继续给你发建议。
+
+## 两个引擎，一个开关
+
+建议由谁产生，在 **设置 → 分析引擎** 里选，全站只有一个入口：
+
+| 模式 | 谁做决定 | 速度 | 成本 |
+|---|---|---|---|
+| **规则引擎** | 固定条件比较指标 | 秒级 | 免费 |
+| **大模型**（OpenAI 兼容） | 模型看指标、账户和规则实测结果后自己选股 | 几十秒 | 按 token |
+| **WorkBuddy** | 同上，但走文件队列，由 WorkBuddy 定时任务处理 | 排队，分钟级 | 免费 |
+
+AI 模式下 **仓位和风控永远由本地代码强制执行**：模型给的股数一律不采纳，
+止损必须落在 1.5%–15%，盈亏比至少 1.5，代码必须在候选列表里，不合格的建议直接丢弃并记录原因。
+
+每张建议卡片都标明来源：`AI 分析 · deepseek-chat · 信心 68` 或 `趋势回踩 · 信号强度 80%`。
 
 ## What it does
 
-- **Multi-market** — A-shares, Hong Kong and US, each with its own switch.
-- **Plans, not tips** — entry zone, ATR stop, 2R/3R targets, lot-aware sizing, fee-aware
-  break-even, same-day expiry, and a plan is refused when one lot already breaks the
-  risk budget.
-- **Three rule strategies** — trend pullback, 20-day breakout, mean reversion. All
-  explainable, all backtestable with the same code path.
-- **Receipt loop** — signed short links over ntfy, webhook, WeClawBot or SMTP; the fill
-  and its deviation are stored next to the plan.
-- **Journal** — trades, positions, IPO ledger, discipline stats that compare the trades
-  where you followed the rules with the ones where you did not.
-- **Cost engine** — exchange rules plus ten broker plans (Fosun, uSmart, ZA Bank, Futu,
-  Tiger, IBKR, generic A-share), editable in the UI.
-- **Learning mode** — plain-language explanations under every plan, plus a glossary with
-  per-term "don't show again".
-- **Bilingual, dark mode, local-first** — zh-CN/en, auto/light/dark, SQLite on your disk,
-  no account, no telemetry.
+- **多市场** — A 股、港股、美股，各自独立开关。
+- **选股而不是体检** — 从每个市场按市值取候选池（默认 30 只），再从里面挑；
+  不是只看你已有的持仓。
+- **规则是数据** — 一条规则就是一个 JSON：条件、加分项、止损和目标引用。
+  在 `/rules` 页写、改、复制，保存前会编译，写错指标名会直接报出来。
+- **规则必须证明自己** — 三折滚动 + 公平基准（同样的入场、同样的持有天数、不设止损）。
+  没有超额收益的自动停用，但保留历史，换个行情可以重测。
+- **建议可执行** — 入场区间、ATR 止损、2R 目标、按每手取整、费用、保本价、截止时间；
+  买一手就超风险预算的会直接拒绝，并说明是资金量问题。
+- **回执闭环** — 签名短链，ntfy / webhook / WeClawBot / SMTP；成交与偏差落库。
+- **交易台账** — 持仓、已平仓、打新；粘贴成交单自动解析；纪律统计对比守规矩和破规矩的收益。
+- **成本引擎** — 交易所规则 + 十个券商套餐（复星、盈立、众安、富途、老虎、IBKR、A 股通用），UI 里可增删改。
+- **学习模式** — 每条建议展开「这是什么 / 为什么现在 / 亏了怎么办」，术语库 40 条白话解释，可逐条不再提示。
+- **交易日历** — 三市场交易时段、节假日、开市状态、下一个可交易收盘。
+- **双语、暗色、本地优先** — zh-CN/en，auto/light/dark，SQLite 落盘，无账号无遥测。
 
 ## Quick start
 
 ```bash
-# requires Python 3.11+
+# 需要 Python 3.11+
 uv sync --extra desktop
 uv run kestrel init
-uv run kestrel desktop      # native window + tray
-# or
+uv run kestrel desktop      # 原生窗口 + 托盘
+# 或者
 uv run kestrel serve        # http://127.0.0.1:8000
 ```
 
-Container:
+容器：
 
 ```bash
-docker compose up           # http://127.0.0.1:8000, data in a named volume
+docker compose up           # http://127.0.0.1:8000，数据在命名卷里
 ```
 
 ## Screens
 
-| Page | What it answers |
+| 页面 | 回答什么问题 |
 |---|---|
-| Dashboard | What am I watching, and what is it doing right now? |
-| Scan | What is worth doing today, at what price, with what risk? |
-| Journal | What did I actually do, and what did it cost me? |
-| Backtest | Does this rule survive history, or only today? |
-| Fees | How much must the price rise before I break even? |
-| Settings | Capital, risk, broker, notifications, agents, glossary |
+| 行情 | 我在看什么，现在什么价？点代码进个股详情 |
+| 操作建议 | 今天该做什么，在什么价位，承担多少风险？（引擎由设置决定） |
+| 交易台账 | 我实际做了什么，代价是什么？ |
+| 成本计算 | 涨多少才算真的回本？ |
+| 快速模拟 | 这套规则放进历史里会亏成什么样？ |
+| 规则 | 规则长什么样，哪条真的有效？ |
+| 设置 | 本金、风险、市场、数据源、分析引擎、推送、备份、术语 |
 
-## How a scan works
+## 一次分析怎么走
 
 ```
-watchlist → bars (cached) → indicators → strategies → best signal
-          → plan (size from risk budget, never from conviction)
-          → recommendation + receipt token → notification outbox → phone
+候选池（按市值）→ 日线缓存 → 指标 → ┬→ 规则引擎：条件全满足 → 分高的排前
+                                   └→ AI：简报（指标+账户+规则实测）→ 模型选股 → 本地风控校验 → 仓位本地计算
+                                                        ↓
+                              建议（带来源标记）→ 回执短链 → 推送 → 手机确认
 ```
 
-If nothing qualifies, the scan stores a diagnostic (`near`, `blocked_lot`) and the UI
-says why. It will not invent a trade.
+没有符合条件的标的时，页面会说明原因（差多少分、为什么被否决），不会硬凑一条。
+
+## Writing a rule
+
+```json
+{
+  "code": "pullback_quiet",
+  "name": "缩量回踩",
+  "conditions": [
+    {"left": "ma_stack", "op": "is_true"},
+    {"left": "dist_sma20", "op": "between", "value": [-2.5, 0.5]},
+    {"left": "rsi14", "op": "between", "value": [40, 62]}
+  ],
+  "score": {"base": 0.45, "bonus": [
+    {"when": {"left": "vol_ratio", "op": "<", "right": 1.15}, "add": 0.2}
+  ]},
+  "stop":   {"field": "low20"},
+  "target": {"field": "high20"}
+}
+```
+
+`/api/rules/schema` 返回完整 JSON Schema、26 个指标释义和操作符语义；
+`/rules` 页有一个「复制提示词」按钮，把这段喂给任何模型，它就能写出合规规则。
 
 ## Data sources
 
-Eastmoney (primary, JSON), Tencent and Sina (GBK fallbacks) behind a circuit-breaker
-chain; Yahoo for daily bars when the others fail. All are public, unofficial endpoints —
-expect breakage, which is why every parser is isolated and fixture-tested.
+| 来源 | 费用 | 市场 | 说明 |
+|---|---|---|---|
+| 东方财富 | 免费 | 三市场 | 主源，JSON |
+| 腾讯 / 新浪 | 免费 | 三市场 | GBK 兜底 |
+| Yahoo | 免费，无需 Key | 三市场 | 实时快照 |
+| Finnhub / Alpha Vantage / Twelve Data / Polygon / Tiingo | 有免费额度 | 视服务商 | 填 Key 即用 |
+
+三个内置源可在设置里开关，关掉一个自动降级到下一个。也可以加任意自定义源：
+URL 模板（`{code}` `{market}` `{symbol}` `{yf_symbol}` `{key}`）+ JSON 点路径 + 换算系数，
+保存前有「先测一下」按钮，先看到解析出来的数字再入库。
 
 ## Status
 
-Feature-complete for the v1 scope: scanning, planning, delivery, receipts, journal,
-fees, backtest, desktop shell, container. Not in scope: order execution, social features,
-a native mobile app, intraday strategies.
+已完成：选股、计划、推送、回执、台账、费用、快速模拟、规则引擎与验证、AI 分析、交易日历、备份、桌面壳、容器。
+
+已知边界：
+- 日线级别。没有盘口、资金流、财报预期，所以**选股优势接近于零**——
+  `/rules` 页的实测数据会如实告诉你这一点。
+- WorkBuddy 模式是异步队列，最细调度为每小时一次。
+- OCR 未实现（本机无引擎），成交单走粘贴文本。
 
 ## Disclaimer
 
-Kestrel is a research and learning tool. It does **not** provide investment advice, does
-not predict prices, and does not place orders. Nothing it produces is a recommendation to
-buy or sell any security. Markets carry risk; you are responsible for your own decisions.
+Kestrel 是研究与学习工具。它**不提供投资建议、不预测价格、不下单**。
+它产出的任何内容都不构成买卖任何证券的要约。市场有风险，决策由你负责。
+它最有用的功能可能是告诉你「现在不该动」。
 
 ## License
 

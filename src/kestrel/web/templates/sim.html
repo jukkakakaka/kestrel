@@ -12,7 +12,16 @@
   </div>
 </div>
 
-<div class="notice">{{ t('sim.what') }}</div>
+<div class="notice">{{ t("sim.what") }}</div>
+
+{% if engine.is_ai %}
+<div class="notice warn">
+  <strong>提醒：当前建议由 {{ engine.label }} 产生，这个页面不参与选股。</strong>
+  这里的作用是检验规则到底有没有用——AI 模式下的建议不受这些规则约束，
+  但它们的实测结果会作为参考资料交给 AI。想看 AI 的判断，去
+  <a href="/advice">操作建议</a>。
+</div>
+{% endif %}
 
 {% if report and report.rules %}
 <div id="edge-report">

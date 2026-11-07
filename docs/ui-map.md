@@ -1,21 +1,30 @@
 # UI map
 
-| Route | Nav label | Purpose |
+| Route | Nav | Purpose |
 |---|---|---|
-| `/` | 行情 | Live quotes, market open/closed state, links to the original source page |
-| `/stock/{market}/{code}` | — | One symbol: 60-day chart, indicators, current plan, open position |
-| `/advice` | 操作建议 | Today's plans as verbs (buy / watch), history, scan log |
-| `/journal` | 交易台账 | Positions, closed trades, statement import |
-| `/cost` | 成本计算 | Round-trip fees, break-even price, editable broker plans |
-| `/sim` | 模拟盘 | Backtest a strategy on history |
-| `/settings` | 设置 | Capital, markets, data sources, engine, alerts, backup, glossary |
+| `/` | 行情 | 实时行情、开市状态、来源链接 |
+| `/stock/{market}/{code}` | — | 个股：60 日走势、指标、当前建议、持仓 |
+| `/advice` | 操作建议 | 唯一产生建议的地方；引擎由设置决定，卡片标注来源 |
+| `/journal` | 交易台账 | 持仓、已平仓、打新、成交单导入 |
+| `/cost` | 成本计算 | 来回费用、保本价、可编辑的券商套餐 |
+| `/sim` | 快速模拟 | 检验规则在历史上的表现（与选股解耦） |
+| `/rules` | 规则 | 规则列表、逐折实测、编辑器、给 AI 的提示词 |
+| `/settings` | 设置 | 通用 / 市场与选股 / 数据源 / 分析引擎 / 推送 / 备份 / 术语 |
 
-Old paths redirect: `/scan` → `/advice`, `/fees` → `/cost`, `/backtest` → `/sim`.
+旧路径重定向：`/scan` → `/advice`，`/fees` → `/cost`，`/backtest` → `/sim`。
 
-## Why the names changed
+## 页面随引擎变化
 
-- **看板 → 行情**: a dashboard implies decisions; this page only shows prices.
-- **扫描 → 操作建议**: "scan" describes the machine's action. The user needs to know
-  what to *do*, so the page is named after the output, and every card carries a verb.
-- **回测 → 模拟盘**: backtesting is one technique; the page simulates a strategy over
-  history, which is what a beginner actually wants to know.
+引擎是全局开关，页面会说明自己在这个开关下的角色：
+
+- **`/advice`** — 副标题显示 `AI 决策 · <模型>` 或 `规则计算`；按钮文字跟着变；
+  顶部有一条横幅解释当前谁在决策、另一个引擎还在起什么作用。
+- **`/rules`** — AI 模式下提示「规则不直接参与选股，但仍为 AI 提供已验证路径的参考」。
+- **`/sim`** — AI 模式下提示「本页不参与选股，只用于检验规则是否有用」。
+
+## 命名理由
+
+- **看板 → 行情**：看板暗示决策，这个页面只显示价格。
+- **扫描 → 操作建议**：扫描是机器的动作；用户要的是「该做什么」，所以按输出命名，每张卡片带动词。
+- **回测 → 快速模拟**：回测是一种技术，这个页面做的是把规则放进历史里重放，
+  且明确「这里不撮合下单」，避免和券商的虚拟盘混淆。
