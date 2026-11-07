@@ -36,7 +36,7 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
 
         symbols = conn.execute(
             """
-            SELECT s.id, s.market, s.code, s.name, s.currency, s.lot_size
+            SELECT s.id, s.market, s.code, s.name, s.currency, s.lot_size, s.secid
             FROM watchlist w JOIN symbol s ON s.id = w.symbol_id
             WHERE s.market IN ({})
             """.format(",".join("?" * len(markets))),
@@ -46,13 +46,31 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
         strategies = registry()
         scanned = signals = plans = 0
         near: list[dict] = []
+        skipped: list[dict] = []
+        rejected: list[dict] = []
         blocked_lot = 0
 
         for sym in symbols:
+            # A symbol with no resolved secid never loaded data. Try once here so
+            # a bad row fixes itself instead of silently vanishing from the scan.
+            if not sym["secid"]:
+                fixed = await _try_resolve(conn, sym)
+                if fixed:
+                    sym = dict(sym, secid=fixed)
+
             bars = await bars_service.get_bars(
                 conn, sym["id"], sym["market"], sym["code"], limit=260
             )
             if len(bars) < 40:
+                skipped.append(
+                    {
+                        "market": sym["market"],
+                        "code": sym["code"],
+                        "name": sym["name"],
+                        "reason": "no_bars" if not bars else "short_history",
+                        "bars": len(bars),
+                    }
+                )
                 continue
             scanned += 1
             ind = compute(Series.from_bars(bars))
@@ -84,7 +102,7 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
             signals += 1
 
             broker = settings_map.get(f"broker.{sym['market']}")
-            plan = builder.build(
+            plan, why = builder.build_ex(
                 market=sym["market"],
                 code=sym["code"],
                 name=sym["name"],
@@ -96,7 +114,16 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
                 broker=broker,
             )
             if plan is None:
-                blocked_lot += 1
+                if why == "lot_too_big":
+                    blocked_lot += 1
+                rejected.append(
+                    {
+                        "market": sym["market"],
+                        "code": sym["code"],
+                        "name": sym["name"],
+                        "reason": why or "unknown",
+                    }
+                )
                 continue
             plans += 1
 
@@ -104,6 +131,13 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
                 "INSERT INTO signal (scan_id, symbol_id, strategy, score, reasons)"
                 " VALUES (?,?,?,?,?)",
                 (scan_id, sym["id"], best.code, best.score, json.dumps(best.reasons)),
+            )
+            # A newer plan replaces the older one for the same symbol, otherwise
+            # repeated scans stack duplicate cards on the page.
+            conn.execute(
+                "UPDATE recommendation SET status='superseded'"
+                " WHERE symbol_id=? AND status='active'",
+                (sym["id"],),
             )
             cur = conn.execute(
                 """
@@ -143,10 +177,13 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
         summary = {
             "ok": True,
             "scan_id": scan_id,
+            "total": len(symbols),
             "scanned": scanned,
             "signals": signals,
             "plans": plans,
             "blocked_lot": blocked_lot,
+            "skipped": skipped,
+            "rejected": rejected,
             "near": sorted(near, key=lambda x: -x["score"])[:5],
             "min_score": min_score,
         }
@@ -166,6 +203,30 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
         return {"ok": False, "error": str(exc)}
     finally:
         conn.close()
+
+
+async def _try_resolve(conn, sym) -> str | None:
+    """Attempt to resolve an unresolved symbol and persist the secid."""
+    from kestrel.datasources import resolve as resolver
+
+    try:
+        found = await resolver.resolve(sym["code"], sym["market"])
+    except Exception as exc:  # noqa: BLE001 - never let lookup break a scan
+        log.warning("resolve failed for %s:%s — %s", sym["market"], sym["code"], exc)
+        return None
+    if found is None:
+        conn.execute(
+            "UPDATE symbol SET resolve_error=? WHERE id=?", ("not_found", sym["id"])
+        )
+        conn.commit()
+        return None
+    conn.execute(
+        "UPDATE symbol SET secid=?, name=?, exchange=?, resolve_error=NULL,"
+        " updated_at=datetime('now') WHERE id=?",
+        (found.secid, found.name, found.exchange, sym["id"]),
+    )
+    conn.commit()
+    return found.secid
 
 
 def active_recommendations(limit: int = 50) -> list[dict]:

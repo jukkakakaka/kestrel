@@ -97,6 +97,65 @@ def cmd_desktop(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(_args: argparse.Namespace) -> int:
+    """Re-resolve every watchlist symbol whose secid is missing or stale."""
+    import asyncio
+
+    from kestrel.datasources import resolve as resolver
+    from kestrel.db.engine import connect
+    from kestrel.db.migrate import init_db
+
+    settings.ensure_dirs()
+    init_db()
+
+    conn = connect()
+    try:
+        rows = conn.execute(
+            "SELECT id, market, code, name, secid FROM symbol ORDER BY market, code"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        print("自选是空的。先在网页里加几只，再跑这个命令。")
+        return 0
+
+    print(f"检查 {len(rows)} 只标的…\n")
+    ok = fixed = bad = 0
+
+    async def run() -> None:
+        nonlocal ok, fixed, bad
+        for row in rows:
+            label = f'{row["market"]:2s} {row["code"]:8s} {row["name"]}'
+            if row["secid"]:
+                ok += 1
+                print(f"  ok    {label}  → {row['secid']}")
+                continue
+            found = await resolver.resolve(row["code"], row["market"])
+            if found is None:
+                bad += 1
+                print(f"  坏     {label}  → 找不到，建议删掉重加")
+                continue
+            conn2 = connect()
+            try:
+                conn2.execute(
+                    "UPDATE symbol SET secid=?, name=?, exchange=?, resolve_error=NULL"
+                    " WHERE id=?",
+                    (found.secid, found.name, found.exchange, row["id"]),
+                )
+                conn2.commit()
+            finally:
+                conn2.close()
+            fixed += 1
+            print(f"  修复   {label}  → {found.secid} ({found.name})")
+
+    asyncio.run(run())
+    print(f"\n可用 {ok} 只，修复 {fixed} 只，无法识别 {bad} 只。")
+    if bad:
+        print("无法识别的标的会让扫描跳过它们。删掉重加，或换成正确的代码。")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="kestrel", description="Kestrel trading companion")
     parser.add_argument("--version", action="version", version=f"kestrel {__version__}")
@@ -106,6 +165,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_init = sub.add_parser("init", help="initialise the local database")
     p_init.set_defaults(func=cmd_init)
+
+    p_doc = sub.add_parser("doctor", help="re-resolve watchlist symbols that fail to load")
+    p_doc.set_defaults(func=cmd_doctor)
 
     p_serve = sub.add_parser("serve", help="run the local web server")
     p_serve.add_argument("--host", default=settings.host)

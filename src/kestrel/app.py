@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from kestrel import __version__
 from kestrel.core.clock import iso
 from kestrel.core.money import to_micro
-from kestrel.datasources.base import guess_market, normalize_code
+from kestrel.datasources.base import guess_market
 from kestrel.datasources.chain import QuoteChain, default_chain
 from kestrel.db.engine import connect
 from kestrel.db.migrate import init_db
@@ -33,6 +33,9 @@ def _templates():
 
     tpl = Jinja2Templates(directory=str(TEMPLATES))
     tpl.env.filters["money"] = _money
+    tpl.env.filters["cur"] = _cur
+    tpl.env.filters["cny"] = _cny
+    tpl.env.filters["when"] = _when
     return tpl
 
 
@@ -43,6 +46,49 @@ def _money(value, places: int = 2) -> str:
         return f"{int(value) / 1_000_000:,.{places}f}"
     except (TypeError, ValueError):
         return str(value)
+
+
+_CUR_SYMBOL = {"CNY": "¥", "HKD": "HK$", "USD": "US$"}
+_FX_CNY = {"CNY": 1.0, "HKD": 0.92, "USD": 7.1}
+
+
+def _cur(value, currency: str = "CNY", places: int = 2) -> str:
+    """Format a micro-unit amount with its currency, e.g. US$341.34."""
+    if value is None:
+        return "—"
+    try:
+        amount = int(value) / 1_000_000
+    except (TypeError, ValueError):
+        return str(value)
+    return f"{_CUR_SYMBOL.get(currency, '¥')}{amount:,.{places}f}"
+
+
+def _cny(value, currency: str = "CNY") -> str:
+    """Same amount converted to CNY, for the 'what does this cost me' line."""
+    if value is None:
+        return "—"
+    try:
+        amount = int(value) / 1_000_000
+    except (TypeError, ValueError):
+        return "—"
+    rate = _FX_CNY.get(currency, 1.0)
+    return f"¥{amount * rate:,.0f}"
+
+
+def _when(iso_text: str) -> str:
+    """Render an ISO timestamp in Beijing time, which is what the user reads."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    if not iso_text:
+        return "—"
+    try:
+        moment = datetime.fromisoformat(str(iso_text))
+    except ValueError:
+        return str(iso_text)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=ZoneInfo("UTC"))
+    return moment.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%m-%d %H:%M")
 
 
 def _persist_quotes(quotes) -> None:
@@ -99,6 +145,11 @@ async def lifespan(app: FastAPI):
     settings.ensure_dirs()
     init_db()
     app.state.chain = default_chain()
+    from kestrel.datasources import resolve as resolver
+
+    seeded = resolver.load_from_db()
+    if seeded:
+        log.info("resolved %d cached security ids", seeded)
     from kestrel.scheduler import service as scheduler_service
 
     app.state.scheduler = scheduler_service.start()
@@ -157,20 +208,63 @@ def create_app() -> FastAPI:
 
     @app.post("/api/watchlist", response_class=JSONResponse)
     async def add_symbol(request: Request):
+        from kestrel.datasources import resolve as resolver
+
         body = await request.json()
         raw = str(body.get("code", "")).strip()
         if not raw:
             return JSONResponse({"ok": False, "error": "empty code"}, status_code=400)
-        market = (body.get("market") or guess_market(raw)).upper()
-        code = normalize_code(market, raw)
+        if any(ch.isspace() for ch in raw):
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": f"「{raw}」里有空格。股票代码不能带空格——如果你是想输入名称，请用中文名，比如「腾讯」。",
+                },
+                status_code=400,
+            )
+        asked = (body.get("market") or "").upper() or None
+        if not asked:
+            # let the resolver pick the market when the user did not say
+            asked = None
+
+        found = await resolver.resolve(raw, asked)
+        if found is None:
+            hint_market = asked or guess_market(raw)
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": f"找不到「{raw}」这只标的。检查代码是否正确，或换一个市场再试。",
+                    "hint": f"已尝试市场：{hint_market}",
+                },
+                status_code=404,
+            )
+
+        market, code = found.market, found.code
         conn = connect()
         try:
             conn.execute("BEGIN")
             conn.execute(
-                "INSERT OR IGNORE INTO symbol (market, code, name, currency, lot_size)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (market, code, code, {"CN": "CNY", "HK": "HKD", "US": "USD"}[market],
-                 100 if market in ("HK", "CN") else 1),
+                """
+                INSERT INTO symbol (market, code, name, currency, lot_size, exchange, secid,
+                                    resolve_error, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, datetime('now'))
+                ON CONFLICT(market, code) DO UPDATE SET
+                    name        = excluded.name,
+                    exchange    = excluded.exchange,
+                    secid       = excluded.secid,
+                    resolve_error = NULL,
+                    is_active   = 1,
+                    updated_at  = datetime('now')
+                """,
+                (
+                    market,
+                    code,
+                    found.name,
+                    found.currency,
+                    found.lot_size,
+                    found.exchange,
+                    found.secid,
+                ),
             )
             sid = conn.execute(
                 "SELECT id FROM symbol WHERE market=? AND code=?", (market, code)
@@ -186,7 +280,13 @@ def create_app() -> FastAPI:
             raise
         finally:
             conn.close()
-        return {"ok": True, "market": market, "code": code}
+        return {
+            "ok": True,
+            "market": market,
+            "code": code,
+            "name": found.name,
+            "secid": found.secid,
+        }
 
     @app.delete("/api/watchlist/{market}/{code}", response_class=JSONResponse)
     async def remove_symbol(market: str, code: str):

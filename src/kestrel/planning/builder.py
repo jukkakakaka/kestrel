@@ -18,6 +18,9 @@ FX = {"CNY": Decimal("1"), "HKD": Decimal("0.92"), "USD": Decimal("7.1")}
 CURRENCY = {"CN": "CNY", "HK": "HKD", "US": "USD"}
 TZ = {"CN": "Asia/Shanghai", "HK": "Asia/Hong_Kong", "US": "America/New_York"}
 
+# Minimum reward-to-risk a plan must offer before it is worth showing.
+MIN_R = Decimal("1.5")
+
 
 @dataclass(slots=True)
 class Plan:
@@ -58,7 +61,7 @@ def valid_until(market: str) -> str:
     return close.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")
 
 
-def build(
+def build_ex(
     *,
     market: str,
     code: str,
@@ -69,11 +72,17 @@ def build(
     risk_pct: float,
     lot_size: int,
     broker: str | None,
-) -> Plan | None:
+) -> tuple[Plan | None, str | None]:
+    """Build a plan, or explain why the setup is not worth taking.
+
+    The reason matters: "one lot already exceeds the risk budget" is a capital
+    problem the user can fix, while "reward too small" is the setup's fault.
+    Treating them the same made the scan report look like it was broken.
+    """
     last = Decimal(str(ind.get("last") or 0))
     atr = Decimal(str(ind.get("atr14") or 0))
     if last <= 0:
-        return None
+        return None, "no_price"
 
     currency = CURRENCY.get(market.upper(), "CNY")
     fx = FX.get(currency, Decimal("1"))
@@ -94,22 +103,24 @@ def build(
 
     risk_per_share = entry_low - stop
     if risk_per_share <= 0:
-        return None
+        return None, "bad_stop"
     stop_pct = risk_per_share / entry_low
-    if not (Decimal("0.015") <= stop_pct <= Decimal("0.15")):
-        return None
+    if stop_pct > Decimal("0.15"):
+        return None, "stop_too_wide"
+    if stop_pct < Decimal("0.015"):
+        return None, "stop_too_tight"
 
     risk_budget = capital_local * Decimal(str(risk_pct)) / Decimal("100")
     raw_qty = risk_budget / risk_per_share
     lot = max(1, int(lot_size))
     qty = int(raw_qty // lot) * lot
     if qty <= 0:
-        return None
+        return None, "lot_too_big"
 
     # Never let one position exceed 35% of capital.
     cap_qty = int((capital_local * Decimal("0.35")) / entry_low // lot) * lot
     if cap_qty <= 0:
-        return None
+        return None, "lot_too_big"
     qty = min(qty, cap_qty)
 
     cost = entry_low * qty
@@ -120,14 +131,21 @@ def build(
     target2 = entry_low + risk_per_share * Decimal("3")
     if signal.target_hint:
         hint_t = Decimal(str(signal.target_hint))
-        if hint_t > entry_high:
+        # A hint is only worth taking when it still pays for the risk. The 20-day
+        # high sits just above a pullback entry more often than not, and using it
+        # blindly produced plans with a 0.9:1 reward-to-risk.
+        hint_r = (hint_t - entry_low) / risk_per_share if risk_per_share > 0 else Decimal("0")
+        if hint_t > entry_high and hint_r >= MIN_R:
             target1 = hint_t
             target2 = entry_low + (hint_t - entry_low) * Decimal("1.5")
 
     r_multiple = float((target1 - entry_low) / risk_per_share)
+    if r_multiple < 1.5:
+        # Below 1.5:1 the fees and the odds both stop working. No plan beats a bad plan.
+        return None, "low_reward"
     confidence = round(min(0.95, 0.35 + signal.score * 0.6), 3)
 
-    return Plan(
+    plan = Plan(
         market=market.upper(),
         code=code,
         name=name,
@@ -151,6 +169,13 @@ def build(
         explain_zh=_explain_zh(market, name, signal, entry_low, stop, target1, qty, risk_pct),
         explain_en=_explain_en(market, name, signal, entry_low, stop, target1, qty, risk_pct),
     )
+    return plan, None
+
+
+def build(**kwargs) -> Plan | None:
+    """Plan-only wrapper for callers that do not need the rejection reason."""
+    plan, _reason = build_ex(**kwargs)
+    return plan
 
 
 REASON_ZH = {

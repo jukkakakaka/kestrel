@@ -22,13 +22,32 @@ MARKET_PREFIX = {"CN": ("1", "0"), "HK": ("116",), "US": ("105", "106")}
 
 
 def _secids(market: str, code: str) -> list[str]:
+    """Candidate secids, most specific first.
+
+    A resolved secid (from ``kestrel.datasources.resolve``) wins, because the
+    prefix-guessing below only covers the common cases. Guesses stay as a
+    fallback so the app still works before a symbol has been resolved.
+    """
     market = market.upper()
+    out: list[str] = []
     if market == "CN":
         sh = code.startswith(("6", "9", "5"))
-        return [f"1.{code}" if sh else f"0.{code}"]
-    if market == "HK":
-        return [f"116.{code}"]
-    return [f"{p}.{code}" for p in MARKET_PREFIX["US"]]
+        out.append(f"1.{code}" if sh else f"0.{code}")
+        out.append(f"0.{code}" if sh else f"1.{code}")
+    elif market == "HK":
+        out.append(f"116.{code}")
+    else:
+        out.extend(f"{p}.{code}" for p in MARKET_PREFIX["US"])
+
+    try:
+        from kestrel.datasources.resolve import known_secid
+
+        secid = known_secid(market, code)
+    except Exception:  # pragma: no cover - resolve is optional here
+        secid = None
+    if secid:
+        out = [secid] + [s for s in out if s != secid]
+    return out
 
 
 def _decimal(value, digits: int) -> Decimal | None:

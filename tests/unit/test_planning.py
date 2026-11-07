@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from kestrel.indicators.engine import Series, compute
-from kestrel.planning.builder import build
+from kestrel.planning.builder import build, build_ex
 from kestrel.strategies.base import Breakout20
 
 LOT = 100
@@ -82,3 +82,54 @@ def test_risk_budget_caps_the_position():
 def test_no_plan_when_one_lot_exceeds_risk_budget():
     plan = _plan(risk_pct=0.2)
     assert plan is None, "one lot must not be forced when it breaks the budget"
+
+
+def test_close_resistance_hint_is_ignored():
+    """A take-profit hint closer than 1.5R must not drag the reward down.
+
+    The 20-day high sits just above a pullback entry surprisingly often, and
+    using it as the target produced plans risking 16 to make 14.
+    """
+    ind = compute(Series.from_bars(_uptrend_then_breakout()))
+    assert ind
+    signal = Breakout20().evaluate(ind)
+    assert signal is not None
+
+    entry = ind["last"] * 0.997
+    risk = entry - ind["low20"] * 1.0  # roughly the ATR stop distance
+    signal.target_hint = entry + risk * 0.9  # only 0.9R away
+
+    plan, why = build_ex(
+        market="HK",
+        code="TEST",
+        name="Test",
+        ind=ind,
+        signal=signal,
+        capital_cny=10000,
+        risk_pct=2.0,
+        lot_size=LOT,
+        broker="fosun_hk",
+    )
+    assert why is None, "the plan itself is fine, only the hint was bad"
+    assert plan is not None
+    assert plan.r_multiple >= 1.5, "target should fall back to 2R instead of the hint"
+
+
+def test_rejection_reason_is_specific():
+    ind = compute(Series.from_bars(_uptrend_then_breakout()))
+    assert ind
+    signal = Breakout20().evaluate(ind)
+    assert signal is not None
+    plan, why = build_ex(
+        market="HK",
+        code="TEST",
+        name="Test",
+        ind=ind,
+        signal=signal,
+        capital_cny=10000,
+        risk_pct=0.2,
+        lot_size=LOT,
+        broker="fosun_hk",
+    )
+    assert plan is None
+    assert why == "lot_too_big", "the caller needs to tell capital problems from bad setups"

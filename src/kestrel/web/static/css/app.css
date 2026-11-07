@@ -288,3 +288,12 @@ td.src { color: var(--muted); font-size: 12px; }
 
 .fee-total td { border-top: 1px solid var(--line-strong, var(--line)); padding-top: 13px; font-size: 14px; }
 table.grid th.num, table.grid td.num { text-align: right; }
+
+/* --- scan diagnostics --- */
+.skip-box {
+  margin-top: 12px; padding: 12px 14px; border-radius: 10px;
+  background: var(--warn-soft, #fdf6ec); border: 1px solid var(--warn-line, #f0dfc0);
+}
+.skip-title { font-size: 12.5px; font-weight: 600; color: var(--warn-ink, #8a5a1f); margin-bottom: 6px; }
+.skip-box .near-list { margin-top: 6px; }
+.skip-box .hint { margin: 8px 0 0; }
