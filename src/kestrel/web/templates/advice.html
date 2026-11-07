@@ -305,6 +305,10 @@
             flash('AI 分析失败：' + (res.error || '未知错误'), 'err');
             return;
           }
+          if (res.pending) {
+            flash(res.message + ' 处理完刷新这一页就能看到。', 'warn', true);
+            return;
+          }
           var msg = 'AI 看了 ' + res.candidates + ' 只，提出 ' + res.picks
             + ' 条，通过风控 ' + res.accepted + ' 条。';
           if (res.rejected && res.rejected.length) {

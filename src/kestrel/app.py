@@ -457,6 +457,11 @@ def create_app() -> FastAPI:
         from kestrel.services import scan as scan_service
 
         scan_service.expire_stale()
+        # an answer may have landed since the last visit
+        try:
+            analyst_service.ingest()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("analyst ingest failed: %s", exc)
         recs = scan_service.active_recommendations(50)
         conn = connect()
         try:
@@ -1177,6 +1182,33 @@ def create_app() -> FastAPI:
         markets = (body or {}).get("markets")
         limit = int((body or {}).get("limit") or 40)
         return await analyst.analyse(markets=markets, limit=limit)
+
+    @app.post("/api/analyst/ingest", response_class=JSONResponse)
+    async def api_analyst_ingest():
+        from kestrel.services import analyst
+
+        return analyst.ingest()
+
+    @app.get("/api/analyst/pending", response_class=JSONResponse)
+    async def api_analyst_pending():
+        from kestrel.services import bridge
+
+        items = bridge.pending_requests("analyse")
+        return {
+            "ok": True,
+            "count": len(items),
+            "bridge": bridge.bridge_info(),
+            "items": [
+                {
+                    "id": item.get("id"),
+                    "created_at": item.get("created_at"),
+                    "reply_to": item.get("reply_to"),
+                    "prompt": bridge.task_prompt(item),
+                    "brief": (item.get("input") or {}).get("brief"),
+                }
+                for item in items
+            ],
+        }
 
     @app.get("/api/analyst/runs", response_class=JSONResponse)
     async def api_analyst_runs():

@@ -151,6 +151,10 @@ def build_brief(markets: list[str], limit: int = 40, history: int = 260) -> dict
                 }
             )
 
+        lots = {
+            f"{r['market']}:{r['code']}": r["lot_size"]
+            for r in conn.execute("SELECT market, code, lot_size FROM symbol").fetchall()
+        }
         positions = [
             dict(r)
             for r in conn.execute(
@@ -182,6 +186,7 @@ def build_brief(markets: list[str], limit: int = 40, history: int = 260) -> dict
             "max_per_sector": settings.get("risk.max_per_sector"),
         },
         "open_positions": positions,
+        "_lots": lots,
         "candidates": candidates,
         "rule_evidence": evidence,
         "constraints": {
@@ -389,6 +394,35 @@ async def analyse(
 
     provider = "dry" if dry_reply is not None else str(cfg.get("agent.provider") or "rules")
     model = str(cfg.get("agent.model") or "")
+
+    # WorkBuddy has no synchronous entry point, so the request is queued and the
+    # answer is collected later. Pretending otherwise would hang the page.
+    if provider == "workbuddy" and dry_reply is None:
+        from kestrel.services import bridge
+
+        request_id = bridge.queue(
+            "analyse",
+            SYSTEM + "\n\n" + OUTPUT_SPEC,
+            {"brief": brief},
+            meta={"provider": "workbuddy"},
+        )
+        _record_run(provider, "workbuddy", brief, 0, 0, [], None, {"queued": request_id}, started)
+        return {
+            "ok": True,
+            "pending": True,
+            "request_id": request_id,
+            "provider": provider,
+            "candidates": len(brief["candidates"]),
+            "picks": 0,
+            "accepted": 0,
+            "rejected": [],
+            "message": (
+                "任务已经放进队列，等 WorkBuddy 处理。"
+                f" 文件在 {bridge.PENDING}，处理完写到 {bridge.DONE}。"
+            ),
+            "bridge": bridge.bridge_info(),
+        }
+
     raw_reply: dict
     try:
         if dry_reply is not None:
@@ -399,6 +433,11 @@ async def analyse(
         _record_run(provider, model, brief, 0, 0, [], str(exc), None, started)
         return {"ok": False, "error": str(exc)}
 
+    return _finish(brief, raw_reply, provider, model, started)
+
+
+def _finish(brief: dict, raw_reply: dict, provider: str, model: str, started) -> dict:
+    """Validate, size and store. Shared by the HTTP path and the file bridge."""
     accepted: list[dict] = []
     rejected: list[dict] = []
     seen_sector: dict[str, int] = {}
@@ -422,6 +461,16 @@ async def analyse(
                 break
         if sector and seen_sector.get(sector, 0) >= max_sector:
             rejected.append({"code": pick.code, "reason": f"行业集中度：{sector} 已满"})
+            continue
+        # Can this account even afford one lot? Saying "no" beats dropping it.
+        lots = brief.get("_lots") or {}
+        qty, _fees, _risk = size_position(
+            pick, brief, lots.get(f"{pick.market}:{pick.code}", 1)
+        )
+        if qty <= 0:
+            rejected.append(
+                {"code": pick.code, "reason": "本金不够买一手（或超出单票 35% 上限）"}
+            )
             continue
         if sector:
             seen_sector[sector] = seen_sector.get(sector, 0) + 1
@@ -450,12 +499,53 @@ async def analyse(
     }
 
 
+def ingest() -> dict:
+    """Pick up answers the WorkBuddy agent has written and store them."""
+    from kestrel.services import bridge
+
+    collected = bridge.collect("analyse")
+    if not collected:
+        return {"ok": True, "collected": 0, "stored": 0, "results": []}
+
+    results = []
+    stored = 0
+    for request_id, body in collected:
+        brief = ((body.get("_request") or {}).get("input") or {}).get("brief")
+        if not brief:
+            results.append({"id": request_id, "ok": False, "error": "请求里没有 brief"})
+            continue
+        created = (body.get("_request") or {}).get("created_at")
+        try:
+            started = (
+                datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+                if created
+                else datetime.now(UTC)
+            )
+        except ValueError:
+            started = datetime.now(UTC)
+        try:
+            outcome = _finish(brief, body, "workbuddy", "workbuddy", started)
+            stored += outcome.get("accepted", 0)
+            results.append(
+                {
+                    "id": request_id,
+                    "ok": True,
+                    "accepted": outcome.get("accepted", 0),
+                    "rejected": outcome.get("rejected", []),
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("ingest %s failed: %s", request_id, exc)
+            results.append({"id": request_id, "ok": False, "error": str(exc)})
+    return {"ok": True, "collected": len(collected), "stored": stored, "results": results}
+
+
 def _store(accepted: list[dict], brief: dict, label: str, raw_reply: dict) -> int:
     conn = connect()
     saved = 0
     try:
         lots = {
-            (r["market"], r["code"]): r["lot_size"]
+            f"{r['market']}:{r['code']}": r["lot_size"]
             for r in conn.execute("SELECT market, code, lot_size FROM symbol").fetchall()
         }
         for item in accepted:
