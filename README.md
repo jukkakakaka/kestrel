@@ -1,104 +1,157 @@
-<p align="center">
-  <img src="assets/brand/logo.svg" alt="Kestrel 隼" width="420">
-</p>
+<div align="center">
 
-# Kestrel 隼
+<img src="assets/brand/png/logo-mark-1024.png" width="84" alt="Kestrel">
 
-**Watch. Then strike.** — 自托管的多市场选股与交易台账，对你自己诚实。
+<h1>Kestrel 隼</h1>
 
-[中文说明](README.zh-CN.md) · [Architecture](docs/architecture.md) · [Fee model](docs/fee-model.md) · [Notifications](docs/notifications.md) · [UI map](docs/ui-map.md) · [Engines](docs/engines.md)
+**Watch first. Then act.**
+
+A self-hosted, multi-market stock screener and trading journal that keeps you honest.<br/>
+For people who hold A-shares, Hong Kong and US names in the same week.
+
+<br/>
+
+[![CI](https://github.com/jukkakakaka/kestrel/actions/workflows/ci.yml/badge.svg)](https://github.com/jukkakakaka/kestrel/actions/workflows/ci.yml) [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE) [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-informational.svg)](pyproject.toml) [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux%20%7C%20Docker-lightgrey.svg)](#install)
+
+[English](README.md) · [简体中文](README.zh-CN.md) · [Docs](docs/) · [Engines](docs/engines.md) · [Architecture](docs/architecture.md)
+
+<img src="docs/screenshots/advice.png" width="900" alt="Advice page: an AI-generated plan with entry band, stop, target, position size, risk-reward and the reason behind it">
+
+</div>
 
 ---
 
-## Why
+Most tools help you **find** a trade. Kestrel asks the harder question afterwards:
+**did you actually follow your plan?**
 
-多数工具帮你**找到**交易。Kestrel 还追问一个更难的问题：**你照着计划做了吗？**
+Every plan carries an entry band, a stop, a target, a share count, fees, a true break-even
+price and a deadline. It reaches your phone with a one-tap receipt page. Tap *executed*,
+type the fill price, and the gap between plan and behaviour becomes a number you can work on.
 
-每条建议都带入场区间、止损、目标、股数、费用、保本价和截止时间，推到手机上有一个一键回执页。
-点「已执行」、填真实成交价，计划与行为之间的偏差就变成一个可以改进的数字。
+And, less comfortably: **it tells you whether its own rules make money.** Seven rules ship
+with the app; the ones that measured as no better than doing nothing were switched off
+instead of being quietly published as advice.
 
-但更重要的是：**它会告诉你自己的规则到底赚不赚钱**。三条内置规则在全池历史上跑下来，
-两条是亏钱的——它们被自动停用了，而不是继续给你发建议。
+## One switch, three engines
 
-## 两个引擎，一个开关
+Who produces advice is a single setting. There is one button on the advice page, and its
+label follows that setting.
 
-建议由谁产生，在 **设置 → 分析引擎** 里选，全站只有一个入口：
+| Engine | Decides | Latency | Cost |
+| :--- | :--- | :--- | :--- |
+| **Rules** | fixed conditions over indicators | instant | free |
+| **Model** (OpenAI-compatible) | reads indicators, your account and the measured record of every rule, then picks | ~30 s | per token |
+| **WorkBuddy** | same, but over a file queue serviced by a scheduled agent | minutes | free |
 
-| 模式 | 谁做决定 | 速度 | 成本 |
-|---|---|---|---|
-| **规则引擎** | 固定条件比较指标 | 秒级 | 免费 |
-| **大模型**（OpenAI 兼容） | 模型看指标、账户和规则实测结果后自己选股 | 几十秒 | 按 token |
-| **WorkBuddy** | 同上，但走文件队列，由 WorkBuddy 定时任务处理 | 排队，分钟级 | 免费 |
+In both AI modes **risk and position sizing stay in local code**: the model's share count is
+discarded, the stop must sit 1.5%–15% below entry, reward must clear 1.5R, the ticker must
+exist in the candidate list, and one sector may not dominate. Rejected picks are logged with
+a reason and shown in the UI — a model that gets filtered is more informative than one that
+looks flawless.
 
-AI 模式下 **仓位和风控永远由本地代码强制执行**：模型给的股数一律不采纳，
-止损必须落在 1.5%–15%，盈亏比至少 1.5，代码必须在候选列表里，不合格的建议直接丢弃并记录原因。
-
-每张建议卡片都标明来源：`AI 分析 · deepseek-chat · 信心 68` 或 `趋势回踩 · 信号强度 80%`。
+Every card states its origin: `AI · deepseek-chat · conviction 68` or `Trend pullback · strength 80%`.
 
 ## What it does
 
-- **多市场** — A 股、港股、美股，各自独立开关。
-- **选股而不是体检** — 从每个市场按市值取候选池（默认 30 只），再从里面挑；
-  不是只看你已有的持仓。
-- **规则是数据** — 一条规则就是一个 JSON：条件、加分项、止损和目标引用。
-  在 `/rules` 页写、改、复制，保存前会编译，写错指标名会直接报出来。
-- **规则必须证明自己** — 三折滚动 + 公平基准（同样的入场、同样的持有天数、不设止损）。
-  没有超额收益的自动停用，但保留历史，换个行情可以重测。
-- **建议可执行** — 入场区间、ATR 止损、2R 目标、按每手取整、费用、保本价、截止时间；
-  买一手就超风险预算的会直接拒绝，并说明是资金量问题。
-- **回执闭环** — 签名短链，ntfy / webhook / WeClawBot / SMTP；成交与偏差落库。
-- **交易台账** — 持仓、已平仓、打新；粘贴成交单自动解析；纪律统计对比守规矩和破规矩的收益。
-- **成本引擎** — 交易所规则 + 十个券商套餐（复星、盈立、众安、富途、老虎、IBKR、A 股通用），UI 里可增删改。
-- **学习模式** — 每条建议展开「这是什么 / 为什么现在 / 亏了怎么办」，术语库 40 条白话解释，可逐条不再提示。
-- **交易日历** — 三市场交易时段、节假日、开市状态、下一个可交易收盘。
-- **双语、暗色、本地优先** — zh-CN/en，auto/light/dark，SQLite 落盘，无账号无遥测。
+- **Three markets, independently switched** — A-shares, Hong Kong, US. Turn off the ones you do not trade.
+- **Screening, not just monitoring** — each run draws from a market-cap ranked pool per market
+  (30 by default), not only from your existing positions. A cold run evaluates ~85 symbols; warm
+  cache finishes in under a second.
+- **Rules are data** — a rule is a JSON document: conditions, bonus terms, where the stop and
+  target come from. Write, edit and clone them in the UI; saving compiles first, so a typo names
+  the field it could not resolve.
+- **Rules must prove themselves** — walk-forward folds against a fair benchmark: same entry, same
+  holding period, no stop. Anything that cannot beat holding is disabled automatically, kept with
+  its history so you can retest it in another regime.
+- **Plans you can actually place** — ATR stop, 2R target, whole lots, fees included, break-even
+  computed. When one lot alone exceeds the risk budget, the plan is rejected and says so instead
+  of vanishing.
+- **Receipt loop** — signed short links through ntfy, webhook, WeClawBot or SMTP; fills and
+  deviations land back in the database.
+- **Trading journal** — open positions, closed trades, IPOs; paste a broker confirmation and it
+  parses the fills; discipline stats compare following the plan against breaking it.
+- **Cost engine** — exchange levies plus ten broker plans editable in the UI. Know that 10,000 HKD
+  round trip costs ~0.55% and 1,000 HKD costs ~3.7%.
+- **Learning mode** — every plan expands into *what this is / why now / what if it goes wrong*,
+  with a 40-term glossary in plain language and per-term opt-out.
+- **Trading calendar** — sessions, holidays, open/closed state and the next tradable close.
+- **Bilingual, dark mode, local-first** — zh-CN/en, auto/light/dark, SQLite on disk, no account,
+  no telemetry.
 
-## Quick start
+## Screenshots
+
+<table>
+<tr valign="top">
+<td width="50%" valign="top"><img width="440" src="docs/screenshots/market.png" alt="Live quotes with session state and source links"><br/><sub><b>Markets</b> — session state per exchange, red-up/green-down, links to the original source page</sub></td>
+<td width="50%" valign="top"><img width="440" src="docs/screenshots/rules.png" alt="Rules with per-fold measured results"><br/><sub><b>Rules</b> — each rule with per-fold expectancy, excess over holding, and a verdict badge</sub></td>
+</tr>
+</table>
+
+## Install
+
+**Prebuilt app (macOS 11+)**
+
+Download `Kestrel-0.1.0.dmg` from the latest release, drag it to Applications. The bundle is
+ad-hoc signed, so the first launch needs the quarantine flag removed:
 
 ```bash
-# 需要 Python 3.11+
-uv sync --extra desktop
+xattr -dr com.apple.quarantine /Applications/Kestrel.app
+open /Applications/Kestrel.app
+```
+
+**From source**
+
+```bash
+uv sync --extra desktop   # Python 3.11+
 uv run kestrel init
-uv run kestrel desktop      # 原生窗口 + 托盘
-# 或者
-uv run kestrel serve        # http://127.0.0.1:8000
+uv run kestrel desktop    # native window + menu-bar icon
+# or, if you prefer the browser
+uv run kestrel serve      # http://127.0.0.1:8000
 ```
 
-容器：
+**Docker**
 
 ```bash
-docker compose up           # http://127.0.0.1:8000，数据在命名卷里
+docker compose up         # http://127.0.0.1:8000, data in a named volume
 ```
 
-## Screens
+**Build the app yourself**
 
-| 页面 | 回答什么问题 |
-|---|---|
-| 行情 | 我在看什么，现在什么价？点代码进个股详情 |
-| 操作建议 | 今天该做什么，在什么价位，承担多少风险？（引擎由设置决定） |
-| 交易台账 | 我实际做了什么，代价是什么？ |
-| 成本计算 | 涨多少才算真的回本？ |
-| 快速模拟 | 这套规则放进历史里会亏成什么样？ |
-| 规则 | 规则长什么样，哪条真的有效？ |
-| 设置 | 本金、风险、市场、数据源、分析引擎、推送、备份、术语 |
-
-## 一次分析怎么走
-
-```
-候选池（按市值）→ 日线缓存 → 指标 → ┬→ 规则引擎：条件全满足 → 分高的排前
-                                   └→ AI：简报（指标+账户+规则实测）→ 模型选股 → 本地风控校验 → 仓位本地计算
-                                                        ↓
-                              建议（带来源标记）→ 回执短链 → 推送 → 手机确认
+```bash
+make package              # dist/Kestrel.app
+make package-dmg          # dist/Kestrel-0.1.0.dmg
 ```
 
-没有符合条件的标的时，页面会说明原因（差多少分、为什么被否决），不会硬凑一条。
+The build script generates the icon, signs the bundle, and smoke-tests that a frozen copy
+renders `/advice` — an app that starts but serves a blank page is a failure mode worth catching
+in CI rather than in your hands.
+
+## How a run works
+
+```mermaid
+flowchart LR
+    A[Universe<br/>market-cap ranked] --> B[Daily bars<br/>cached]
+    B --> C[Indicators<br/>26 fields]
+    C --> D{Engine}
+    D -->|Rules| E[Conditions must all hold<br/>score ranks the survivors]
+    D -->|Model| F[Brief: indicators + account<br/>+ measured rule record]
+    F --> G[Model picks<br/>action, thesis, stop, target]
+    G --> H[Local risk gate<br/>stop band, R floor, sector cap, affordability]
+    E --> I[Plan<br/>entry band, stop, target, qty, fees, break-even]
+    H --> I
+    I --> J[Receipt link -> push -> phone]
+    J --> K[(Journal<br/>plan vs fill)]
+```
+
+When nothing qualifies, the page says why — how far the score fell short, which constraint
+rejected it — rather than inventing a plan to fill the space.
 
 ## Writing a rule
 
 ```json
 {
   "code": "pullback_quiet",
-  "name": "缩量回踩",
+  "name": "Quiet pullback",
   "conditions": [
     {"left": "ma_stack", "op": "is_true"},
     {"left": "dist_sma20", "op": "between", "value": [-2.5, 0.5]},
@@ -112,37 +165,86 @@ docker compose up           # http://127.0.0.1:8000，数据在命名卷里
 }
 ```
 
-`/api/rules/schema` 返回完整 JSON Schema、26 个指标释义和操作符语义；
-`/rules` 页有一个「复制提示词」按钮，把这段喂给任何模型，它就能写出合规规则。
+`GET /api/rules/schema` returns a JSON Schema, all 26 fields with meanings, operator semantics
+and every shipped rule as a worked example. The rules page has a **copy prompt** button built
+from those same constants, so any model can author a valid rule without reading this repo.
 
 ## Data sources
 
-| 来源 | 费用 | 市场 | 说明 |
-|---|---|---|---|
-| 东方财富 | 免费 | 三市场 | 主源，JSON |
-| 腾讯 / 新浪 | 免费 | 三市场 | GBK 兜底 |
-| Yahoo | 免费，无需 Key | 三市场 | 实时快照 |
-| Finnhub / Alpha Vantage / Twelve Data / Polygon / Tiingo | 有免费额度 | 视服务商 | 填 Key 即用 |
+| Source | Cost | Markets | Notes |
+| :--- | :--- | :--- | :--- |
+| Eastmoney | free | CN / HK / US | primary, JSON |
+| Tencent · Sina | free | CN / HK / US | GBK fallbacks |
+| Yahoo | free, no key | CN / HK / US | verified against the others |
+| Finnhub · Alpha Vantage · Twelve Data · Polygon · Tiingo | free tier or paid | per provider | paste a key |
 
-三个内置源可在设置里开关，关掉一个自动降级到下一个。也可以加任意自定义源：
-URL 模板（`{code}` `{market}` `{symbol}` `{yf_symbol}` `{key}`）+ JSON 点路径 + 换算系数，
-保存前有「先测一下」按钮，先看到解析出来的数字再入库。
+Built-in sources can be toggled; disabling one falls through to the next. Custom sources take a
+URL template (`{code}` `{market}` `{symbol}` `{yf_symbol}` `{key}`), JSON dot paths, a scale
+divisor for milli-unit endpoints, and a **test** button that shows the parsed number before you
+save it.
 
-## Status
+## Configuration
 
-已完成：选股、计划、推送、回执、台账、费用、快速模拟、规则引擎与验证、AI 分析、交易日历、备份、桌面壳、容器。
+Everything else lives in the database and is edited in the UI. Bootstrap values are environment
+variables:
 
-已知边界：
-- 日线级别。没有盘口、资金流、财报预期，所以**选股优势接近于零**——
-  `/rules` 页的实测数据会如实告诉你这一点。
-- WorkBuddy 模式是异步队列，最细调度为每小时一次。
-- OCR 未实现（本机无引擎），成交单走粘贴文本。
+| Variable | Default | Meaning |
+| :--- | :--- | :--- |
+| `KESTREL_HOME` | `./data`, or `~/Library/Application Support/Kestrel` when bundled | database, cache, logs, bridge queue |
+| `KESTREL_HOST` | `127.0.0.1` | bind address |
+| `KESTREL_PORT` | `8000` | port |
+| `KESTREL_DEBUG` | `false` | verbose logging |
+
+## Honest limits
+
+This is the part most READMEs leave out.
+
+- **Daily bars only.** No order book, no fund flows, no earnings expectations. On that
+  information set the selection edge is close to zero, and the rules page will show you exactly
+  that: expectancy is positive, but almost all of it comes from the 2:1 payoff, not from the entry.
+- **The stop is doing the work.** Measured against holding the same entry for the same number of
+  days with no stop, the excess return of every shipped rule is near zero. Treat the app as a
+  discipline and cost tool, not an oracle.
+- **WorkBuddy mode is asynchronous** and its finest schedule is hourly.
+- **OCR is not implemented.** Paste confirmations as text; it is more accurate anyway.
+- **Not packaged for Windows CI yet**, though the spec supports it.
+
+## Project layout
+
+```
+src/kestrel/
+  app.py            FastAPI app, routes, template filters
+  services/         scan, analyst, engine, rules, universe, calendar, edge, statement, bridge
+  strategies/       rule spec compiler, built-in rule library, AI-facing schema
+  datasources/      provider chain, Eastmoney/Tencent/Sina, resolver, presets, custom
+  planning/         position sizing, stop/target placement, fee-aware plans
+  fees/             exchange levy model, broker plans
+  web/              Jinja templates + static assets
+  db/               schema and versioned migrations
+packaging/          PyInstaller spec, macOS build script, icons
+```
+
+## Documentation
+
+| Document | Contents |
+| :--- | :--- |
+| [docs/engines.md](docs/engines.md) | The three engines, shared risk checks, what each page does in AI mode |
+| [docs/architecture.md](docs/architecture.md) | Module map, data flow, storage |
+| [docs/fee-model.md](docs/fee-model.md) | Exchange levies and broker plans |
+| [docs/notifications.md](docs/notifications.md) | Channels, receipts, signature scheme |
+| [docs/ui-map.md](docs/ui-map.md) | Route table and naming rationale |
+
+## Contributing
+
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+`uv run pytest` (86 tests) and `uv run ruff check src tests` must pass.
 
 ## Disclaimer
 
-Kestrel 是研究与学习工具。它**不提供投资建议、不预测价格、不下单**。
-它产出的任何内容都不构成买卖任何证券的要约。市场有风险，决策由你负责。
-它最有用的功能可能是告诉你「现在不该动」。
+Kestrel is a research and learning tool. It does **not** provide investment advice, forecast
+prices, or place orders. Nothing it produces is an offer to buy or sell any security.
+Markets carry risk; the decisions are yours. Its most useful feature may be telling you that
+today is not the day.
 
 ## License
 

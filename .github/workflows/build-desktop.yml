@@ -5,35 +5,107 @@ on:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: write
+
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-14
-            artifact: Kestrel-macos
-          - os: windows-latest
-            artifact: Kestrel-windows
-    runs-on: ${{ matrix.os }}
+  macos:
+    name: macOS
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v3
         with:
-          python-version: "3.12"
+          enable-cache: true
 
-      - name: Install build deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyinstaller pywebview pystray pillow
-          pip install -e .
+      - name: Build, sign and smoke-test the bundle
+        run: ./packaging/macos/build.sh --dmg
 
-      - name: Build
-        run: pyinstaller packaging/pyinstaller/kestrel.spec --noconfirm --distpath dist --workpath build
+      - name: Zip the app for people who prefer that
+        run: cd dist && ditto -c -k --keepParent Kestrel.app Kestrel-macos.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: dist/
+          name: Kestrel-macos
+          path: |
+            dist/Kestrel.app
+            dist/Kestrel-*.dmg
+            dist/Kestrel-macos.zip
           if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: release-assets
+          path: dist/Kestrel-*.dmg
+          if-no-files-found: error
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: |
+          uv sync --extra desktop
+          uv pip install pyinstaller
+
+      - name: Build
+        run: uv run pyinstaller packaging/pyinstaller/kestrel.spec --noconfirm
+
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          # A frozen build can start and still serve a blank page when templates
+          # are missing, so check a rendered page, not just the process.
+          $env:KESTREL_HOME = "$env:RUNNER_TEMP\kestrel-smoke"
+          $p = Start-Process -FilePath "dist\Kestrel\Kestrel.exe" -ArgumentList "serve","--port","8399" -PassThru
+          $ok = $false
+          foreach ($i in 1..40) {
+            Start-Sleep -Milliseconds 500
+            try {
+              $body = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 "http://127.0.0.1:8399/advice").Content
+              if ($body -match "操作建议") { $ok = $true; break }
+            } catch { }
+          }
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          if (-not $ok) { throw "smoke test failed: /advice did not render" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kestrel-windows
+          path: dist/Kestrel
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [macos, windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Kestrel-*.dmg
+          generate_release_notes: true
+          body: |
+            ### macOS
+
+            1. Download `Kestrel-*.dmg` and drag **Kestrel** into Applications.
+            2. The bundle is ad-hoc signed, so clear the quarantine flag once:
+
+               ```bash
+               xattr -dr com.apple.quarantine /Applications/Kestrel.app
+               ```
+
+            Data lives in `~/Library/Application Support/Kestrel`.

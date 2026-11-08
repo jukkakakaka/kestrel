@@ -8,16 +8,43 @@ before the database exists.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def is_frozen() -> bool:
+    """True when running from a PyInstaller bundle."""
+    return bool(getattr(sys, "frozen", False))
+
+
+def bundle_dir() -> Path:
+    """Directory that holds bundled data files (templates, locales, assets)."""
+    if is_frozen():
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def _system_home() -> Path:
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Kestrel"
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        return Path(base) / "Kestrel"
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(base) / "kestrel"
+
+
 def _default_home() -> Path:
     env = os.environ.get("KESTREL_HOME")
     if env:
         return Path(env).expanduser().resolve()
+    # A bundled app is launched from Finder/Explorer, where the working directory
+    # is "/" — creating ./data there fails or lands somewhere the user never sees.
+    if is_frozen():
+        return _system_home()
     return (Path.cwd() / "data").resolve()
 
 

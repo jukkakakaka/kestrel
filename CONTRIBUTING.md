@@ -27,6 +27,21 @@ New providers implement `QuoteProvider` (`datasources/base.py`) and get register
 recorded fixtures — note that Tencent and Sina return **GBK**, so fixtures must store
 raw bytes, not decoded strings.
 
+## Packaging the desktop app
+
+```bash
+make package        # dist/Kestrel.app, ad-hoc signed, smoke-tested
+make package-dmg    # also dist/Kestrel-0.1.0.dmg
+```
+
+`packaging/macos/build.sh` generates `packaging/icon.icns` from `icon.png`, runs
+PyInstaller with `packaging/pyinstaller/kestrel.spec`, signs the bundle and then **starts a
+frozen copy and checks that `/advice` renders**. Keep that check: a bundle can launch
+successfully and still serve a blank page when a data directory was left out of the spec.
+
+When adding a new non-Python asset (templates, locales, migrations, images), add its
+directory to `DATAS` in the spec as well, or it will be missing only in the packaged app.
+
 ## Commit messages
 
 Plain and specific: `fix(fees): round HK stamp duty up to the nearest dollar`.
