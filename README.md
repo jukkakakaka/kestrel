@@ -105,10 +105,15 @@ open /Applications/Kestrel.app
 ```bash
 uv sync --extra desktop   # Python 3.11+
 uv run kestrel init
-uv run kestrel desktop    # native window + menu-bar icon
+uv run kestrel desktop    # native window
 # or, if you prefer the browser
 uv run kestrel serve      # http://127.0.0.1:8000
 ```
+
+Closing the window quits. macOS gives an app exactly one main thread, pywebview owns it,
+and AppKit only permits a menu-bar icon on that thread — so the mac build has no tray.
+Use `kestrel serve` (or `kestrel desktop --browser`) when you want scanning to continue
+without a window.
 
 **Docker**
 

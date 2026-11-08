@@ -1,13 +1,26 @@
-"""Desktop shell: a native window plus a tray icon around the local server.
+"""Desktop shell: a native window around the local server.
 
-The server keeps running when the window is closed, so scheduled scans are not
-interrupted. Requires the ``desktop`` extra (pywebview, pystray, pillow).
+Requires the ``desktop`` extra (pywebview, pystray, pillow).
+
+Platform note. On macOS AppKit requires ``NSStatusItem`` to be created on the
+main thread, and the main thread already belongs to pywebview's run loop.
+pystray's darwin backend builds the item on whatever thread called ``run()``,
+so putting it on a worker thread traps inside BoardServices
+(``-[BSServiceMainRunLoopQueue assertBarrierOnQueue]``) and kills the process a
+second after launch. There is only one main thread and pywebview needs it, so
+the menu-bar icon is simply not created on macOS: the window is the app, closing
+it quits, and ``kestrel serve`` is the way to scan headless.
+
+Windows and Linux backends own their own message loop and are fine on a worker
+thread, so the tray stays there. ``KESTREL_TRAY=0`` disables it anywhere.
 """
 
 from __future__ import annotations
 
 import contextlib
 import logging
+import os
+import sys
 import threading
 
 from kestrel.settings import bundle_dir
@@ -15,6 +28,20 @@ from kestrel.settings import bundle_dir
 log = logging.getLogger(__name__)
 
 BRAND = bundle_dir() / "assets" / "brand"
+
+_FALSY = ("0", "false", "no", "off")
+
+
+def tray_supported() -> bool:
+    """Whether a menu-bar / notification-area icon can be created here."""
+    flag = os.environ.get("KESTREL_TRAY", "").strip().lower()
+    if flag in _FALSY:
+        return False
+    if sys.platform == "darwin":
+        # Never: creating NSStatusItem off the main thread is a hard crash, and
+        # the main thread is taken by the window. See the module docstring.
+        return False
+    return True
 
 
 def _icon_image():
@@ -30,32 +57,35 @@ def _icon_image():
 
 
 def _start_tray(url: str, on_quit):
+    """Start the tray icon, or return None. Never raises."""
+    if not tray_supported():
+        return None
     try:
         import pystray
-    except ImportError:
-        log.info("pystray not installed, running without tray icon")
+
+        def open_panel(_item=None):
+            import webbrowser
+
+            webbrowser.open(url)
+
+        menu = pystray.Menu(
+            pystray.MenuItem("Open Kestrel", open_panel, default=True),
+            pystray.MenuItem("Quit", lambda: (on_quit(), icon.stop())),
+        )
+        icon = pystray.Icon("kestrel", _icon_image(), "Kestrel", menu)
+        threading.Thread(target=icon.run, daemon=True, name="kestrel-tray").start()
+        return icon
+    except Exception as exc:  # noqa: BLE001
+        # A tray icon is a convenience; it must never be the reason the app dies.
+        log.warning("tray unavailable: %s", exc)
         return None
-
-    def open_panel(_item=None):
-        import webbrowser
-
-        webbrowser.open(url)
-
-    menu = pystray.Menu(
-        pystray.MenuItem("Open Kestrel", open_panel, default=True),
-        pystray.MenuItem("Quit", lambda: (on_quit(), icon.stop())),
-    )
-    icon = pystray.Icon("kestrel", _icon_image(), "Kestrel", menu)
-    threading.Thread(target=icon.run, daemon=True).start()
-    return icon
 
 
 def run_desktop(url: str, server=None) -> None:
-    """Open the native window.
+    """Open the native window and block until the app should quit.
 
-    Closing the window does not kill the process when a tray icon is running:
-    the scheduler keeps scanning in the background and the tray menu can bring
-    the UI back. Without a tray, closing the window quits.
+    With a tray icon the process outlives the window so the scheduler keeps
+    running; without one, closing the window quits, which is the macOS norm.
 
     If the window cannot be created at all (no display, broken WKWebView), fall
     back to the system browser and keep serving. Silently exiting would look
@@ -96,15 +126,14 @@ def run_desktop(url: str, server=None) -> None:
         log.info("falling back to the browser at %s", url)
         with contextlib.suppress(Exception):
             webbrowser.open(url)
-        # No window to close, so keep the server (and the scheduler) alive until
-        # the process is killed from the tray or the task manager.
+        # No window and possibly no tray: keep serving until the process is
+        # stopped from the tray, the dock or the task manager.
         try:
-            while True:
+            while not stop.is_set():
                 stop.wait(3600)
-                if stop.is_set():
-                    return
         except KeyboardInterrupt:
-            return
+            pass
+        return
 
     log.info("window closed")
 
@@ -112,7 +141,7 @@ def run_desktop(url: str, server=None) -> None:
         return
 
     with contextlib.suppress(Exception):
-        icon.notify("Kestrel 仍在后台运行，点菜单栏图标可以重新打开。", "Kestrel")
+        icon.notify("Kestrel is still running. Use the tray icon to reopen it.", "Kestrel")
     stop.wait()
 
 

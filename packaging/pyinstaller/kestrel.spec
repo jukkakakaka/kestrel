@@ -12,6 +12,7 @@ Build with::
 or ``make package``, which also generates the icons and signs the bundle.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -19,6 +20,11 @@ from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = Path(SPECPATH).parent.parent
 SRC = ROOT / "src" / "kestrel"
+
+# Single source of truth: the bundle must never claim a version the wheel does not.
+VERSION = re.search(
+    r'^version = "([^"]+)"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"), re.M
+).group(1)
 
 datas = [
     (str(SRC / "web" / "templates"), "kestrel/web/templates"),
@@ -96,13 +102,13 @@ if sys.platform == "darwin":
         name="Kestrel.app",
         icon=str(ROOT / "packaging" / "icon.icns"),
         bundle_identifier="dev.kestrel.app",
-        version="0.1.0",
+        version=VERSION,
         info_plist={
             "CFBundleName": "Kestrel",
             "CFBundleDisplayName": "Kestrel",
             "CFBundleExecutable": "Kestrel",
-            "CFBundleShortVersionString": "0.1.0",
-            "CFBundleVersion": "0.1.0",
+            "CFBundleShortVersionString": VERSION,
+            "CFBundleVersion": VERSION,
             "LSMinimumSystemVersion": "11.0",
             "LSApplicationCategoryType": "public.app-category.finance",
             "NSHighResolutionCapable": True,

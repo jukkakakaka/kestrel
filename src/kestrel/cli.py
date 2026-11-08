@@ -61,10 +61,32 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _log_to_file() -> None:
+    """Mirror logs into the data dir.
+
+    A bundled app has no terminal, so without this a crash leaves nothing
+    behind but a system crash report.
+    """
+    path = settings.log_dir / "desktop.log"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(path, encoding="utf-8")
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+        )
+        handler.setLevel(logging.INFO)
+        root = logging.getLogger()
+        root.setLevel(logging.INFO)
+        root.addHandler(handler)
+    except OSError:
+        pass
+
+
 def cmd_desktop(args: argparse.Namespace) -> int:
     from kestrel.db.migrate import init_db
 
     settings.ensure_dirs()
+    _log_to_file()
     init_db()
 
     port = _free_port(args.port or settings.port)
@@ -78,6 +100,22 @@ def cmd_desktop(args: argparse.Namespace) -> int:
         time.sleep(0.1)
 
     url = f"http://127.0.0.1:{port}"
+
+    if getattr(args, "browser", False):
+        # Escape hatch: no webview at all. Used when the native window cannot
+        # start on a machine, and handy for debugging.
+        import webbrowser
+
+        print(f"Kestrel serving on {url}  (Ctrl+C to stop)")
+        webbrowser.open(url)
+        try:
+            while not server.should_exit:
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.should_exit = True
+        return 0
 
     try:
         import webview  # noqa: F401
@@ -186,6 +224,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_desk = sub.add_parser("desktop", help="run the desktop client (window + tray)")
     p_desk.add_argument("--port", type=int, default=None)
+    p_desk.add_argument(
+        "--browser", action="store_true", help="skip the native window, open the system browser"
+    )
     p_desk.set_defaults(func=cmd_desktop)
 
     return parser

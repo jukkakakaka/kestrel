@@ -88,10 +88,14 @@ open /Applications/Kestrel.app
 ```bash
 uv sync --extra desktop   # 需要 Python 3.11+
 uv run kestrel init
-uv run kestrel desktop    # 原生窗口 + 菜单栏图标
+uv run kestrel desktop    # 原生窗口
 # 或者只用浏览器
 uv run kestrel serve      # http://127.0.0.1:8000
 ```
+
+关掉窗口就是退出。macOS 一个进程只有一个主线程，pywebview 占着它，而 AppKit 只允许在主线程
+创建菜单栏图标——所以 mac 版没有托盘。想让扫描在没有窗口时继续跑，用 `kestrel serve`
+（或 `kestrel desktop --browser`）。
 
 **容器**
 
