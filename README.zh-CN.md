@@ -75,8 +75,8 @@
 
 **现成的 macOS 应用（11+）**
 
-从 Releases 下载 `Kestrel-0.1.0.dmg`，拖进「应用程序」。安装包是 ad-hoc 签名，
-首次启动前需要去掉隔离标记：
+从 [Releases](https://github.com/jukkakakaka/kestrel/releases) 下载 `Kestrel-*.dmg`，拖进「应用程序」。
+安装包是 ad-hoc 签名，首次启动前需要去掉隔离标记：
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Kestrel.app

@@ -91,8 +91,9 @@ Every card states its origin: `AI · deepseek-chat · conviction 68` or `Trend p
 
 **Prebuilt app (macOS 11+)**
 
-Download `Kestrel-0.1.0.dmg` from the latest release, drag it to Applications. The bundle is
-ad-hoc signed, so the first launch needs the quarantine flag removed:
+Grab the latest `Kestrel-*.dmg` from [releases](https://github.com/jukkakakaka/kestrel/releases)
+and drag it to Applications. The bundle is ad-hoc signed, so the first launch needs the
+quarantine flag removed:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Kestrel.app
