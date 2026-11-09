@@ -101,6 +101,22 @@
       </div>
       <div class="setting-row">
         <div class="setting-label">
+          <span>{{ t('horizon.title') }}</span>
+          <small>{{ t('horizon.hint') }}</small>
+        </div>
+        <div class="setting-input">
+          <select data-key="trade.horizon">
+            <option value="auto" {% if values.get('trade.horizon','auto') == 'auto' %}selected{% endif %}>{{ t('horizon.auto') }}</option>
+            {% for h in horizon_options %}
+            <option value="{{ h.code }}" {% if values.get('trade.horizon') == h.code %}selected{% endif %}>
+              {{ h.label }}{% if h.beta %} · {{ t('horizon.beta') }}{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">
           <span>{{ t('settings.universe') }}</span>
           <small>{{ t('settings.universe_hint') }}</small>
         </div>

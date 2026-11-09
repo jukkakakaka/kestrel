@@ -43,6 +43,11 @@ SECTIONS: list[Section] = [
               help_zh="悬停或点击术语看解释，可单独关闭", help_en="Hover/click terms for definitions"),
     ]),
     Section("scan", "扫描", "Scanning", [
+        Field("trade.horizon", "交易周期", "Trading horizon", "select",
+              options=[("auto", "自动（按行情与资金推荐）"), ("short", "短线 · 日线"),
+                       ("medium", "中线 · 周线"), ("long", "长线 · 月线（Beta）")],
+              help_zh="决定扫描读哪种 K 线、回测持有多久、计划活多久；选自动则每次扫描前重新判断",
+              help_en="Bar size for scans, backtests and plan lifetime; auto re-decides each scan"),
         Field("scan.min_score", "触发门槛（0–1）", "Min score", "number", step="0.05",
               help_zh="策略得分低于它就不生成建议，0.55 约等于中等强度",
               help_en="Strategies below this score are ignored"),

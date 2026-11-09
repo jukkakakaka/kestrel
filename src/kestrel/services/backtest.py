@@ -23,6 +23,7 @@ def run(
     max_hold: int = 15,
     min_bars: int = 60,
     registry_override: dict | None = None,
+    stop_band: tuple[float, float] = (0.015, 0.15),
 ) -> dict:
     source = registry_override if registry_override is not None else registry()
     strategy = source.get(strategy_code)
@@ -50,12 +51,16 @@ def run(
             if stop >= entry:
                 continue
             risk = entry - stop
-            # Same band the live planner enforces. A 0.3% stop turns every
-            # result into a 30R outlier and makes the statistics meaningless.
-            if not (0.015 * entry <= risk <= 0.15 * entry):
+            # Same band the live planner enforces, for the *same* bar size. The
+            # daily band used to be hard-coded here, which silently threw away
+            # every monthly setup — two monthly ATRs is routinely 20%+.
+            if not (stop_band[0] * entry <= risk <= stop_band[1] * entry):
                 continue
             position = {
                 "index": i,
+                # Kept so fold statistics can be ordered in time instead of in
+                # whatever order the symbols happened to be scanned.
+                "date": str(bars[i]["date"]),
                 "entry": entry,
                 "stop": stop,
                 "target": entry + risk * 2,
@@ -112,7 +117,15 @@ def _stats(trades: list[dict]) -> dict:
     }
 
 
-def save(market: str, code: str, strategy: str, result: dict, start: str, end: str) -> int:
+def save(
+    market: str,
+    code: str,
+    strategy: str,
+    result: dict,
+    start: str,
+    end: str,
+    timeframe: str = "short",
+) -> int:
     import json
 
     from kestrel.db.engine import connect
@@ -123,12 +136,13 @@ def save(market: str, code: str, strategy: str, result: dict, start: str, end: s
         cur = conn.execute(
             """
             INSERT INTO backtest_run (market, code, strategy, start_date, end_date,
-                                      trades, win_rate, avg_r, max_dd, equity)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
+                                      trades, win_rate, avg_r, max_dd, equity, timeframe)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 market, code, strategy, start, end, stats["count"], stats["win_rate"],
                 stats["avg_r"], stats["max_dd"], json.dumps(result["equity"][-120:]),
+                timeframe,
             ),
         )
         conn.commit()

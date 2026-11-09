@@ -50,15 +50,27 @@ def _round(value: Decimal, digits: str = "0.001") -> Decimal:
     return value.quantize(Decimal(digits))
 
 
-def valid_until(market: str) -> str:
-    """Plans expire at the close of the next tradable session in market time.
+def valid_until(market: str, horizon: str = "short") -> str:
+    """When the plan stops being actionable.
 
-    Delegates to the trading calendar so a Saturday plan survives to Monday
-    instead of dying a few hours after it was made.
+    Daily swing plans die at the next close. A weekly or monthly plan that
+    expired the same evening would be unusable, so the lifetime travels with the
+    horizon instead of being hard-coded to one session.
     """
+    from datetime import datetime, timedelta
+
+    from kestrel.services import timeframe as tf
     from kestrel.services.calendar import next_session_close
 
-    return next_session_close(market)
+    base = next_session_close(market)
+    ttl = tf.get(horizon).ttl_days
+    if not ttl:
+        return base
+    try:
+        moment = datetime.fromisoformat(base.replace("Z", "+00:00"))
+    except ValueError:
+        return base
+    return (moment + timedelta(days=ttl)).isoformat(timespec="seconds")
 
 
 def build_ex(
@@ -72,6 +84,7 @@ def build_ex(
     risk_pct: float,
     lot_size: int,
     broker: str | None,
+    horizon: str = "short",
 ) -> tuple[Plan | None, str | None]:
     """Build a plan, or explain why the setup is not worth taking.
 
@@ -105,9 +118,14 @@ def build_ex(
     if risk_per_share <= 0:
         return None, "bad_stop"
     stop_pct = risk_per_share / entry_low
-    if stop_pct > Decimal("0.15"):
+    # The band widens with the bar size: two weekly ATRs is a normal stop, two
+    # monthly ATRs can be 25% and would otherwise be rejected as "too wide".
+    from kestrel.services import timeframe as tf
+
+    floor, ceiling = tf.get(horizon).stop_band
+    if stop_pct > Decimal(str(ceiling)):
         return None, "stop_too_wide"
-    if stop_pct < Decimal("0.015"):
+    if stop_pct < Decimal(str(floor)):
         return None, "stop_too_tight"
 
     risk_budget = capital_local * Decimal(str(risk_pct)) / Decimal("100")
@@ -164,7 +182,7 @@ def build_ex(
         breakeven=_round(breakeven),
         r_multiple=round(r_multiple, 2),
         confidence=confidence,
-        valid_until=valid_until(market),
+        valid_until=valid_until(market, horizon),
         invalidation=["close_below_stop", "expired"],
         explain_zh=_explain_zh(market, name, signal, entry_low, stop, target1, qty, risk_pct),
         explain_en=_explain_en(market, name, signal, entry_low, stop, target1, qty, risk_pct),

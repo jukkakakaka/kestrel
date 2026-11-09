@@ -470,12 +470,29 @@ def create_app() -> FastAPI:
             interval = int(config_service.get(conn, "scan.interval_minutes", 60) or 60)
             markets = config_service.get(conn, "scan.markets", ["CN", "HK", "US"])
             universe = str(config_service.get(conn, "scan.universe", "both"))
+            requested = str(config_service.get(conn, "trade.horizon", "auto") or "auto")
             ui = {
                 "learning": bool(config_service.get(conn, "ui.learning_mode", True)),
                 "glossary": bool(config_service.get(conn, "ui.glossary", True)),
             }
         finally:
             conn.close()
+
+        from kestrel.services import advisor as advisor_service
+        from kestrel.services import timeframe
+
+        advice = advisor_service.cached()
+        if advice is None:
+            # First visit after an upgrade: the page should not be blank about
+            # which bar size is in force.
+            try:
+                advice = advisor_service.evaluate()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("advisor failed on page load: %s", exc)
+                advice = {}
+
+        pinned = timeframe.is_valid(requested)
+        in_force = requested if pinned else (advice or {}).get("horizon") or timeframe.DEFAULT
         from kestrel.services import engine as engine_service
 
         engine_info = engine_service.status()
@@ -509,8 +526,58 @@ def create_app() -> FastAPI:
                 scans=scan_service.recent_scans(6),
                 analyst_runs=analyst_service.recent_runs(3),
                 engine=engine_info,
+                horizon={
+                    "requested": requested,
+                    "pinned": pinned,
+                    "in_force": in_force,
+                    "label": timeframe.label(in_force, request.cookies.get("locale") or "zh-CN"),
+                    "beta": timeframe.get(in_force).beta,
+                    "advice": advice or {},
+                    "options": timeframe.options(request.cookies.get("locale") or "zh-CN"),
+                    "labels": {
+                        item["code"]: item["label"]
+                        for item in timeframe.options(request.cookies.get("locale") or "zh-CN")
+                    },
+                },
             ),
         )
+
+    @app.post("/api/horizon", response_class=JSONResponse)
+    async def api_horizon(request: Request):
+        """Pin a bar size, or hand the decision back to the advisor."""
+        from kestrel.services import advisor as advisor_service
+        from kestrel.services import config as config_service
+        from kestrel.services import timeframe
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        value = str((body or {}).get("horizon", "")).strip().lower()
+        if not value and (body or {}).get("force"):
+            # Recompute without touching the pin: the user asked what the
+            # numbers say now, not to change their setting.
+            return {"ok": True, "advisor": advisor_service.evaluate(force=True)}
+        if value != timeframe.AUTO and not timeframe.is_valid(value):
+            return {"ok": False, "error": "unknown horizon"}
+
+        conn = connect()
+        try:
+            config_service.put(conn, "trade.horizon", value)
+            conn.commit()
+        finally:
+            conn.close()
+
+        if value == timeframe.AUTO:
+            report = advisor_service.evaluate(force=True)
+        else:
+            report = advisor_service.cached() or {}
+        return {
+            "ok": True,
+            "requested": value,
+            "horizon": value if value != timeframe.AUTO else report.get("horizon"),
+            "advisor": report,
+        }
 
     @app.get("/scan")
     async def scan_redirect():
@@ -664,6 +731,7 @@ def create_app() -> FastAPI:
         from kestrel.datasources import registry as source_registry
         from kestrel.services import channels as channel_service
         from kestrel.services import config as config_service
+        from kestrel.services import timeframe
         from kestrel.services import universe as universe_service
 
         conn = connect()
@@ -685,6 +753,7 @@ def create_app() -> FastAPI:
                 presets=preset_service.PRESETS,
                 channels=channel_service.all_channels(),
                 pool=universe_service.pool_summary(),
+                horizon_options=timeframe.options(request.cookies.get("locale") or "zh-CN"),
                 saved=request.query_params.get("saved"),
             ),
         )
@@ -910,7 +979,8 @@ def create_app() -> FastAPI:
         return RedirectResponse("/cost", status_code=301)
 
     def _sim_context(request: Request, **extra):
-        from kestrel.services import backtest
+        from kestrel.services import backtest, timeframe
+        from kestrel.services import config as config_service
         from kestrel.services import engine as engine_service
         from kestrel.services import rules as rule_service
 
@@ -932,8 +1002,12 @@ def create_app() -> FastAPI:
                     """
                 ).fetchall()
             ]
+            horizon_default = str(config_service.get(conn, "trade.horizon", "auto") or "auto")
         finally:
             conn.close()
+        if not timeframe.is_valid(horizon_default):
+            horizon_default = timeframe.DEFAULT
+
         from kestrel.strategies.base import registry
 
         labels = {
@@ -942,19 +1016,30 @@ def create_app() -> FastAPI:
             "mean_reversion": "超跌反弹",
         }
         options = [(code, labels.get(code, code)) for code in registry()]
-        return _ctx(
-            request=request,
-            report=report,
-            symbols=symbols,
-            strategy_options=options,
-            runs=backtest.recent(20),
-            result=None,
-            error=None,
-            form={"symbol": (symbols[0]["market"] + "/" + symbols[0]["code"]) if symbols else "",
-                  "strategy": "trend_pullback"},
-            engine=report.get("engine"),
-            **extra,
-        )
+        locale = request.cookies.get("locale") or "zh-CN"
+        context = {
+            "report": report,
+            "symbols": symbols,
+            "strategy_options": options,
+            "horizon_options": timeframe.options(locale),
+            "horizon_labels": {
+                item["code"]: item["label"] for item in timeframe.options(locale)
+            },
+            "horizon_default": horizon_default,
+            "runs": backtest.recent(20),
+            "result": None,
+            "error": None,
+            "form": {
+                "symbol": (symbols[0]["market"] + "/" + symbols[0]["code"]) if symbols else "",
+                "strategy": "trend_pullback",
+                "horizon": horizon_default,
+            },
+            "engine": report.get("engine"),
+        }
+        # The POST handler supplies result/error/form; merging keeps the defaults
+        # from colliding with them.
+        context.update(extra)
+        return _ctx(request=request, **context)
 
     @app.get("/sim", response_class=HTMLResponse)
     async def sim_page(request: Request):
@@ -970,15 +1055,21 @@ def create_app() -> FastAPI:
     async def sim_run(request: Request):
         from kestrel.services import backtest
         from kestrel.services import bars as bars_service
+        from kestrel.services import timeframe as timeframe_service
         from kestrel.strategies.base import registry
 
         form = await request.form()
         raw = str(form.get("symbol", "")).strip()
         strategy = str(form.get("strategy", "trend_pullback"))
+        horizon_code = str(form.get("horizon", "short")).strip().lower()
+        if not timeframe_service.is_valid(horizon_code):
+            horizon_code = timeframe_service.DEFAULT
+        cfg = timeframe_service.get(horizon_code)
+
         if "/" not in raw:
             return templates.TemplateResponse(
                 request=request, name="sim.html",
-                context=_sim_context(error="先选一只标的。"),
+                context=_sim_context(request, error="先选一只标的。"),
             )
         market, code = raw.split("/", 1)
         market = market.upper()
@@ -996,32 +1087,58 @@ def create_app() -> FastAPI:
             if row is None:
                 error = "找不到这只标的，先去行情页加进自选。"
             else:
-                bars = await bars_service.get_bars(conn, row["id"], market, code, limit=600)
-                if len(bars) < 80:
-                    error = "历史数据不足（少于 80 根日线），没法跑。"
+                daily = await bars_service.get_bars(
+                    conn, row["id"], market, code, limit=cfg.lookback
+                )
+                # Backtest on exactly the bars the scanner would see for this
+                # horizon, or the simulated result says nothing about the plan.
+                bars = timeframe_service.prepare(daily, cfg.code)
+                if len(bars) < cfg.min_bars:
+                    error = (
+                        f"历史数据不足（{len(bars)} 根 {cfg.bar} 线，至少需要 {cfg.min_bars} 根），"
+                        "换短一点的周期再试。"
+                    )
                 else:
-                    result = backtest.run(bars, strategy)
+                    result = backtest.run(
+                        bars, strategy, max_hold=cfg.max_hold, stop_band=cfg.stop_band
+                    )
+                    result["timeframe"] = cfg.code
+                    result["bar"] = cfg.bar
                     backtest.save(market, code, strategy, result,
-                                  str(bars[0]["date"]), str(bars[-1]["date"]))
+                                  str(bars[0]["date"]), str(bars[-1]["date"]),
+                                  timeframe=cfg.code)
         finally:
             conn.close()
 
         return templates.TemplateResponse(
             request=request, name="sim.html",
-            context=_sim_context(result=result, error=error,
-                                 form={"symbol": f"{market}/{code}", "strategy": strategy}),
+            context=_sim_context(request, result=result, error=error,
+                                 form={"symbol": f"{market}/{code}", "strategy": strategy,
+                                       "horizon": horizon_code}),
         )
 
     @app.post("/api/edge", response_class=JSONResponse)
     async def api_edge(request: Request):
-        from kestrel.services import edge
+        from kestrel.services import advisor, edge, timeframe
+        from kestrel.services import config as config_service
 
         try:
             body = await request.json()
         except Exception:
             body = {}
         limit = int((body or {}).get("symbols") or 120)
-        return edge.evaluate(max_symbols=limit)
+
+        # Measure the horizon actually in force, unless the caller names one.
+        conn = connect()
+        try:
+            requested = config_service.get(conn, "trade.horizon", timeframe.AUTO)
+        finally:
+            conn.close()
+        horizon, _advice = advisor.resolve(requested)
+        horizon = str((body or {}).get("horizon") or horizon).strip().lower()
+        if not timeframe.is_valid(horizon):
+            horizon = timeframe.DEFAULT
+        return edge.evaluate(max_symbols=limit, horizon=horizon)
 
     @app.get("/api/edge", response_class=JSONResponse)
     async def api_edge_get():
@@ -1235,6 +1352,7 @@ def create_app() -> FastAPI:
     async def rules_page(request: Request):
         from kestrel.services import engine as engine_service
         from kestrel.services import rules as rule_service
+        from kestrel.services import timeframe
         from kestrel.strategies.schema import prompt_for_ai
         from kestrel.strategies.spec import FIELDS
 
@@ -1247,6 +1365,12 @@ def create_app() -> FastAPI:
                 fields=sorted(FIELDS),
                 ai_prompt=prompt_for_ai(),
                 engine=engine_service.status(),
+                states=rule_service.timeframe_states(),
+                horizon_options=timeframe.options(request.cookies.get("locale") or "zh-CN"),
+                horizon_labels={
+                    item["code"]: item["label"]
+                    for item in timeframe.options(request.cookies.get("locale") or "zh-CN")
+                },
             ),
         )
 
@@ -1287,6 +1411,7 @@ def create_app() -> FastAPI:
     @app.post("/api/rules/validate", response_class=JSONResponse)
     async def api_rules_validate(request: Request):
         from kestrel.services import rules as rule_service
+        from kestrel.services import timeframe
         from kestrel.strategies.spec import RuleError
 
         try:
@@ -1294,10 +1419,29 @@ def create_app() -> FastAPI:
         except Exception:
             body = {}
         code = str((body or {}).get("code") or "").strip()
+        horizon = str((body or {}).get("horizon") or timeframe.DEFAULT).strip().lower()
+        if not timeframe.is_valid(horizon):
+            horizon = timeframe.DEFAULT
         try:
             if code:
-                return rule_service.validate(code)
-            return {"ok": True, "results": rule_service.validate_all()}
+                return rule_service.validate(code, horizon=horizon)
+            results = rule_service.validate_all(horizon=horizon)
+            saved = sum(1 for item in results if item.get("persisted"))
+            skipped = len(results) - saved
+            if skipped and saved:
+                note = f"{skipped} 条规则样本不足，未覆盖原判定。"
+            elif skipped:
+                note = "全部规则样本不足，未覆盖已保存的判定。"
+            else:
+                note = ""
+            return {
+                "ok": True,
+                "timeframe": horizon,
+                "results": results,
+                "persisted": saved,
+                "skipped": skipped,
+                "note": note,
+            }
         except RuleError as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 

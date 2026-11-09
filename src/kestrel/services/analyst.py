@@ -96,11 +96,21 @@ class Pick:
 
 # --------------------------------------------------------------------- brief
 
-def build_brief(markets: list[str], limit: int = 40, history: int = 260) -> dict:
-    """A compact, honest snapshot: what the model is allowed to reason about."""
+def build_brief(markets: list[str], limit: int = 40, history: int | None = None) -> dict:
+    """A compact, honest snapshot: what the model is allowed to reason about.
+
+    The bar size comes from the same resolution the scanner uses. Showing the
+    model daily indicators while the scan trades weekly bars would make its
+    opinion about a different market than the one the user is acting in.
+    """
+    from kestrel.services import advisor, timeframe
+
     conn = connect()
     try:
         settings = config_service.all_values(conn)
+        horizon_code, _advice = advisor.resolve(settings.get("trade.horizon"))
+        cfg = timeframe.get(horizon_code)
+        history = history or cfg.lookback
         rows = conn.execute(
             """
             SELECT s.id, s.market, s.code, s.name, s.sector, s.lot_size, s.pool_rank
@@ -116,8 +126,13 @@ def build_brief(markets: list[str], limit: int = 40, history: int = 260) -> dict
 
         candidates = []
         for row in rows:
-            bars = bars_service.cached_bars(conn, row["id"], history)
-            if len(bars) < 80:
+            bars = timeframe.prepare(
+                bars_service.drop_forming(
+                    bars_service.cached_bars(conn, row["id"], history), row["market"]
+                ),
+                cfg.code,
+            )
+            if len(bars) < cfg.min_bars:
                 continue
             ind = compute(Series.from_bars(bars))
             if not ind:
@@ -172,6 +187,7 @@ def build_brief(markets: list[str], limit: int = 40, history: int = 260) -> dict
             evidence.append(
                 {
                     "rule": item["name"],
+                    "timeframe": v.get("timeframe") or "short",
                     "verdict": v.get("verdict"),
                     "expectancy_r": round(float(v.get("avg_exp") or 0), 3),
                     "edge_over_holding": round(float(v.get("avg_edge") or 0), 3),
@@ -180,6 +196,17 @@ def build_brief(markets: list[str], limit: int = 40, history: int = 260) -> dict
 
     return {
         "as_of": datetime.now(UTC).isoformat(timespec="seconds"),
+        "horizon": {
+            "code": cfg.code,
+            "label": cfg.zh,
+            "bar": cfg.bar,
+            "max_hold_bars": cfg.max_hold,
+            "note": (
+                f"价格与指标都基于 {cfg.bar} 线；计划应在 {cfg.max_hold} 根 {cfg.bar} 线内了结。"
+                if cfg.code != "short"
+                else "日线级别；通常持有几天到几周。"
+            ),
+        },
         "account": {
             "capital_cny": settings.get("account.capital"),
             "risk_per_trade_pct": settings.get("risk.per_trade_pct"),
@@ -191,8 +218,8 @@ def build_brief(markets: list[str], limit: int = 40, history: int = 260) -> dict
         "rule_evidence": evidence,
         "constraints": {
             "long_only": True,
-            "min_stop_pct": MIN_STOP_PCT * 100,
-            "max_stop_pct": MAX_STOP_PCT * 100,
+            "min_stop_pct": cfg.stop_band[0] * 100,
+            "max_stop_pct": cfg.stop_band[1] * 100,
             "min_reward_risk": MIN_R,
             "max_picks": MAX_PICKS,
         },
@@ -301,8 +328,11 @@ def validate_pick(raw: dict, brief: dict) -> tuple[Pick | None, str]:
 
     risk = entry_low - stop
     stop_pct = risk / entry_low
-    if not (MIN_STOP_PCT <= stop_pct <= MAX_STOP_PCT):
-        return None, f"止损距离 {stop_pct * 100:.1f}% 超出 {MIN_STOP_PCT*100:.0f}%–{MAX_STOP_PCT*100:.0f}%"
+    limits = brief.get("constraints") or {}
+    min_stop = float(limits.get("min_stop_pct", MIN_STOP_PCT * 100)) / 100
+    max_stop = float(limits.get("max_stop_pct", MAX_STOP_PCT * 100)) / 100
+    if not (min_stop <= stop_pct <= max_stop):
+        return None, f"止损距离 {stop_pct * 100:.1f}% 超出 {min_stop*100:.0f}%–{max_stop*100:.0f}%"
     if target <= entry_low:
         return None, "目标价不高于入场价"
     if (target - entry_low) / risk < MIN_R:
@@ -543,6 +573,7 @@ def ingest() -> dict:
 def _store(accepted: list[dict], brief: dict, label: str, raw_reply: dict) -> int:
     conn = connect()
     saved = 0
+    horizon_code = str((brief.get("horizon") or {}).get("code") or "short")
     try:
         lots = {
             f"{r['market']}:{r['code']}": r["lot_size"]
@@ -574,9 +605,9 @@ def _store(accepted: list[dict], brief: dict, label: str, raw_reply: dict) -> in
                      risk_amount, est_fees, breakeven, r_multiple, confidence,
                      valid_until, invalidation, explain_zh, explain_en, status,
                      action, headline, learn_zh, learn_en,
-                     source, ai_model, ai_thesis, ai_confidence)
+                     source, ai_model, ai_thesis, ai_confidence, horizon)
                 VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active',
-                        ?,?,?,'', 'ai',?,?,?)
+                        ?,?,?,'', 'ai',?,?,?,?)
                 """,
                 (
                     symbol_id, pick.market, pick.code, pick.name, currency,
@@ -588,7 +619,7 @@ def _store(accepted: list[dict], brief: dict, label: str, raw_reply: dict) -> in
                     to_micro(risk_amount), to_micro(fees),
                     to_micro(pick.entry_low + fees / max(1, qty)),
                     round(r_multiple, 2), pick.conviction / 100.0,
-                    valid_until(pick.market),
+                    valid_until(pick.market, horizon_code),
                     json.dumps([pick.invalidation or "model_invalidation"]),
                     pick.thesis, "",
                     pick.action,
@@ -597,6 +628,7 @@ def _store(accepted: list[dict], brief: dict, label: str, raw_reply: dict) -> in
                     label,
                     pick.thesis,
                     pick.conviction,
+                    horizon_code,
                 ),
             )
             saved += 1

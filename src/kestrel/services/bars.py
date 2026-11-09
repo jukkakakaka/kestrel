@@ -61,6 +61,29 @@ def _upsert(conn: sqlite3.Connection, symbol_id: int, bars: list[dict]) -> None:
     )
 
 
+def _depth(conn: sqlite3.Connection, symbol_id: int) -> int:
+    row = conn.execute("SELECT bars_depth FROM symbol WHERE id=?", (symbol_id,)).fetchone()
+    return int(row["bars_depth"] or 0) if row else 0
+
+
+def _set_depth(conn: sqlite3.Connection, symbol_id: int, depth: int) -> None:
+    conn.execute("UPDATE symbol SET bars_depth=? WHERE id=?", (int(depth), symbol_id))
+
+
+def needs_fetch(
+    conn: sqlite3.Connection, symbol_id: int, market: str, bars: list[dict], limit: int
+) -> bool:
+    """Should this symbol be re-fetched?
+
+    Two different reasons: the data is old, or it is fresh but was never fetched
+    this deep. Without the second check, switching to a monthly horizon would
+    keep reading three years of dailies forever because nothing was "stale".
+    """
+    if is_stale(bars, market):
+        return True
+    return len(bars) < limit and _depth(conn, symbol_id) < limit
+
+
 async def get_bars(
     conn: sqlite3.Connection,
     symbol_id: int,
@@ -68,11 +91,9 @@ async def get_bars(
     code: str,
     limit: int = 260,
 ) -> list[dict]:
-    """Return cached bars, fetching when the cache is empty or older than a day."""
-    cached = _rows(conn, symbol_id, limit)
-    latest = cached[-1]["date"] if cached else None
-    stale = latest is None or str(date.today() - timedelta(days=4)) > str(latest)
-    if cached and not stale:
+    """Return cached bars, fetching when the cache is behind or too shallow."""
+    cached = drop_forming(_rows(conn, symbol_id, limit), market)
+    if cached and not needs_fetch(conn, symbol_id, market, cached, limit):
         return cached
     try:
         bars = await fetch_daily(market, code, limit=limit)
@@ -80,19 +101,47 @@ async def get_bars(
         log.warning("bar refresh failed for %s:%s (%s)", market, code, exc)
         return cached
     if bars:
-        _upsert(conn, symbol_id, bars)
+        save_bars(conn, symbol_id, bars, depth=limit)
         conn.commit()
-    return _rows(conn, symbol_id, limit)
+    return drop_forming(_rows(conn, symbol_id, limit), market)
 
 
 def cached_bars(conn: sqlite3.Connection, symbol_id: int, limit: int = 260) -> list[dict]:
     return _rows(conn, symbol_id, limit)
 
 
-def is_stale(bars: list[dict]) -> bool:
+def drop_forming(bars: list[dict], market: str | None = None) -> list[dict]:
+    """Drop a trailing bar for a session that has not closed yet.
+
+    Providers start returning today's candle as soon as the market opens, so a
+    mid-session refresh would otherwise let a half-built bar drive indicators —
+    the signal appears at 10:00 and evaporates by the close. Everything in this
+    app is a close-confirmed decision, so the forming bar has to go.
+    """
+    if not bars or not market or str(market).upper() not in ("CN", "HK", "US"):
+        return bars
+    from kestrel.services.calendar import last_closed_session
+
+    if str(bars[-1]["date"])[:10] > last_closed_session(market):
+        return bars[:-1]
+    return bars
+
+
+def is_stale(bars: list[dict], market: str | None = None) -> bool:
+    """Is the cache behind the last session that has actually closed?
+
+    The old check was ``today - 4 days > last_date``, which was meant to survive a
+    long weekend but ended up letting a Tuesday scan run on Friday's bars. When
+    the market is known we ask the trading calendar instead.
+    """
     if not bars:
         return True
-    return str(date.today() - timedelta(days=4)) > str(bars[-1]["date"])
+    last = str(bars[-1]["date"])[:10]
+    if market and str(market).upper() in ("CN", "HK", "US"):
+        from kestrel.services.calendar import last_closed_session
+
+        return last < last_closed_session(market)
+    return str(date.today() - timedelta(days=4)) > last
 
 
 async def fetch_only(market: str, code: str, limit: int = 260) -> list[dict]:
@@ -104,9 +153,12 @@ async def fetch_only(market: str, code: str, limit: int = 260) -> list[dict]:
         return []
 
 
-def save_bars(conn: sqlite3.Connection, symbol_id: int, bars: list[dict]) -> None:
-    if bars:
-        _upsert(conn, symbol_id, bars)
+def save_bars(conn: sqlite3.Connection, symbol_id: int, bars: list[dict], depth: int = 0) -> None:
+    if not bars:
+        return
+    _upsert(conn, symbol_id, bars)
+    if depth:
+        _set_depth(conn, symbol_id, depth)
 
 
 def valid_count(bars: list[dict]) -> int:

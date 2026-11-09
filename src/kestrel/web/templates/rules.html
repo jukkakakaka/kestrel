@@ -8,10 +8,25 @@
     <div class="sub">规则是数据，不是代码。任何人都能加一条，然后由验证器决定它值不值得用。</div>
   </div>
   <div class="page-actions">
+    <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:6px;">
+      {{ t('rules.horizon') }}
+      <select id="validate-horizon" style="font-size:12.5px;padding:4px 6px;">
+        {% for h in horizon_options %}
+        <option value="{{ h.code }}" {% if h.beta %}data-beta="1"{% endif %}>{{ h.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <button class="btn ghost" id="validate-all">全部重新验证</button>
     <button class="btn" id="new-rule">写一条新规则</button>
   </div>
 </div>
+
+<script>
+  function currentHorizon() {
+    var sel = document.getElementById('validate-horizon');
+    return sel ? sel.value : 'short';
+  }
+</script>
 
 <div id="rule-flash" class="notice hidden"></div>
 
@@ -33,6 +48,7 @@
 <div class="notice">
   判定看的是<strong>超额收益</strong>：同样的入场点、同样的持有天数、不设止损，能跑赢它才算有本事。
   只看「赚了多少钱」没有意义——牛市里随便买都赚。
+  <br><span class="muted" style="font-size:12.5px;">{{ t('rules.horizon_hint') }}</span>
 </div>
 
 {% for r in rules %}
@@ -45,6 +61,16 @@
     {% elif r.last_verdict == '无优势' %}<span class="badge avoid">无优势</span>
     {% elif r.last_verdict %}<span class="badge wait">{{ r.last_verdict }}</span>
     {% else %}<span class="badge wait">未验证</span>{% endif %}
+    {% set tf_states = states.get(r.code, {}) %}
+    {% for h in horizon_options %}
+      {% set s = tf_states.get(h.code) %}
+      {% if s %}
+      <span class="tiny muted" title="最近验证 {{ s.validated_at[:16] }} · {{ s.symbols }} 只">
+        {{ h.label.split(' · ')[0] }}
+        <b class="{{ 'up' if s.verdict == '有优势' else ('down' if s.verdict == '无优势' else '') }}">{{ s.verdict }}</b>
+      </span>
+      {% endif %}
+    {% endfor %}
     <span class="spacer"></span>
     <label class="switch" title="启用后才会产生建议">
       <input type="checkbox" class="rule-toggle" data-code="{{ r.code }}" {% if r.enabled %}checked{% endif %}>
@@ -67,6 +93,11 @@
         不动持有 {{ '%+.3f' % f.bench }} · 超额
         <span class="{{ 'up' if f.edge > 0 else 'down' }}">{{ '%+.3f' % f.edge }}</span>
       </div>
+      {% if f.pf is defined %}
+      <div class="tiny muted" style="margin-top:1px;">
+        PF {{ '%.2f' | format(f.pf) }} · 回撤 {{ '%.1f' | format(f.dd) }}R · 连亏 {{ f.streak }}
+      </div>
+      {% endif %}
     </div>
     {% endfor %}
   </div>
@@ -75,6 +106,11 @@
   <footer class="advice-foot">
     <span class="deadline">
       {% if r.last_validated %}上次验证 {{ r.last_validated[:16] }}{% else %}还没验证过{% endif %}
+      {% if r.validation %}
+        · {{ horizon_labels.get(r.validation.timeframe or 'short', r.validation.timeframe or 'short') }}
+        · {{ r.validation.symbols }} 只
+        · {{ r.validation.folds | sum(attribute='n') }} 笔
+      {% endif %}
     </span>
     <button class="btn sm ghost" data-validate="{{ r.code }}">验证这一条</button>
     <button class="btn sm ghost" data-edit="{{ r.code }}">改</button>
@@ -233,7 +269,7 @@
         return fetch('/api/rules/validate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: res.code })
+          body: JSON.stringify({ code: res.code, horizon: currentHorizon() })
         }).then(function () { location.reload(); });
       });
   });
@@ -256,8 +292,16 @@
       fetch('/api/rules/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: code })
-      }).then(function () { location.reload(); });
+        body: JSON.stringify({ code: code, horizon: currentHorizon() })
+      }).then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (res && res.note) {
+            say(res.note, 'warn');
+            setTimeout(function () { location.reload(); }, 1600);
+          } else {
+            location.reload();
+          }
+        });
     });
   });
 
@@ -269,8 +313,16 @@
       fetch('/api/rules/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: '{}'
-      }).then(function () { location.reload(); });
+        body: JSON.stringify({ horizon: currentHorizon() })
+      }).then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (res && res.note) {
+            say(res.note, 'warn');
+            setTimeout(function () { location.reload(); }, 1600);
+          } else {
+            location.reload();
+          }
+        });
     });
   }
 

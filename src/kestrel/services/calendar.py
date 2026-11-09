@@ -169,6 +169,30 @@ def next_session_close(market: str) -> str:
     return (now + timedelta(days=1)).astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")
 
 
+def last_closed_session(market: str) -> str:
+    """ISO date of the most recent session that has already closed.
+
+    Cache freshness has to be judged against this, not against "today minus N
+    days": a four-day tolerance meant a Tuesday scan could happily run on last
+    Friday's bars. Before the close the answer is the previous session; after it,
+    today.
+    """
+    market = market.upper()
+    tz = ZoneInfo(MARKET_TZ.get(market, "UTC"))
+    now = datetime.now(tz)
+    sessions = SESSIONS.get(market, [(time(16, 0), time(16, 0))])
+    last_close = sessions[-1][1]
+
+    day = now.date()
+    for _ in range(30):
+        if is_trading_day(market, day):
+            close = datetime.combine(day, last_close, tzinfo=tz)
+            if close <= now:
+                return day.isoformat()
+        day -= timedelta(days=1)
+    return (now.date() - timedelta(days=1)).isoformat()
+
+
 def upcoming_holidays(market: str, limit: int = 4) -> list[str]:
     today = date.today()
     days = sorted(d for d in _holidays(market.upper()) if d >= today.isoformat())

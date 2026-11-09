@@ -14,6 +14,7 @@ DEFAULTS: dict[str, Any] = {
     "risk.max_per_sector": 2,
     "scan.auto_enabled": False,
     "scan.interval_minutes": 60,
+    "trade.horizon": "auto",
     "scan.markets": ["CN", "HK", "US"],
     "scan.min_score": 0.55,
     "scan.universe": "both",

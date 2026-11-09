@@ -17,6 +17,7 @@ import json
 import logging
 import time
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from kestrel.core.money import to_micro
 from kestrel.db.engine import connect
@@ -25,7 +26,9 @@ from kestrel.planning import builder
 from kestrel.receipts import tokens
 from kestrel.services import bars as bars_service
 from kestrel.services import config as config_service
+from kestrel.services import journal as journal_service
 from kestrel.services import rules as rule_service
+from kestrel.services import timeframe
 from kestrel.services import universe as universe_service
 
 log = logging.getLogger(__name__)
@@ -64,7 +67,14 @@ def _sector_key(sector: str) -> str:
     return text
 
 
-def _learn_zh(plan, ind: dict, signal, risk_share: float) -> str:
+HOLD_ZH = {
+    "short": "通常持有几天到几周",
+    "medium": "通常持有几周到两个月",
+    "long": "通常持有几个月，按月线级别管理",
+}
+
+
+def _learn_zh(plan, ind: dict, signal, risk_share: float, horizon: str = "short") -> str:
     if plan is None:
         return (
             "这是什么：现在不需要动手。\n"
@@ -74,14 +84,60 @@ def _learn_zh(plan, ind: dict, signal, risk_share: float) -> str:
     risk_pct = float((plan.entry_low - plan.stop) / plan.entry_low * 100)
     name = STRATEGY_NAME.get(signal.code, "当前策略")
     return (
-        "这是什么：一笔做多（先买后卖）的计划，通常持有几天到几周。\n"
+        f"这是什么：一笔做多（先买后卖）的计划，{HOLD_ZH.get(horizon, HOLD_ZH['short'])}。\n"
         f"为什么现在做：「{name}」在 {float(ind.get('last') or 0):.2f} 附近给出信号。\n"
         f"如果错了会怎样：跌破 {plan.stop:.2f}（约 −{risk_pct:.1f}%）就卖，"
         f"这一笔最多亏 {plan.risk_amount:.2f}，占你总资金约 {risk_share:.1f}%。"
     )
 
 
-async def _load_bars(conn, symbols: list[dict], limit: int = 260) -> tuple[dict, list[dict]]:
+def _used_exposure_cny() -> Decimal:
+    """Cost basis of what is already open, in CNY.
+
+    Entry price is the only price the journal owns reliably, so exposure is
+    measured at cost. That understates a winner and overstates a loser — both are
+    more honest than pretending we know a live quote at scan time.
+    """
+    total = Decimal("0")
+    try:
+        for position in journal_service.positions():
+            total += journal_service.to_cny(
+                Decimal(str(position["entry"])) * int(position["qty"]), position["currency"]
+            )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not read open positions: %s", exc)
+    return total
+
+
+def _plan_cost_cny(plan) -> Decimal:
+    return journal_service.to_cny(Decimal(str(plan.entry_low)) * plan.qty, plan.currency)
+
+
+def _exceeds_exposure(cost_cny: Decimal, cap: Decimal, used: Decimal, added: Decimal) -> bool:
+    """Would this plan push total exposure over the ceiling?
+
+    A zero or negative cap means "not configured" and must not block everything —
+    the setting shipped with a default of 60, but an explicit 0 is a legitimate
+    way of saying "no new positions" only if the user asked for it. Treating it
+    as unlimited keeps the old behaviour for anyone who never opened the page.
+    """
+    if cap <= 0:
+        return False
+    return used + added + cost_cny > cap
+
+
+def _resolve_horizon(settings_map: dict) -> tuple[str, dict | None]:
+    """Turn ``trade.horizon`` into a concrete bar size.
+
+    Delegates to the advisor so the scanner and the AI brief can never disagree
+    about which bars the numbers were measured on.
+    """
+    from kestrel.services import advisor
+
+    return advisor.resolve(settings_map.get("trade.horizon", timeframe.AUTO))
+
+
+async def _load_bars(conn, symbols: list[dict], limit: int = 260) -> dict[int, list[dict]]:
     """Read cache, refresh stale symbols concurrently, then persist.
 
     Network calls run in parallel but every database write happens afterwards on
@@ -92,7 +148,7 @@ async def _load_bars(conn, symbols: list[dict], limit: int = 260) -> tuple[dict,
     for sym in symbols:
         rows = bars_service.cached_bars(conn, sym["id"], limit)
         cached[sym["id"]] = rows
-        if bars_service.is_stale(rows):
+        if bars_service.needs_fetch(conn, sym["id"], sym["market"], rows, limit):
             need.append(sym)
 
     if need:
@@ -106,24 +162,15 @@ async def _load_bars(conn, symbols: list[dict], limit: int = 260) -> tuple[dict,
         results = await asyncio.gather(*(pull(s) for s in need))
         for symbol_id, rows in results:
             if rows:
-                bars_service.save_bars(conn, symbol_id, rows)
+                bars_service.save_bars(conn, symbol_id, rows, depth=limit)
                 cached[symbol_id] = rows[-limit:]
         conn.commit()
 
-    skipped: list[dict] = []
-    for sym in symbols:
-        rows = cached.get(sym["id"]) or []
-        if len(rows) < MIN_BARS:
-            skipped.append(
-                {
-                    "market": sym["market"],
-                    "code": sym["code"],
-                    "name": sym["name"],
-                    "reason": "no_bars" if not rows else "short_history",
-                    "bars": len(rows),
-                }
-            )
-    return cached, skipped
+    markets = {sym["id"]: sym["market"] for sym in symbols}
+    return {
+        symbol_id: bars_service.drop_forming(rows, markets.get(symbol_id))
+        for symbol_id, rows in cached.items()
+    }
 
 
 async def _resolve_missing(symbols: list[dict]) -> None:
@@ -182,10 +229,14 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
         risk_pct = float(settings_map.get("risk.per_trade_pct", 2.0))
         mode = str(settings_map.get("scan.universe", "both"))
         pool_size = int(settings_map.get("scan.pool_size", 30))
+        exposure_pct = float(settings_map.get("risk.max_total_exposure_pct", 60) or 60)
+        horizon_code, advice = _resolve_horizon(settings_map)
+        horizon = timeframe.get(horizon_code)
 
         cur = conn.execute(
-            "INSERT INTO scan_run (trigger, markets, universe, pool_size) VALUES (?,?,?,?)",
-            (trigger, json.dumps(markets), mode, pool_size),
+            "INSERT INTO scan_run (trigger, markets, universe, pool_size, horizon)"
+            " VALUES (?,?,?,?,?)",
+            (trigger, json.dumps(markets), mode, pool_size, horizon.code),
         )
         scan_id = cur.lastrowid
         conn.commit()
@@ -203,12 +254,36 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
     try:
         symbols = _pick_symbols(markets, mode, pool_size)
         await _resolve_missing(symbols)
-        bars_map, skipped = await _load_bars(conn, symbols)
+        bars_map = await _load_bars(conn, symbols, limit=horizon.lookback)
+
+        # Aggregate first, then decide who is too short: a symbol with 300 daily
+        # bars is fine weekly and thin monthly, so the threshold belongs to the
+        # horizon, not to the cache.
+        prepared: dict[int, list[dict]] = {}
+        skipped: list[dict] = []
+        for sym in symbols:
+            rows = bars_map.get(sym["id"]) or []
+            folded = timeframe.prepare(rows, horizon.code)
+            if len(folded) < horizon.min_bars:
+                skipped.append(
+                    {
+                        "market": sym["market"],
+                        "code": sym["code"],
+                        "name": sym["name"],
+                        "reason": "no_bars" if not rows else "short_history",
+                        "bars": len(folded),
+                    }
+                )
+                continue
+            prepared[sym["id"]] = folded
 
         strategies = rule_service.registry()
-        # Only enabled rules may publish advice. Validation switches off the ones
-        # measured as having no edge; the user can override on the rules page.
-        allowed = {code: True for code in strategies}
+
+        # A rule measured as losing money on *this* bar size may not publish.
+        # Saying nothing is a feature.
+        blocked = rule_service.blocked_for(horizon.code)
+        allowed = {code: code not in blocked for code in strategies}
+
         signals = plans = 0
         near: list[dict] = []
         rejected: list[dict] = []
@@ -216,9 +291,16 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
         sector_count: dict[str, int] = {}
         max_per_sector = int(settings_map.get("risk.max_per_sector", 2))
 
+        # Exposure is a portfolio fact, not a per-plan one: three plans each
+        # risking 2% are not three independent decisions. The setting existed in
+        # the UI for a while without anything reading it.
+        exposure_cap = Decimal(str(capital)) * Decimal(str(exposure_pct)) / Decimal("100")
+        exposure_used = _used_exposure_cny()
+        exposure_added = Decimal("0")
+
         for sym in symbols:
-            rows = bars_map.get(sym["id"]) or []
-            if len(rows) < MIN_BARS:
+            rows = prepared.get(sym["id"]) or []
+            if not rows:
                 continue
             ind = compute(Series.from_bars(rows))
             if not ind:
@@ -262,6 +344,7 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
                 risk_pct=risk_pct,
                 lot_size=sym["lot_size"] or 1,
                 broker=broker,
+                horizon=horizon.code,
             )
             if plan is None:
                 if why == "lot_too_big":
@@ -295,6 +378,24 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
             if sector:
                 sector_count[sector] = sector_count.get(sector, 0) + 1
 
+            # Portfolio ceiling. Checked last so the more specific rejections
+            # (bad stop, sector cap) keep their explanations.
+            cost_cny = _plan_cost_cny(plan)
+            if _exceeds_exposure(cost_cny, exposure_cap, exposure_used, exposure_added):
+                rejected.append(
+                    {
+                        "market": sym["market"],
+                        "code": sym["code"],
+                        "name": sym["name"],
+                        "reason": "exposure_cap",
+                        "score": round(best.score, 3),
+                        "need": float(cost_cny),
+                        "left": float(exposure_cap - exposure_used - exposure_added),
+                    }
+                )
+                continue
+            exposure_added += cost_cny
+
             plans += 1
 
             risk_share = float(plan.risk_amount) / capital * 100 if capital else 0.0
@@ -315,9 +416,9 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
                      entry_low, entry_high, stop, target1, target2, qty, lot_size,
                      risk_amount, est_fees, breakeven, r_multiple, confidence,
                      valid_until, invalidation, explain_zh, explain_en, status,
-                     action, headline, learn_zh, learn_en)
+                     action, headline, learn_zh, learn_en, horizon)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active',
-                        ?,?,?,?)
+                        ?,?,?,?,?)
                 """,
                 (
                     scan_id, sym["id"], plan.market, plan.code, plan.name, plan.currency,
@@ -332,8 +433,9 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
                     plan.explain_zh, plan.explain_en,
                     ACTION_BUY,
                     _headline_zh(ACTION_BUY, plan, ind, sym["name"]),
-                    _learn_zh(plan, ind, best, risk_share),
+                    _learn_zh(plan, ind, best, risk_share, horizon.code),
                     "",
+                    horizon.code,
                 ),
             )
             rec_id = cur.lastrowid
@@ -385,6 +487,19 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
             "universe": mode,
             "pool": pool_counts,
             "allowed": allowed,
+            "horizon": {
+                "code": horizon.code,
+                "label": horizon.zh,
+                "requested": str(settings_map.get("trade.horizon", timeframe.AUTO)),
+                "auto": advice is not None,
+                "reason": (advice or {}).get("primary_reason") or "",
+            },
+            "exposure": {
+                "cap": float(exposure_cap),
+                "used": float(exposure_used),
+                "added": float(exposure_added),
+                "pct": exposure_pct,
+            },
             "duration_ms": duration,
             "finished_at": datetime.now(UTC).isoformat(timespec="seconds"),
         }

@@ -42,6 +42,69 @@
 
 <div id="scan-feedback" class="notice hidden"></div>
 
+<section class="card" id="horizon-card">
+  <div class="card-head">
+    <h2>{{ t('horizon.title') }}</h2>
+    <span class="meta">
+      {{ t('horizon.in_force') }} · <strong>{{ horizon.label }}</strong>
+      {% if horizon.beta %}<span class="badge wait" style="font-size:11px;">{{ t('horizon.beta') }}</span>{% endif %}
+      {% if horizon.pinned %}· {{ t('horizon.pinned') }}{% else %}· {{ t('horizon.auto_on') }}{% endif %}
+    </span>
+  </div>
+  <div class="card-body">
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 10px;" id="hz-row">
+      <button class="btn sm {% if not horizon.pinned %}{% else %}ghost{% endif %}" data-hz="auto">
+        {{ t('horizon.auto') }}
+      </button>
+      {% for o in horizon.options %}
+      <button class="btn sm {% if horizon.pinned and horizon.requested == o.code %}{% else %}ghost{% endif %}"
+              data-hz="{{ o.code }}">
+        {{ o.label }}{% if o.beta %} · {{ t('horizon.beta') }}{% endif %}
+      </button>
+      {% endfor %}
+      <span class="spacer" style="flex:1;"></span>
+      <button class="btn sm ghost" id="hz-recompute">{{ t('horizon.recompute') }}</button>
+    </div>
+
+    <p class="hint" style="margin:0 0 10px;">{{ t('horizon.hint') }}</p>
+
+    {% set adv = horizon.advice %}
+    {% if adv and adv.reasons %}
+      {% set m = adv.metrics or {} %}
+      {% if m.breadth is defined %}
+      <div class="advice-figs" style="grid-template-columns: repeat(3, minmax(0,1fr));">
+        <div><span class="k">{{ t('horizon.breadth') }}</span><span class="v">{{ '%.0f'|format((m.breadth or 0) * 100) }}%</span></div>
+        <div><span class="k">{{ t('horizon.atr') }}</span><span class="v">{{ '%.1f'|format(m.atr_pct or 0) }}%</span></div>
+        <div><span class="k">{{ t('horizon.cost') }}</span><span class="v">{{ '%.1f'|format((m.cost_drag or {}).get('short', 0)) }}%</span></div>
+      </div>
+      {% endif %}
+      <details {% if not horizon.pinned %}open{% endif %} style="margin-top:10px;">
+        <summary>{{ t('horizon.why') }}</summary>
+        <ul style="margin:8px 0 0;padding-left:18px;line-height:1.85;font-size:13px;">
+          {% for r in adv.reasons %}<li>{{ r.zh }}</li>{% endfor %}
+        </ul>
+        <p class="muted" style="font-size:12px;margin-top:8px;">
+          {{ t('horizon.score') }}：
+          {% for code, value in (adv.scores or {}).items() %}
+            {{ horizon.labels.get(code, code) }} <b class="mono">{{ '%+.1f'|format(value) }}</b>{% if not loop.last %} · {% endif %}
+          {% endfor %}
+        </p>
+      </details>
+    {% else %}
+      <p class="muted">{{ t('horizon.insufficient') }}</p>
+    {% endif %}
+
+    {% if adv and adv.blocked %}
+      <div class="notice warn" style="margin-top:10px;">
+        <strong>{{ t('horizon.blocked') }}</strong> {{ adv.note }}
+      </div>
+    {% endif %}
+    {% if horizon.beta %}
+      <p class="hint" style="margin-top:10px;">{{ t('horizon.beta_hint') }}</p>
+    {% endif %}
+  </div>
+</section>
+
 {% if analyst_runs %}
 <section class="card">
   <div class="card-head">
@@ -83,6 +146,9 @@
           <span class="badge wait" title="{{ r.ai_thesis or '' }}">AI 分析</span>
         {% else %}
           <span class="badge avoid" title="由规则计算">{{ t('strategy.' + r.strategy) }}</span>
+        {% endif %}
+        {% if r.horizon and r.horizon != 'short' %}
+          <span class="badge wait">{{ horizon.labels.get(r.horizon, r.horizon) }}</span>
         {% endif %}
         {% if r.status == 'active' %}
           <span class="badge buy">{{ t('adv.action_buy') }}</span>
@@ -262,6 +328,37 @@
     box.textContent = msg;
     box.classList.remove('hidden');
     if (!sticky) { setTimeout(function () { box.classList.add('hidden'); }, 9000); }
+  }
+
+  function setHorizon(payload, done) {
+    fetch('/api/horizon', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.ok) { flash((res.error || 'horizon failed'), 'err', true); return; }
+        if (done) { done(res); return; }
+        location.reload();
+      })
+      .catch(function (e) { flash(String(e), 'err', true); });
+  }
+
+  document.querySelectorAll('[data-hz]').forEach(function (el) {
+    el.addEventListener('click', function () {
+      el.disabled = true;
+      setHorizon({ horizon: el.getAttribute('data-hz') });
+    });
+  });
+
+  var recompute = document.getElementById('hz-recompute');
+  if (recompute) {
+    recompute.addEventListener('click', function () {
+      recompute.disabled = true;
+      flash('正在重新判断…', '', true);
+      setHorizon({ force: true }, function () { location.reload(); });
+    });
   }
 
   if (runBtn) {
