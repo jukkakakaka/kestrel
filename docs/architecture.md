@@ -22,6 +22,8 @@ desktop window, a local browser app, or a container behind a reverse proxy.
 | Layer | Module | Responsibility |
 |---|---|---|
 | Data | `datasources/` | One adapter per provider, circuit breaker fallback chain, daily bar cache |
+| Timeframes | `services/timeframe.py` | Daily / weekly / monthly horizons: bar folding plus the lookback, warmup, time-stop and stop band each one needs |
+| Regime | `services/advisor.py` | Which horizon the current tape, capital and positions actually suit |
 | Indicators | `indicators/engine.py` | SMA / EMA / RSI / ATR / slope / volume ratio, plain Python |
 | Strategies | `strategies/base.py` | Pure functions of the indicator snapshot, return a scored signal |
 | Planning | `planning/builder.py` | Signal → executable plan: entry zone, ATR stop, 2R/3R targets, lot-aware size, fees, break-even, expiry |
@@ -41,9 +43,10 @@ desktop window, a local browser app, or a container behind a reverse proxy.
    `qty`, `stop` or `target` after the plan is built.
 3. **Agents never block a scan.** Every agent call has a fallback to the rules text.
 4. **A plan without a stop does not exist.** `build()` returns `None` when the stop
-   distance is outside 1.5–15 % or when one lot exceeds the risk budget.
-5. **Every recommendation is stamped with its market and an expiry.** No open-ended
-   advice.
+   distance is outside the band for its horizon (1.5–15 % daily, 3–18 % weekly,
+   5–30 % monthly) or when one lot exceeds the risk budget.
+5. **Every recommendation is stamped with its market, its horizon and an expiry.**
+   No open-ended advice. A weekly plan is not allowed to die at tonight's close.
 
 ## Lookahead safety
 
@@ -53,12 +56,23 @@ exists to make this explicit; any future optimisation that breaks it should rais
 
 ## Data flow for a scan
 
-1. `run_scan()` loads the watchlist for the enabled markets.
-2. Bars are served from `bar_daily`, refreshed from Eastmoney when stale.
-3. Each strategy scores the snapshot; the best score above `scan.min_score` wins.
-4. `build()` converts the signal into a plan (or refuses).
-5. The recommendation is stored, a receipt token minted, and a notification queued.
-6. `dispatch()` sends it; the phone link writes back a `receipt` row with the
+1. `run_scan()` resolves the horizon: `trade.horizon` if pinned, otherwise
+   `services/advisor.py` scores daily / weekly / monthly against pool breadth,
+   volatility, capital and fee drag.
+2. `run_scan()` loads the watchlist for the enabled markets and asks for
+   `horizon.lookback` daily bars — a fresh cache that is too shallow still gets
+   re-fetched, otherwise monthly bars would never appear.
+3. Bars are served from `bar_daily`, refreshed from Eastmoney when stale, and a
+   trailing bar for a session that has not closed is dropped so a half-built
+   candle cannot drive indicators. Daily bars are then folded to the horizon's
+   bar size.
+4. Each strategy scores the snapshot; the best score above `scan.min_score` wins,
+   and rules measured as losing money *on this bar size* are skipped.
+5. `build()` converts the signal into a plan (or refuses).
+6. The recommendation is stored with its horizon, a receipt token minted, and a
+   notification queued. The exposure ceiling is applied across the whole batch,
+   so three plans risking 2 % each are not counted as independent.
+7. `dispatch()` sends it; the phone link writes back a `receipt` row with the
    deviation between plan and fill.
 
 ## Failure modes

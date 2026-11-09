@@ -54,6 +54,10 @@ Every card states its origin: `AI · deepseek-chat · conviction 68` or `Trend p
 ## What it does
 
 - **Three markets, independently switched** — A-shares, Hong Kong, US. Turn off the ones you do not trade.
+- **Three horizons, recommended for you** — swing on daily bars, position on weekly, long-term on
+  monthly (Beta). By default it weighs pool breadth, volatility, account size and your actual fee
+  schedule to say which one suits now; pin one and it stops asking. The horizon moves the backtest's
+  holding period, the stop band and the plan's lifetime together — not just a label.
 - **Screening, not just monitoring** — each run draws from a market-cap ranked pool per market
   (30 by default), not only from your existing positions. A cold run evaluates ~85 symbols; warm
   cache finishes in under a second.
@@ -137,17 +141,22 @@ in CI rather than in your hands.
 ```mermaid
 flowchart LR
     A[Universe<br/>market-cap ranked] --> B[Daily bars<br/>cached]
-    B --> C[Indicators<br/>26 fields]
-    C --> D{Engine}
-    D -->|Rules| E[Conditions must all hold<br/>score ranks the survivors]
-    D -->|Model| F[Brief: indicators + account<br/>+ measured rule record]
-    F --> G[Model picks<br/>action, thesis, stop, target]
-    G --> H[Local risk gate<br/>stop band, R floor, sector cap, affordability]
-    E --> I[Plan<br/>entry band, stop, target, qty, fees, break-even]
+    B --> C{Horizon<br/>daily / weekly / monthly}
+    C --> D[Indicators<br/>26 fields]
+    D --> E{Engine}
+    E -->|Rules| F[Conditions must all hold<br/>score ranks the survivors]
+    E -->|Model| G[Brief: indicators + account<br/>+ per-horizon rule record]
+    G --> H[Model picks<br/>action, thesis, stop, target]
+    F --> I[Local risk gate<br/>stop band, R floor, sector cap, exposure]
     H --> I
-    I --> J[Receipt link -> push -> phone]
-    J --> K[(Journal<br/>plan vs fill)]
+    I --> J[Plan<br/>entry band, stop, target, qty, fees, break-even]
+    J --> K[Receipt link -> push -> phone]
+    K --> L[(Journal<br/>plan vs fill)]
 ```
+
+The horizon is decided first, because how long you intend to hold is what makes a stop sensible
+and a plan's lifetime meaningful. Breadth, daily range, capital and fee drag score the three
+options; when nothing wins clearly it falls back to daily and says so.
 
 When nothing qualifies, the page says why — how far the score fell short, which constraint
 rejected it — rather than inventing a plan to fill the space.
@@ -208,9 +217,16 @@ This is the part most READMEs leave out.
 - **Daily bars only.** No order book, no fund flows, no earnings expectations. On that
   information set the selection edge is close to zero, and the rules page will show you exactly
   that: expectancy is positive, but almost all of it comes from the 2:1 payoff, not from the entry.
+- **Long-term is Beta.** Monthly bars see price and volume and nothing else, and the sample is
+  thinnest. Across ~100 symbols and 25 years, only two or three of the seven shipped rules
+  produce enough trades to judge (`trend_pullback` 96, `washout_bounce` 42); the rest read
+  "insufficient sample", and the ones that can be judged mostly lose to holding. The page shows
+  the trade count next to every verdict — that is the data talking, not a bug.
 - **The stop is doing the work.** Measured against holding the same entry for the same number of
   days with no stop, the excess return of every shipped rule is near zero. Treat the app as a
   discipline and cost tool, not an oracle.
+- **The horizon recommendation is a heuristic**, not a model: breadth, volatility, capital, fee
+  drag, weighted and explained. It can be wrong. Pin the horizon you want and it stops arguing.
 - **WorkBuddy mode is asynchronous** and its finest schedule is hourly.
 - **OCR is not implemented.** Paste confirmations as text; it is more accurate anyway.
 - **Not packaged for Windows CI yet**, though the spec supports it.
@@ -220,7 +236,8 @@ This is the part most READMEs leave out.
 ```
 src/kestrel/
   app.py            FastAPI app, routes, template filters
-  services/         scan, analyst, engine, rules, universe, calendar, edge, statement, bridge
+  services/         scan, analyst, engine, rules, universe, calendar, edge, statement, bridge,
+                    timeframe (bar folding) and advisor (horizon choice)
   strategies/       rule spec compiler, built-in rule library, AI-facing schema
   datasources/      provider chain, Eastmoney/Tencent/Sina, resolver, presets, custom
   planning/         position sizing, stop/target placement, fee-aware plans
@@ -243,7 +260,7 @@ packaging/          PyInstaller spec, macOS build script, icons
 ## Contributing
 
 Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
-`uv run pytest` (86 tests) and `uv run ruff check src tests` must pass.
+`uv run pytest` (107 tests) and `uv run ruff check src tests` must pass.
 
 ## Disclaimer
 
