@@ -18,7 +18,7 @@ from kestrel.datasources.base import guess_market
 from kestrel.datasources.chain import QuoteChain, default_chain
 from kestrel.db.engine import connect
 from kestrel.db.migrate import init_db
-from kestrel.i18n import available_locales, load_catalog, translate
+from kestrel.i18n import available_locales, load_catalog, locale_label, translate
 from kestrel.settings import settings
 
 log = logging.getLogger(__name__)
@@ -293,6 +293,7 @@ def create_app() -> FastAPI:
             "t": lambda key, **kw: translate(locale, key, **kw),
             "locale": locale,
             "locales": available_locales(),
+            "locale_label": locale_label,
             "theme": theme,
             "version": __version__,
             "catalog": load_catalog(locale),
@@ -360,6 +361,9 @@ def create_app() -> FastAPI:
         conn = connect()
         try:
             onboarded = bool(config_service.get(conn, "ui.onboarded", False))
+            enabled = [str(m).upper() for m in config_service.get(
+                conn, "scan.markets", ["CN", "HK", "US"]
+            ) or ["CN", "HK", "US"]]
         finally:
             conn.close()
         if not onboarded:
@@ -374,20 +378,27 @@ def create_app() -> FastAPI:
             brief = {"todos": [], "urgent": 0, "headline": "暂时算不出来",
                      "quiet": True, "book": {}, "positions": [], "active_advice": 0}
 
+        marks = ",".join("?" * len(enabled)) or "''"
         conn = connect()
         try:
             rows = conn.execute(
-                """
+                f"""
                 SELECT s.market, s.code, s.name, s.currency, w.note,
                        q.price, q.prev_close, q.change_pct, q.source, q.fetched_at
                 FROM watchlist w
                 JOIN symbol s ON s.id = w.symbol_id
                 LEFT JOIN quote_latest q ON q.symbol_id = s.id
+                WHERE s.market IN ({marks})
                 ORDER BY s.market, s.code
                 LIMIT 8
-                """
+                """,
+                tuple(enabled),
             ).fetchall()
-            watch_count = conn.execute("SELECT COUNT(*) AS n FROM watchlist").fetchone()["n"]
+            watch_count = conn.execute(
+                f"SELECT COUNT(*) AS n FROM watchlist WHERE symbol_id IN"
+                f" (SELECT id FROM symbol WHERE market IN ({marks}))",
+                tuple(enabled),
+            ).fetchone()["n"]
         finally:
             conn.close()
 
@@ -399,25 +410,32 @@ def create_app() -> FastAPI:
                 brief=brief,
                 items=[dict(r) for r in rows],
                 watch_count=watch_count,
-                markets=calendar_service.all_status(),
+                markets=calendar_service.all_status(enabled),
             ),
         )
 
     @app.get("/market", response_class=HTMLResponse)
     async def market_page(request: Request):
         from kestrel.services import calendar as calendar_service
+        from kestrel.services import config as config_service
 
         conn = connect()
         try:
+            enabled = [str(m).upper() for m in config_service.get(
+                conn, "scan.markets", ["CN", "HK", "US"]
+            ) or ["CN", "HK", "US"]]
+            marks = ",".join("?" * len(enabled)) or "''"
             rows = conn.execute(
-                """
+                f"""
                 SELECT s.market, s.code, s.name, s.currency, w.note,
                        q.price, q.prev_close, q.change_pct, q.source, q.fetched_at
                 FROM watchlist w
                 JOIN symbol s ON s.id = w.symbol_id
                 LEFT JOIN quote_latest q ON q.symbol_id = s.id
+                WHERE s.market IN ({marks})
                 ORDER BY s.market, s.code
-                """
+                """,
+                tuple(enabled),
             ).fetchall()
         finally:
             conn.close()
@@ -427,7 +445,8 @@ def create_app() -> FastAPI:
             context=_ctx(
                 request,
                 items=[dict(r) for r in rows],
-                markets=calendar_service.all_status(),
+                markets=calendar_service.all_status(enabled),
+                enabled_markets=enabled,
             ),
         )
 
@@ -949,8 +968,10 @@ def create_app() -> FastAPI:
         from kestrel.datasources import registry as source_registry
         from kestrel.services import channels as channel_service
         from kestrel.services import config as config_service
+        from kestrel.services import prompts as prompt_service
         from kestrel.services import timeframe
         from kestrel.services import universe as universe_service
+        from kestrel.services import updates as updates_service
 
         conn = connect()
         try:
@@ -972,6 +993,9 @@ def create_app() -> FastAPI:
                 channels=channel_service.all_channels(),
                 pool=universe_service.pool_summary(),
                 horizon_options=timeframe.options(request.cookies.get("locale") or "zh-CN"),
+                prompts=prompt_service.prompts(),
+                about=updates_service.info(),
+                update=updates_service.cached() or {},
                 saved=request.query_params.get("saved"),
             ),
         )
@@ -1253,14 +1277,13 @@ def create_app() -> FastAPI:
         if not timeframe.is_valid(horizon_default):
             horizon_default = timeframe.DEFAULT
 
-        from kestrel.strategies.base import registry
-
-        labels = {
-            "trend_pullback": "趋势回踩",
-            "breakout_20": "20 日突破",
-            "mean_reversion": "超跌反弹",
-        }
-        options = [(code, labels.get(code, code)) for code in registry()]
+        # 试跑必须能跑任意标的，而且策略下拉要列出**全部**规则——
+        # 早先这里写死了三条策略的标签，用户自建或后来新增的规则根本选不到。
+        rules = report["rules"]
+        options = [(r["code"], r["name"]) for r in rules if r.get("enabled", 1)]
+        for item in rules:
+            if not item.get("enabled", 1):
+                options.append((item["code"], f'{item["name"]}（已停用）'))
         locale = request.cookies.get("locale") or "zh-CN"
         context = {
             "report": report,
@@ -1298,60 +1321,104 @@ def create_app() -> FastAPI:
 
     @app.post("/sim", response_class=HTMLResponse)
     async def sim_run(request: Request):
+        from kestrel.datasources import resolve as resolver
         from kestrel.services import backtest
         from kestrel.services import bars as bars_service
+        from kestrel.services import rules as rule_service
         from kestrel.services import timeframe as timeframe_service
-        from kestrel.strategies.base import registry
 
         form = await request.form()
         raw = str(form.get("symbol", "")).strip()
-        strategy = str(form.get("strategy", "trend_pullback"))
+        strategy = str(form.get("strategy", "")).strip()
         horizon_code = str(form.get("horizon", "short")).strip().lower()
         if not timeframe_service.is_valid(horizon_code):
             horizon_code = timeframe_service.DEFAULT
         cfg = timeframe_service.get(horizon_code)
 
-        if "/" not in raw:
+        if not raw:
             return templates.TemplateResponse(
                 request=request, name="sim.html",
-                context=_sim_context(request, error="先选一只标的。"),
+                context=_sim_context(request, error="先填一个股票代码。"),
             )
-        market, code = raw.split("/", 1)
-        market = market.upper()
 
-        if strategy not in registry():
+        # 接受 00700 / HK/00700 / 腾讯 三种写法，任意标的都能试跑，
+        # 不再要求先加自选。
+        market = ""
+        code = raw
+        if "/" in raw:
+            head, tail = raw.split("/", 1)
+            if head.upper() in ("CN", "HK", "US"):
+                market, code = head.upper(), tail.strip()
+        found = await resolver.resolve(code, market or None)
+        if found is None:
+            return templates.TemplateResponse(
+                request=request, name="sim.html",
+                context=_sim_context(
+                    request,
+                    error=f"找不到「{raw}」。检查代码是否正确，或者直接写成 市场/代码，比如 US/AAPL。",
+                    form={"symbol": raw, "strategy": strategy, "horizon": horizon_code},
+                ),
+            )
+        market, code = found.market, found.code
+
+        rules = {r["code"]: r for r in rule_service.all_rules()}
+        if strategy not in rules:
             strategy = "trend_pullback"
 
         error = None
         result = None
+        note = ""
         conn = connect()
         try:
-            row = conn.execute(
+            conn.execute(
+                """
+                INSERT INTO symbol (market, code, name, currency, lot_size, updated_at)
+                VALUES (?,?,?,?,?,datetime('now'))
+                ON CONFLICT(market, code) DO UPDATE SET
+                    name=excluded.name, updated_at=datetime('now')
+                """,
+                (
+                    market, code, found.name, found.currency, found.lot_size,
+                ),
+            )
+            conn.commit()
+            symbol_id = conn.execute(
                 "SELECT id FROM symbol WHERE market=? AND code=?", (market, code)
-            ).fetchone()
-            if row is None:
-                error = "找不到这只标的，先去行情页加进自选。"
-            else:
-                daily = await bars_service.get_bars(
-                    conn, row["id"], market, code, limit=cfg.lookback
-                )
-                # Backtest on exactly the bars the scanner would see for this
-                # horizon, or the simulated result says nothing about the plan.
-                bars = timeframe_service.prepare(daily, cfg.code)
+            ).fetchone()["id"]
+
+            daily = await bars_service.get_bars(
+                conn, symbol_id, market, code, limit=cfg.lookback
+            )
+            # Backtest on exactly the bars the scanner would see for this
+            # horizon, or the simulated result says nothing about the plan.
+            bars = timeframe_service.prepare(daily, cfg.code)
+            if len(bars) < cfg.min_bars:
+                # 数据不足就先**去取**，而不是让用户自己猜要换哪个周期。
+                deeper = await bars_service.fetch_only(market, code, limit=max(cfg.lookback, 4000))
+                if deeper:
+                    bars_service.save_bars(conn, symbol_id, deeper, depth=len(deeper))
+                    conn.commit()
+                    daily = deeper
+                    bars = timeframe_service.prepare(daily, cfg.code)
                 if len(bars) < cfg.min_bars:
                     error = (
-                        f"历史数据不足（{len(bars)} 根 {cfg.bar} 线，至少需要 {cfg.min_bars} 根），"
-                        "换短一点的周期再试。"
+                        f"这只标的只有 {len(bars)} 根 {cfg.bar} 线，至少需要 {cfg.min_bars} 根"
+                        f"（约 {cfg.min_bars if cfg.bar == 'D' else cfg.min_bars} 根周期）。"
+                        "已经尝试补取更长的历史，但仍然不够——通常是上市时间太短。"
+                        "换短线（日线）再试，或者换一只上市更久的股票。"
                     )
                 else:
-                    result = backtest.run(
-                        bars, strategy, max_hold=cfg.max_hold, stop_band=cfg.stop_band
-                    )
-                    result["timeframe"] = cfg.code
-                    result["bar"] = cfg.bar
-                    backtest.save(market, code, strategy, result,
-                                  str(bars[0]["date"]), str(bars[-1]["date"]),
-                                  timeframe=cfg.code)
+                    note = "原有缓存不足，已自动补取更长历史后再试跑。"
+            if error is None:
+                result = backtest.run(
+                    bars, strategy, max_hold=cfg.max_hold, stop_band=cfg.stop_band
+                )
+                result["timeframe"] = cfg.code
+                result["bar"] = cfg.bar
+                result["note"] = note
+                backtest.save(market, code, strategy, result,
+                              str(bars[0]["date"]), str(bars[-1]["date"]),
+                              timeframe=cfg.code)
         finally:
             conn.close()
 
@@ -1482,7 +1549,15 @@ def create_app() -> FastAPI:
     @app.get("/api/market-status", response_class=JSONResponse)
     async def api_market_status():
         from kestrel.services import calendar as calendar_service
+        from kestrel.services import config as config_service
 
+        conn = connect()
+        try:
+            enabled = [str(m).upper() for m in config_service.get(
+                conn, "scan.markets", ["CN", "HK", "US"]
+            ) or ["CN", "HK", "US"]]
+        finally:
+            conn.close()
         return {
             "ok": True,
             "markets": [
@@ -1494,7 +1569,7 @@ def create_app() -> FastAPI:
                     "local_time": s.local_time,
                     "seconds_to_open": s.seconds_to_open,
                 }
-                for s in calendar_service.all_status()
+                for s in calendar_service.all_status(enabled)
             ],
         }
 
@@ -1871,6 +1946,33 @@ def create_app() -> FastAPI:
         result = execution.record(fill)
         return result
 
+    @app.post("/api/journal/{trade_id}/stop", response_class=JSONResponse)
+    async def api_move_stop(trade_id: int, request: Request):
+        """采纳一条移动止损建议。只能往有利方向移动。"""
+        from decimal import Decimal
+
+        from kestrel.services import exits
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        raw = (body or {}).get("stop")
+        try:
+            value = Decimal(str(raw))
+        except Exception:  # noqa: BLE001
+            return JSONResponse({"ok": False, "error": "止损价填一个数字"}, status_code=400)
+        result = exits.apply_stop(trade_id, value, str((body or {}).get("reason") or ""))
+        if not result.get("ok"):
+            return JSONResponse(result, status_code=400)
+        return result
+
+    @app.get("/api/journal/{trade_id}/stops", response_class=JSONResponse)
+    async def api_stop_history(trade_id: int):
+        from kestrel.services import exits
+
+        return {"ok": True, "items": exits.stop_history(trade_id)}
+
     @app.get("/api/positions", response_class=JSONResponse)
     async def api_positions():
         from kestrel.services import positions as position_service
@@ -1913,6 +2015,26 @@ def create_app() -> FastAPI:
         finally:
             conn.close()
         return {"ok": True, "saved": len(items)}
+
+    # ---------------------------------------------------------------- updates
+
+    @app.get("/api/update", response_class=JSONResponse)
+    async def api_update_status(force: bool = False):
+        from kestrel.services import updates
+
+        return await updates.check(force=force)
+
+    @app.get("/api/about", response_class=JSONResponse)
+    async def api_about():
+        from kestrel.services import updates
+
+        return {"ok": True, **updates.info()}
+
+    @app.post("/api/update/install", response_class=JSONResponse)
+    async def api_update_install():
+        from kestrel.services import updates
+
+        return await updates.install()
 
     return app
 

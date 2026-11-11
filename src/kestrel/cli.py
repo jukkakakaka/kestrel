@@ -135,6 +135,70 @@ def cmd_desktop(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_version(_args: argparse.Namespace) -> int:
+    from kestrel.services import updates
+
+    info = updates.info()
+    print(f"Kestrel {info['current']}")
+    print(f"  platform : {info['platform']}")
+    print(f"  mode     : {info['mode']}")
+    print(f"  data dir : {info['home']}")
+    print(f"  releases : {info['releases_url']}")
+    cached = updates.cached()
+    if cached and cached.get("latest"):
+        mark = "有更新" if cached.get("available") else "已是最新"
+        print(f"  update   : {mark}（远端 {cached['latest'].get('version')}）")
+    else:
+        print("  update   : 还没检查过，运行 `kestrel update --check`")
+    return 0
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    import asyncio
+
+    from kestrel.db.migrate import init_db
+    from kestrel.services import updates
+
+    settings.ensure_dirs()
+    init_db()
+
+    async def run() -> int:
+        if args.install:
+            result = await updates.install()
+            if not result.get("ok"):
+                print(f"安装失败：{result.get('error')}")
+                if result.get("url"):
+                    print(f"手动下载：{result['url']}")
+                return 1
+            if result.get("up_to_date"):
+                print(f"已经是最新版本 v{updates.info()['current']}。")
+                return 0
+            print(result.get("next") or "安装包已打开。")
+            print(f"文件：{result.get('path')}")
+            return 0
+
+        report = await updates.check(force=not args.cached)
+        if not report.get("ok"):
+            print(f"检查失败：{report.get('error')}")
+            return 1
+        if not report.get("available"):
+            print(f"已是最新版本 v{report.get('current')}。")
+            if report.get("reason"):
+                print(report["reason"])
+            return 0
+        latest = report.get("latest") or {}
+        print(f"当前 v{report.get('current')} → 最新 v{latest.get('version')}")
+        asset = latest.get("asset")
+        if asset:
+            print(f"安装包：{asset.get('name')}")
+            print("运行 `kestrel update --install` 下载并打开。")
+        else:
+            print(f"这个版本没有当前平台的安装包，请到 {report.get('releases_url')}")
+        return 0
+
+    return asyncio.run(run())
+
+
 def cmd_doctor(_args: argparse.Namespace) -> int:
     """Re-resolve every watchlist symbol whose secid is missing or stale."""
     import asyncio
@@ -216,6 +280,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_doc = sub.add_parser("doctor", help="re-resolve watchlist symbols that fail to load")
     p_doc.set_defaults(func=cmd_doctor)
+
+    p_version = sub.add_parser("version", help="show version, platform and update state")
+    p_version.set_defaults(func=cmd_version)
+
+    p_update = sub.add_parser("update", help="check for a newer release")
+    p_update.add_argument("--check", action="store_true", help="force a fresh check")
+    p_update.add_argument("--cached", action="store_true", help="use the cached result")
+    p_update.add_argument("--install", action="store_true", help="download and open the installer")
+    p_update.set_defaults(func=cmd_update)
 
     p_serve = sub.add_parser("serve", help="run the local web server")
     p_serve.add_argument("--host", default=settings.host)

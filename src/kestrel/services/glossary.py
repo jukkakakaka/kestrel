@@ -201,6 +201,160 @@ TERMS: list[tuple[str, str, str, str, str]] = [
         "策略打分，不是上涨概率。80% 只表示条件符合度高，不代表八成会涨。",
         "A rule score, not a probability. 80% means the setup matches well, not that it will rise.",
     ),
+    # ---- 卖出与持仓管理：新手最容易在这里吃亏 ----
+    (
+        "trailing_stop", "移动止损", "Trailing stop",
+        "赚钱之后把止损往上抬，让已经到手的利润不被吐回去。"
+        "常见做法是涨到 1 倍风险时把止损提到买入价（保本），涨到 2 倍时提到赚 1 倍的位置。"
+        "关键：止损只能往上抬，不能往下调——往下调等于取消止损。",
+        "Raising the stop as the trade moves in your favour, so a winner cannot turn into "
+        "a loser. The usual ladder: at +1R move to break-even, at +2R move to +1R. "
+        "The rule is one-way: a stop may only move up.",
+    ),
+    (
+        "take_profit", "分批止盈", "Scaling out",
+        "不要一次全卖。到第一个目标先卖一半，把利润落袋；剩下的用移动止损跟，"
+        "让它有机会跑得更远。一次全卖的问题是：你永远在猜顶。",
+        "Selling in pieces instead of all at once. Take half at the first target, trail the "
+        "rest. Selling everything at once means you are guessing the top.",
+    ),
+    (
+        "time_stop", "时间止损", "Time stop",
+        "买了之后很久没涨，说明当初的理由没成立。占着资金和注意力本身就是成本，"
+        "所以到了这个周期的持仓上限还没走出来，就该换到更好的机会上。",
+        "If a trade goes nowhere for longer than the horizon allows, the reason you bought "
+        "it did not hold. Capital and attention have a cost; move on.",
+    ),
+    (
+        "r_multiple", "R 倍数", "R multiple",
+        "用「冒了多少钱的风险」当单位来衡量盈亏。风险 1 块赚了 3 块就是 +3R，亏光止损就是 −1R。"
+        "好处是不管股票贵还是便宜、买多买少，所有交易都能放在一起比较。",
+        "Profit measured in units of what you risked. Risk 1 to make 3 is +3R; a full stop-out "
+        "is −1R. It makes trades of different sizes comparable.",
+    ),
+    (
+        "risk_budget", "风险预算", "Risk budget",
+        "这一笔最多允许亏多少钱。它先定，股数后算：预算 ÷ 每股止损距离 = 能买几股。"
+        "顺序反过来（先想买多少股）是新手亏钱的主要原因。",
+        "The most you allow yourself to lose on one trade. It is decided first; the share count "
+        "is derived from it. Doing it the other way round is the classic beginner mistake.",
+    ),
+    (
+        "stop_distance", "止损距离", "Stop distance",
+        "买入价到止损价之间差多少。它同时决定两件事：这笔最多亏多少，以及能买多少股。"
+        "止损太近会被日常波动扫掉，太远则同样的风险预算只能买很少。",
+        "The gap between entry and stop. It sets both your loss per share and your position "
+        "size. Too tight gets shaken out; too wide buys very little.",
+    ),
+    (
+        "floating_pnl", "浮动盈亏", "Open P&L",
+        "还拿着没卖时的账面盈亏。它随时会变，只有卖出才变成真的钱。"
+        "所以「浮盈回撤」不算亏，但「止损被跌破还拿着」通常就是真的亏。",
+        "The paper profit or loss on a position you still hold. It is not real until you sell.",
+    ),
+    (
+        "exposure", "总仓位 / 敞口", "Exposure",
+        "所有持仓加起来占本金的比例。三笔各 20% 的仓位不是三个独立决定，"
+        "它们同涨同跌时就是一笔 60% 的重仓。",
+        "The share of your capital currently at risk across all positions. Three 20% positions "
+        "are not independent — they are one 60% bet when the market turns.",
+    ),
+    (
+        "sector_cap", "行业集中度", "Sector concentration",
+        "同一个行业最多同时持有几只。屏幕选出八只银行，那不是选股，是押注整个板块。",
+        "How many names from one sector you allow at once. Eight banks from a screen is a "
+        "sector bet wearing a stock picker's clothes.",
+    ),
+    (
+        "fifo", "先进先出 / FIFO", "FIFO",
+        "分批买入后卖出时，先平掉最早那一笔。这样每条建仓记录的价格和数量都不会被后来的操作改写，"
+        "复盘时看到的历史才是真的。",
+        "When you sell part of a position, the oldest lot is closed first. Each entry keeps its "
+        "original price and size, so the history stays honest.",
+    ),
+    (
+        "win_rate", "胜率", "Win rate",
+        "赚钱的交易占全部交易的比例。它单独没有意义——胜率 90% 但每次赚 1 块亏 10 块，照样亏钱。"
+        "要和盈亏比一起看。",
+        "The share of trades that made money. Meaningless on its own: 90% wins that make 1 and "
+        "lose 10 still loses money. Read it with reward-to-risk.",
+    ),
+    (
+        "expectancy", "期望值", "Expectancy",
+        "平均每一笔交易能赚（或亏）多少。它是唯一值得长期盯住的数字："
+        "期望为正，做够多次就赚；期望为负，做越多亏越多。",
+        "The average result per trade. It is the one number worth tracking: positive expectancy "
+        "compounds, negative expectancy compounds the other way.",
+    ),
+    (
+        "backtest", "回测", "Backtest",
+        "把一套规则放到历史数据里重放，看看如果过去一直照着做会发生什么。"
+        "它不能预测未来，但能告诉你这套规则是不是本来就不成立。",
+        "Replaying a rule set over historical data to see what would have happened. It cannot "
+        "predict the future, but it can tell you whether the rule was ever any good.",
+    ),
+    (
+        "benchmark", "基准", "Benchmark",
+        "用来对比的参照物。这里的基准是「同样的入场点、同样持有天数、不设止损」。"
+        "跑不赢这个基准，说明你的规则只是运气好赶上了行情。",
+        "The thing you compare against. Here it is the same entry held for the same number of "
+        "days with no stop. Fail to beat that and your rule was just riding the market.",
+    ),
+    (
+        "walk_forward", "滚动验证", "Walk-forward",
+        "把历史切成几段，每段单独测试。只在某一段赚钱的规则通常是过拟合——"
+        "它是照着那段历史编出来的，不是真的有效。",
+        "Splitting history into segments and testing each separately. A rule that only works in "
+        "one segment is usually fitted to that segment rather than actually working.",
+    ),
+    (
+        "horizon", "交易周期", "Trading horizon",
+        "你打算持有多久。日线看几天到几周，周线看几周到两个月，月线看几个月。"
+        "周期决定止损该多宽、计划活多久、多久没涨就该放弃。",
+        "How long you intend to hold. The horizon sets how wide a stop should be, how long a "
+        "plan stays valid, and when a trade has overstayed.",
+    ),
+    (
+        "candidate_pool", "候选池", "Candidate pool",
+        "每次扫描会看的那批股票，按市值从各市场取。只扫自己的自选等于体检，不是选股。",
+        "The names a scan is allowed to look at, taken by market cap per market. Scanning only "
+        "your watchlist is a health check, not stock picking.",
+    ),
+    (
+        "paper_trade", "模拟成交 / 模拟盘", "Paper trade",
+        "用当前行情价假装成交，用来把「计划 → 成交 → 台账」这条链路跑通。"
+        "它不连接券商，也不产生真实委托。",
+        "Filling at the latest quote to exercise the plan → fill → journal path. It is not "
+        "connected to a broker and places no real order.",
+    ),
+    (
+        "limit_up_down", "涨跌停", "Price limit",
+        "A 股每天最多涨跌 10%（部分板块 20%）。涨到上限叫涨停，这时通常买不到；"
+        "跌到下限叫跌停，通常卖不掉。港股和美股没有这个限制。",
+        "A-shares stop at ±10% a day (20% on some boards). At the limit you usually cannot buy "
+        "or sell at all. Hong Kong and the US have no such limit.",
+    ),
+    (
+        "t_plus_one", "T+1", "T+1 settlement",
+        "A 股今天买的股票，明天才能卖。港股和美股是 T+0，当天就能卖。"
+        "这意味着一笔错误当天没法纠正，只能靠止损位提前想清楚。",
+        "A-shares bought today cannot be sold until tomorrow. Hong Kong and the US allow same-day "
+        "exits. One more reason the stop has to be decided before you buy.",
+    ),
+    (
+        "review", "复盘", "Post-trade review",
+        "平仓之后回看：当初为什么买、后来发生了什么、有没有按计划做。"
+        "复盘的价值不在结论，而在发现自己的重复错误。",
+        "Looking back after you close: why you bought, what happened, whether you followed the "
+        "plan. Its value is spotting the mistake you keep repeating.",
+    ),
+    (
+        "order_type", "限价单 / 市价单", "Order types",
+        "限价单是指定价格、不到价不成交；市价单是立刻成交、价格不确定。"
+        "波动大的时候，市价单的成交价可能比你想的差很多。",
+        "A limit order waits for your price; a market order fills now at whatever is available. "
+        "In fast markets that can be far from what you expected.",
+    ),
 ]
 
 

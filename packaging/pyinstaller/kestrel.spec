@@ -112,7 +112,7 @@ if sys.platform == "darwin":
             "LSMinimumSystemVersion": "11.0",
             "LSApplicationCategoryType": "public.app-category.finance",
             "NSHighResolutionCapable": True,
-            "NSHumanReadableCopyright": "Apache-2.0 © Kestrel contributors",
+            "NSHumanReadableCopyright": "GPL-3.0 © Kestrel contributors",
             # The window talks to the app's own server over http://127.0.0.1.
             "NSAppTransportSecurity": {
                 "NSAllowsLocalNetworking": True,

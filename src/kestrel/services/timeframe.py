@@ -37,6 +37,18 @@ class Horizon:
         """Bars per year — used to turn a holding period into a turnover estimate."""
         return {"D": 245, "W": 50, "M": 12}.get(self.bar, 245)
 
+    @property
+    def max_hold_days(self) -> int:
+        """The time stop in calendar days.
+
+        ``max_hold`` counts bars; a user watching a position counts days. The
+        conversion is deliberately generous (a bar ≈ 7/30 calendar days plus one
+        period of slack) so the time stop fires after the position has clearly
+        overstayed, not on a normal weekend.
+        """
+        per_bar = {"D": 7 / 5, "W": 7, "M": 30}.get(self.bar, 1)
+        return int(self.max_hold * per_bar) + (2 if self.bar == "D" else 0)
+
 
 HORIZONS: dict[str, Horizon] = {
     "short": Horizon(

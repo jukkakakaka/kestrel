@@ -45,6 +45,10 @@ echo "==> Kestrel ${VERSION}"
 
 # --- icon ------------------------------------------------------------------
 # .icns is a container of fixed-size PNGs; sips resizes, iconutil packs.
+if [[ ! -f packaging/icon.png || packaging/icon.png -ot scripts/make_icon.py ]]; then
+  echo "==> generating app icon"
+  uv run python scripts/make_icon.py
+fi
 if [[ ! -f packaging/icon.icns || packaging/icon.png -nt packaging/icon.icns ]]; then
   echo "==> generating icon.icns"
   TMP="$(mktemp -d)"
@@ -113,11 +117,26 @@ trap - EXIT
 if [[ "$WANT_DMG" == "1" ]]; then
   echo "==> building $DMG"
   rm -f "$DMG"
-  STAGE="$(mktemp -d)"
-  cp -R "$APP" "$STAGE/"
-  ln -s /Applications "$STAGE/Applications"
-  hdiutil create -quiet -volname "Kestrel" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
-  rm -rf "$STAGE"
+
+  # dmgbuild 才能把图标位置、背景图和窗口尺寸写进 .DS_Store；
+  # hdiutil -srcfolder 只能得到一个空白窗口，看起来像个没做完的安装包。
+  uv pip install dmgbuild --quiet
+  if [[ ! -f packaging/dmg-background.png || packaging/dmg-background.png -ot scripts/make_dmg_background.py ]]; then
+    echo "==> generating dmg background"
+    uv run python scripts/make_dmg_background.py
+  fi
+  # 图标同理：脚本改了就要重新生成，否则发出去的是旧脸
+  if [[ ! -f packaging/icon.png || packaging/icon.png -ot scripts/make_icon.py ]]; then
+    echo "==> generating app icon"
+    uv run python scripts/make_icon.py
+  fi
+
+  uv run dmgbuild -s packaging/macos/dmg_settings.py \
+    -D "app=$APP" \
+    -D "background=packaging/dmg-background.png" \
+    -D "icon=packaging/icon.icns" \
+    -D "volume_name=Kestrel" \
+    "Kestrel" "$DMG"
 fi
 
 echo

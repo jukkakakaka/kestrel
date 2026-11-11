@@ -22,12 +22,25 @@
         </div>
         <div class="field">
           <label>单笔最多亏本金的比例</label>
-          <select id="w-risk">
-            <option value="1">1%（保守，推荐新手）</option>
-            <option value="2" selected>2%（常见）</option>
-            <option value="3">3%（偏激进）</option>
-          </select>
-          <span class="help">5 万本金、2% 就是每笔最多亏 1000 元。</span>
+          <div class="risk-picks" id="w-risk">
+            {% for value, label, note in [
+                ('0.5', '0.5%', '很保守'),
+                ('1', '1%', '保守'),
+                ('2', '2%', '常见'),
+                ('5', '5%', '激进'),
+                ('10', '10%', '很激进')] %}
+            <label class="risk-pick{% if value == '2' %} picked{% endif %}">
+              <input type="radio" name="w-risk" value="{{ value }}"
+                     {% if value == '2' %}checked{% endif %}>
+              <b>{{ label }}</b><small>{{ note }}</small>
+            </label>
+            {% endfor %}
+          </div>
+          <div class="risk-custom">
+            <span class="muted tiny">或者自己填：</span>
+            <input id="w-risk-custom" type="number" min="0.1" max="100" step="0.1" placeholder="%">
+          </div>
+          <span class="help" id="w-risk-help">5 万本金、2% 就是每笔最多亏 1000 元。</span>
         </div>
       </div>
     </div>
@@ -81,7 +94,7 @@
 
   <div class="welcome-foot">
     <button class="btn lg" id="w-done">保存，开始</button>
-    <button class="btn ghost" id="w-skip">先随便看看</button>
+    <button class="btn ghost lg" id="w-skip">稍后设置</button>
     <span class="tiny" id="w-msg"></span>
   </div>
 
@@ -95,6 +108,36 @@
 <script>
 (function () {
   var msg = document.getElementById('w-msg');
+  var capitalInput = document.getElementById('w-capital');
+  var custom = document.getElementById('w-risk-custom');
+  var help = document.getElementById('w-risk-help');
+
+  function pickedRisk() {
+    var customValue = parseFloat(custom.value);
+    if (!isNaN(customValue) && customValue > 0) return customValue;
+    var picked = document.querySelector('input[name="w-risk"]:checked');
+    return picked ? parseFloat(picked.value) : 2;
+  }
+
+  function refresh() {
+    document.querySelectorAll('.risk-pick').forEach(function (el) {
+      var input = el.querySelector('input');
+      el.classList.toggle('picked', input.checked && !custom.value.trim());
+    });
+    var capital = parseFloat(capitalInput.value) || 0;
+    var risk = pickedRisk();
+    if (capital > 0) {
+      help.textContent = capital.toLocaleString() + ' 本金、' + risk +
+        '% 就是每笔最多亏 ' + Math.round(capital * risk / 100).toLocaleString() + ' 元。';
+    }
+  }
+
+  document.querySelectorAll('input[name="w-risk"]').forEach(function (el) {
+    el.addEventListener('change', function () { custom.value = ''; refresh(); });
+  });
+  custom.addEventListener('input', refresh);
+  capitalInput.addEventListener('input', refresh);
+  refresh();
 
   function save(payload, next) {
     fetch('/api/onboarding', {
@@ -120,8 +163,8 @@
     if (picked) horizon = picked.value;
     msg.textContent = '保存中…';
     save({
-      capital: parseFloat(document.getElementById('w-capital').value) || 50000,
-      risk_pct: parseFloat(document.getElementById('w-risk').value) || 2,
+      capital: parseFloat(capitalInput.value) || 50000,
+      risk_pct: pickedRisk(),
       markets: markets,
       horizon: horizon
     }, '/advice');

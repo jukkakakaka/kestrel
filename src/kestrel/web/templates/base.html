@@ -42,7 +42,7 @@
     <div class="tools">
       <select id="locale" aria-label="{{ t('lang.label') }}">
         {% for code in locales %}
-        <option value="{{ code }}" {% if code == locale %}selected{% endif %}>{{ code }}</option>
+        <option value="{{ code }}" {% if code == locale %}selected{% endif %}>{{ locale_label(code) }}</option>
         {% endfor %}
       </select>
       <select id="theme" aria-label="{{ t('theme.label') }}">

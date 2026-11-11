@@ -81,6 +81,9 @@
       <span class="meta">
         现价来自最近一次行情刷新 ·
         {% if book.unpriced %}{{ book.unpriced }} 笔没有现价{% else %}全部有现价{% endif %}
+        · <span class="gloss" data-term="trailing_stop">移动止损</span>
+        <span class="gloss" data-term="take_profit">分批止盈</span>
+        <span class="gloss" data-term="time_stop">时间止损</span>
       </span>
     </div>
     {% if positions %}
@@ -90,7 +93,8 @@
           <th>{{ t('dash.market') }}</th><th>标的</th><th class="num">{{ t('scan.qty') }}</th>
           <th class="num">{{ t('j.entry') }}</th><th class="num">现价</th>
           <th class="num">浮动盈亏</th><th class="num">{{ t('scan.stop') }}</th>
-          <th class="num">距止损</th><th class="num">R</th><th></th>
+          <th class="num">距止损</th><th class="num" title="按最初风险算的倍数">R</th>
+          <th>现在该做什么</th><th></th>
         </tr></thead>
         <tbody>
         {% for p in positions %}
@@ -123,6 +127,29 @@
             {% endif %}
           </td>
           <td class="num mono">{{ '%+.2f'|format(p.r_now) if p.r_now is not none else '—' }}</td>
+          <td style="min-width:210px;">
+            {% if p.exit %}
+              <div class="exit-hint {{ 'urgent' if p.exit.urgency == 'urgent' else '' }}">
+                {{ p.exit.reason_zh }}
+              </div>
+              <div class="exit-actions">
+                {% if p.exit.action == 'move_stop' %}
+                  <button class="btn sm" data-move-stop="{{ p.trade_id }}"
+                          data-stop="{{ p.exit.stop }}">把止损改到 {{ '%.3f'|format(p.exit.stop) }}</button>
+                {% elif p.exit.action in ('take_partial', 'exit_all') %}
+                  <form method="post" action="/journal/{{ p.trade_id }}/close" class="inline-form">
+                    <input type="hidden" name="exit_price" value="{{ '%.3f'|format(p.price) }}">
+                    <input type="hidden" name="qty" value="{{ p.exit.qty | int }}">
+                    <button class="btn sm {{ 'danger' if p.exit.urgency == 'urgent' else '' }}">
+                      卖出 {{ p.exit.qty | int }} 股
+                    </button>
+                  </form>
+                {% endif %}
+              </div>
+            {% else %}
+              <span class="muted tiny">按计划持有</span>
+            {% endif %}
+          </td>
           <td>
             <form method="post" action="/journal/{{ p.trade_id }}/close" class="close-form">
               <input name="exit_price" type="number" step="0.001" required
@@ -372,6 +399,26 @@
         .catch(function (e) { msg.textContent = String(e); });
     });
   }
+
+  /* ---------------- 移动止损 ---------------- */
+  document.querySelectorAll('[data-move-stop]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var id = btn.getAttribute('data-move-stop');
+      var stop = btn.getAttribute('data-stop');
+      if (!confirm('把止损上移到 ' + stop + '？\n\n止损只能往上抬，之后不能改回去。')) return;
+      btn.disabled = true;
+      fetch('/api/journal/' + id + '/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stop: stop, reason: '按移动止损规则采纳' })
+      }).then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (!res.ok) { alert(res.error || '修改失败'); btn.disabled = false; return; }
+          location.reload();
+        })
+        .catch(function (e) { alert(String(e)); btn.disabled = false; });
+    });
+  });
 
   /* ---------------- 对账单导入 ---------------- */
   var parsed = [];

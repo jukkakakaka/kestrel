@@ -144,8 +144,12 @@ def status(market: str) -> MarketStatus:
     )
 
 
-def all_status() -> list[MarketStatus]:
-    return [status(m) for m in ("CN", "HK", "US")]
+def all_status(markets: list[str] | None = None) -> list[MarketStatus]:
+    """开市状态。只返回请求的市场，没开启的市场不该出现在页面上。"""
+    wanted = markets or ["CN", "HK", "US"]
+    order = {"CN": 0, "HK": 1, "US": 2}
+    codes = sorted({str(m).upper() for m in wanted}, key=lambda m: order.get(m, 9))
+    return [status(m) for m in codes]
 
 
 def next_session_close(market: str) -> str:

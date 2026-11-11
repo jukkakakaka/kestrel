@@ -713,9 +713,54 @@ def _record_run(provider, model, brief, picks, accepted, rejected, error, reply,
 
 
 def recent_runs(limit: int = 5) -> list[dict]:
+    """最近的分析记录，附带引擎标签、模型名和当时使用的周期。
+
+    保险点是「provider=workbuddy、model=workbuddy」两列都写着 workbuddy，
+    页面把它们并排显示就成了 "workbuddy · workbuddy"。这里统一成一份可读的
+    描述，页面只负责排版。
+    """
     conn = connect()
     try:
-        rows = conn.execute("SELECT * FROM analyst_run ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
-        return [dict(r) for r in rows]
+        rows = conn.execute(
+            "SELECT * FROM analyst_run ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        out = []
+        for row in rows:
+            item = dict(row)
+            provider = str(item.get("provider") or "")
+            model = str(item.get("model") or "")
+            if provider == "workbuddy":
+                label = "WorkBuddy"
+                detail = ""
+            elif provider == "llm":
+                label = "大模型"
+                detail = model or "未记录模型"
+            elif provider == "dry":
+                label = "演练"
+                detail = ""
+            else:
+                label = provider or "未知引擎"
+                detail = model if model and model != provider else ""
+            item["engine_label"] = label
+            item["engine_detail"] = detail
+            item["horizon"] = _horizon_of(item)
+            out.append(item)
+        return out
     finally:
         conn.close()
+
+
+def _horizon_of(item: dict) -> str:
+    """这次分析用的是哪种 K 线。
+
+    简报存在 ``brief`` 字段里，解析失败就返回空串——页面对空值会隐藏，
+    而不是显示一个假的「短线」。
+    """
+    import json as _json
+
+    try:
+        brief = _json.loads(item.get("brief") or "{}")
+    except (TypeError, ValueError):
+        return ""
+    code = (brief.get("horizon") or {}).get("code")
+    return str(code or "")

@@ -103,8 +103,12 @@ def assess(trade: dict, quote: dict | None) -> dict:
         to_target_pct = float((target - price) / price * 100)
 
     r_now = None
-    if price is not None and stop and entry > stop:
-        r_now = float((price - entry) / (entry - stop))
+    # R 倍数永远按**最初**的风险算。止损上移之后如果还用当前止损做分母，
+    # +2R 会被算成 +4R，看起来越来越好，实际判断依据已经没了。
+    initial_raw = trade.get("initial_stop") or trade.get("stop_price") or plan.get("stop")
+    initial_stop = from_micro(initial_raw) if initial_raw else None
+    if price is not None and initial_stop and entry > initial_stop:
+        r_now = float((price - entry) / (entry - initial_stop))
 
     opened = str(trade.get("filled_at") or trade.get("opened_at") or "")
     held_days = None
@@ -169,8 +173,11 @@ STATE_LABELS = {
 }
 
 
-def open_positions(include_quotes: bool = True) -> list[dict]:
-    """所有未平仓持仓，附带现价与盈亏。"""
+def open_positions(include_quotes: bool = True, with_exits: bool = True) -> list[dict]:
+    """所有未平仓持仓，附带现价、盈亏，以及一条「现在该不该动」的建议。"""
+    from kestrel.services import exits as exit_service
+    from kestrel.services import timeframe
+
     rows = journal.list_trades(status="open", limit=500)
     for row in rows:
         # 兼容旧行：filled_at 为空时回退 opened_at
@@ -180,7 +187,24 @@ def open_positions(include_quotes: bool = True) -> list[dict]:
         quotes = _quote_map(conn, [(r["market"], r["code"]) for r in rows]) if include_quotes else {}
     finally:
         conn.close()
-    return [assess(row, quotes.get(f"{row['market']}:{row['code']}")) for row in rows]
+
+    out = [assess(row, quotes.get(f"{row['market']}:{row['code']}")) for row in rows]
+    if with_exits:
+        by_id = {row["id"]: row for row in rows}
+        for position in out:
+            row = by_id.get(position["trade_id"])
+            if row is None:
+                continue
+            horizon = (position.get("plan") or {}).get("horizon") or timeframe.DEFAULT
+            try:
+                plan = exit_service.suggest(
+                    row, position, max_hold_days=timeframe.get(horizon).max_hold_days
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning("exit advice failed for trade %s: %s", position["trade_id"], exc)
+                plan = None
+            position["exit"] = plan.as_dict() if plan is not None else None
+    return out
 
 
 def summary(positions: list[dict]) -> dict:

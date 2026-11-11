@@ -219,14 +219,15 @@ def _buy(conn, fill: Fill, symbol: dict, snapshot: dict | None) -> dict:
         stop = from_micro(snapshot["stop"])
         target = from_micro(snapshot["target"])
         conn.execute(
-            "UPDATE trade SET stop_price=?, target_price=? WHERE id=?",
-            (to_micro(stop), to_micro(target), trade_id),
+            "UPDATE trade SET stop_price=?, initial_stop=?, target_price=? WHERE id=?",
+            (to_micro(stop), to_micro(stop), to_micro(target), trade_id),
         )
     elif fill.stop or fill.target:
         # 手工建仓也要有止损，否则「距止损」和风险提醒全是空的。
         conn.execute(
-            "UPDATE trade SET stop_price=?, target_price=? WHERE id=?",
+            "UPDATE trade SET stop_price=?, initial_stop=?, target_price=? WHERE id=?",
             (
+                to_micro(fill.stop) if fill.stop else None,
                 to_micro(fill.stop) if fill.stop else None,
                 to_micro(fill.target) if fill.target else None,
                 trade_id,

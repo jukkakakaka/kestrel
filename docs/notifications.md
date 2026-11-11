@@ -1,49 +1,101 @@
-# Notifications and the receipt loop
+# 通知与回执闭环
 
-## Why a receipt loop
+## 为什么要有回执
 
-Push-only alerts turn into noise. Kestrel asks one question after every plan: **did you
-actually do it, and at what price?** The answer is stored next to the plan, so the gap
-between advice and behaviour becomes a number you can shrink.
+只推送的通知会变成噪音。Kestrel 在每条计划之后只问一件事：**你到底做了没有，成交在什么价？**
+答案和计划存在一起，于是建议与行为之间的差距变成一个可以缩小的数字。
 
 ```
-plan stored → notification queued → channel sends → phone opens /r/{code}
-     → tap "executed" + real fill → receipt row with deviation_pct / deviation_r
+计划入库 → 通知入队 → 渠道发送 → 手机打开 /r/{code}
+     → 填真实成交价与数量 → 生成 trade 行 + 偏差（% 与 R）
 ```
 
-## Channels
+两条路径都写进同一本台账：手机回执页、桌面端建议卡的「我已经买了」，
+以及台账页的「记一笔成交」，最终都调用 `services/execution.record()`。
+所以整手校验、FIFO 平仓、偏差计算只有一份实现，三处不会给出不同答案。
 
-All optional, all configurable in Settings → Notifications. A channel is skipped when
-it is not configured; a failing channel never blocks the scan.
+## 渠道
 
-| Code | Transport | Notes |
+全部可选，全部在「设置 → 推送」里配置。没配置的渠道会被跳过；
+某个渠道失败永远不会阻塞扫描。
+
+| Code | 传输方式 | 说明 |
 |---|---|---|
-| `ntfy` | HTTP POST to ntfy.sh or self-hosted | Supports an **action button** that opens the receipt page in one tap |
-| `webhook` | JSON POST | Works with a WeCom group bot URL unchanged |
-| `weclawbot` | `POST /bots/{bot_id}/messages` | Personal WeChat through a WeClawBot-API gateway. Push only; the upstream project is in grey release, so treat it as best effort |
-| `smtp` | STARTTLS + login | Fallback for people who live in email |
+| `ntfy` | HTTP POST 到 ntfy.sh 或自建实例 | 支持**一键回执按钮**，点开就是回执页 |
+| `webhook` | JSON POST | 企业微信群机器人地址可以直接用 |
+| `weclawbot` | `POST /bots/{bot_id}/messages` | 个人微信，经 WeClawBot-API 网关。只能推送 |
+| `smtp` | STARTTLS + 登录 | 适合每天收一封汇总 |
+| `workbuddy` | 写文件到 outbox | 由 WorkBuddy 的定时任务转发到微信，见下 |
 
-WeChat cannot receive replies through that gateway, which is exactly why the receipt
-page is a link rather than a reply. Any channel that can carry a URL works.
+微信这类渠道收不到回复，所以回执做成链接而不是「回复消息」。任何能传 URL 的渠道都能用。
 
-## Making the link reachable
+## WorkBuddy 的两个定时任务
 
-The receipt page is served by your own machine, so the phone has to reach it:
+WorkBuddy 不提供本地 HTTP 入口，所以它在这里承担两件事，各自需要一个定时任务。
+两段提示词都由 `services/prompts.py` **按你当前的配置生成**（数据目录、outbox 路径），
+在「设置 → 分析引擎」和「设置 → 推送 → WorkBuddy」里都能一键复制。
 
-1. **Same Wi-Fi** — set `receipt.public_base` to `http://<your-lan-ip>:8000`. Fastest,
-   works only at home.
-2. **Tunnel (recommended)** — Tailscale, Cloudflare Tunnel or ngrok, then point
-   `receipt.public_base` at the public hostname.
-3. **Server deployment** — if Kestrel runs on a VPS, use that hostname.
+### 1. 分析队列（建议 30–60 分钟一轮）
 
-If the link is unreachable, the plan still works; you can log the fill manually in the
-journal.
+```
+程序写：<data>/bridge/pending/<id>.json      （含完整 brief 与输出契约）
+任务读：pending/*.json → 按 instructions 作答
+任务写：<data>/bridge/done/<id>.json         （程序下次打开建议页时自动收取）
+```
 
-## Guarantees
+### 2. 消息转发（建议 5–15 分钟一轮）
 
-- Receipt codes are HMAC-derived, 8 characters, valid 72 hours, max 5 uses.
-- The outbox row is unique per `(recommendation, channel, locale)` — re-running a scan
-  cannot spam you twice with the same plan.
-- Failed sends keep their error and stay `pending` for the next dispatch pass.
-- Every message renders in the user's locale; the payload is stored as JSON so the
-  same row can be re-sent to another channel later.
+```
+程序写：<outbox>/<时间戳>-<随机>.json          （title / body / url）
+任务读：outbox/*.json → 发到微信
+任务做：移动文件到 <outbox>/sent/
+```
+
+目录在哪里取决于你怎么跑这个应用，这是三个完全不同的答案：
+
+| 运行方式 | 数据目录 | 默认 outbox |
+|---|---|---|
+| 本地浏览器（源码运行） | 仓库下的 `data/` | `~/.workbuddy/kestrel-outbox` |
+| 本地打包应用 | `~/Library/Application Support/Kestrel`（Windows 为 `%APPDATA%\Kestrel`） | 同上 |
+| 在线部署（Docker / VPS） | 容器内的 `/data` 卷 | 必须手动指定成宿主机可访问的路径 |
+
+所以**不要把提示词里的路径写死**：打开设置页复制生成好的版本，
+或者设置 `KESTREL_HOME` 后再打开一次页面。分析引擎的桥目录也支持自定义，
+在「设置 → 分析引擎」的 `bridge` 字段里填（默认跟随 `KESTREL_HOME`）。
+
+Docker 部署时，WorkBuddy 的定时任务跑在另一台机器或宿主机上，
+需要把 `/data/bridge` 挂载到一个两边都能看到的目录，否则任务永远读不到请求。
+
+## 让链接可达
+
+回执页由你自己的机器提供，手机要能访问到它：
+
+1. **同一 Wi-Fi** —— 把 `receipt.public_base` 设成 `http://<局域网 IP>:8000`。最快，只在家里有效。
+2. **隧道（推荐）** —— Tailscale、Cloudflare Tunnel 或 ngrok，然后把 `receipt.public_base`
+   指向公网域名。
+3. **服务器部署** —— Kestrel 跑在 VPS 上时直接用它自己的域名。
+
+链接打不开也不影响计划本身：你照样可以在台账里手动记成交。
+
+## 持仓提醒
+
+除了「有新的建议」，还有一类消息不挂在任何建议上：**持仓本身的风险**。
+
+| 触发 | 文案 | 去重 |
+|---|---|---|
+| 现价跌破止损 | 「按计划应当卖出。止损不是认输」 | 同一笔持仓只发一次 |
+| 接近止损（≤2%） | 「提前想好：到价就走」 | 同上 |
+| 到达目标 | 「先卖一半，剩下用移动止损跟」 | 同上 |
+| 接近目标（≤2%） | 「可以准备分批止盈」 | 同上 |
+
+调度器每 15 分钟检查一次，且**不受「自动扫描」开关影响**——
+关掉自动扫描的人照样需要止损提醒。消息写进 `message_outbox`，
+和 `notification` 一样有重试语义，但不需要 `rec_id`。
+
+## 保证
+
+- 回执码由 HMAC 派生，8 位，72 小时有效，最多用 5 次；过期链接只展示内容、不接受回执。
+- `notification` 按 `(recommendation, channel, locale)` 唯一，重复扫描不会重复轰炸。
+- 持仓提醒按 `(trade_id, kind)` 唯一，同一件事只提醒一次。
+- 发送失败保留错误信息并保持 `pending`，下一轮继续尝试。
+- 每条消息按用户语言渲染，payload 存 JSON，同一行以后可以换渠道重发。

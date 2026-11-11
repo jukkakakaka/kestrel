@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Kestrel">
   <title>Kestrel</title>
-  <desc>Three feathers fanning from a single point, reading as a wing and as a forward strike.</desc>
+  <desc>Three feathers fanning from one point: a wing, and a forward strike.</desc>
   <path d="M208 128 L48 60 L48 96 Z" fill="#16305C"/>
   <path d="M208 128 L48 110 L48 146 Z" fill="#1E63D8"/>
   <path d="M208 128 L48 160 L48 196 Z" fill="#0E9E8E"/>

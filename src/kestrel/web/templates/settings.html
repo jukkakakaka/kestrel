@@ -19,6 +19,7 @@
   <button data-tab="notify">{{ t('settings.tab_notify') }}</button>
   <button data-tab="data">{{ t('settings.tab_data') }}</button>
   <button data-tab="glossary">{{ t('settings.tab_glossary') }}</button>
+  <button data-tab="about">关于</button>
 </div>
 
 <div data-pane="general">
@@ -37,10 +38,11 @@
       <div class="setting-row">
         <div class="setting-label">
           <span>{{ t('settings.risk') }}</span>
-          <small>{{ t('settings.risk_hint') }}</small>
+          <small>一笔最多亏本金的百分之几。新手 1–2%，经验多了可以自己定，没有上限。</small>
         </div>
         <div class="setting-input">
-          <input data-key="risk.per_trade_pct" type="number" step="0.5" value="{{ values.get('risk.per_trade_pct') | num }}">
+          <input data-key="risk.per_trade_pct" type="number" step="0.1" min="0.1" max="100"
+                 value="{{ values.get('risk.per_trade_pct') | num }}">
         </div>
       </div>
       <div class="setting-row">
@@ -91,24 +93,34 @@
       <span class="meta">这些设置对规则引擎和 AI 都生效</span>
     </div>
     <div class="card-body">
-      <div class="setting-row">
+      <div class="setting-row" style="border-bottom:none;padding-bottom:2px;">
         <div class="setting-label">
           <span>{{ t('settings.markets') }}</span>
           <small>{{ t('settings.markets_hint') }}</small>
         </div>
+        <div class="setting-input"></div>
+      </div>
+      {# 市场是三个独立开关，不是一组多选框：和数据源开关用同一种控件，
+         用户一眼就知道「关掉 = 这个市场彻底不参与」。 #}
+      {% set mk = values.get('scan.markets', ['CN','HK','US']) %}
+      {% for code, label, note in [
+          ('CN', 'A 股', 'T+1，涨跌停限制，卖出时收印花税'),
+          ('HK', '港股', '按手交易，印花税买卖双向'),
+          ('US', '美股', '可以只买 1 股，无印花税')] %}
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>{{ label }}</span>
+          <small>{{ note }}</small>
+        </div>
         <div class="setting-input">
-          {% set mk = values.get('scan.markets', ['CN','HK','US']) %}
-          <label style="display:inline-flex;gap:6px;margin-right:12px;">
-            <input type="checkbox" data-multi="scan.markets" value="CN" {% if 'CN' in mk %}checked{% endif %}> A 股
-          </label>
-          <label style="display:inline-flex;gap:6px;margin-right:12px;">
-            <input type="checkbox" data-multi="scan.markets" value="HK" {% if 'HK' in mk %}checked{% endif %}> 港股
-          </label>
-          <label style="display:inline-flex;gap:6px;">
-            <input type="checkbox" data-multi="scan.markets" value="US" {% if 'US' in mk %}checked{% endif %}> 美股
+          <label class="switch">
+            <input type="checkbox" data-multi="scan.markets" value="{{ code }}"
+                   {% if code in mk %}checked{% endif %}>
+            <span></span>
           </label>
         </div>
       </div>
+      {% endfor %}
       <div class="setting-row">
         <div class="setting-label">
           <span>{{ t('horizon.title') }}</span>
@@ -327,9 +339,31 @@
           程序把任务（候选股指标 + 你的账户 + 规则实测结果）写进队列，WorkBuddy 的定时任务读取后给出建议，
           结果自动回填到操作建议页。因为是排队处理，点完之后要等一轮（通常几分钟），不是即时出结果。
           <br><br>
-          队列位置：<span class="mono" style="font-size:12px;">data/bridge/pending</span>
-          ，处理结果写到 <span class="mono" style="font-size:12px;">data/bridge/done</span>。
-          需要先在 WorkBuddy 里建一个定时任务来消费队列。
+          队列位置：<span class="mono" style="font-size:12px;">{{ prompts.analyse.split('`')[1] if '`' in prompts.analyse else 'data/bridge/pending' }}</span>
+          。需要在 WorkBuddy 里建一个定时任务来消费队列，
+          <strong>下面的提示词可以直接复制粘贴过去</strong>。
+        </div>
+
+        <div class="prompt-card">
+          <div class="prompt-head">
+            <div>
+              <b>① 分析队列的定时任务</b>
+              <div class="tiny muted">建议每 30–60 分钟跑一次。它读队列、写答案，程序下次打开页面时自动收。</div>
+            </div>
+            <button class="btn sm ghost" data-copy-prompt="analyse">复制提示词</button>
+          </div>
+          <pre class="prompt-body">{{ prompts.analyse }}</pre>
+        </div>
+
+        <div class="prompt-card">
+          <div class="prompt-head">
+            <div>
+              <b>② 把消息转进微信的定时任务</b>
+              <div class="tiny muted">建议每 5–15 分钟跑一次。配合「推送 → WorkBuddy」渠道使用。</div>
+            </div>
+            <button class="btn sm ghost" data-copy-prompt="notify">复制提示词</button>
+          </div>
+          <pre class="prompt-body">{{ prompts.notify }}</pre>
         </div>
       </div>
 
@@ -380,6 +414,20 @@
           {% if ch.last_error %}<span class="up">上次失败：{{ ch.last_error }}</span>{% endif %}
         </span>
       </div>
+      {% if ch.key == 'workbuddy' %}
+      <div class="divider"></div>
+      <p class="hint" style="margin-bottom:8px;">
+        这个渠道靠 WorkBuddy 的定时任务把文件转进微信。把下面的提示词贴到 WorkBuddy 新建一个定时任务即可，
+        目录路径已经按你填的 outbox 生成好了。
+      </p>
+      <div class="prompt-card">
+        <div class="prompt-head">
+          <b class="tiny">转发消息的定时任务提示词</b>
+          <button class="btn sm ghost" data-copy-prompt="notify">复制提示词</button>
+        </div>
+        <pre class="prompt-body">{{ prompts.notify }}</pre>
+      </div>
+      {% endif %}
     </div>
   </section>
   {% endfor %}
@@ -397,6 +445,74 @@
         <input type="file" id="import-file" accept=".json" class="hidden">
       </div>
       <p class="tiny muted" style="margin-top:12px;">{{ t('settings.backup_warn') }}</p>
+    </div>
+  </section>
+</div>
+
+
+<div data-pane="about" class="hidden">
+  <section class="card">
+    <div class="card-head">
+      <h2>版本与更新</h2>
+      <span class="meta">{{ about.platform }} · {{ about.mode }}</span>
+    </div>
+    <div class="card-body">
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>当前版本</span>
+          <small>v{{ about.current }} · Python {{ about.python }}</small>
+        </div>
+        <div class="setting-input">
+          <button class="btn ghost" id="check-update">检查更新</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>每天自动检查</span>
+          <small>只检查并提示，不会替你安装。关掉就只能手动点上面那个按钮。</small>
+        </div>
+        <div class="setting-input">
+          <label class="switch">
+            <input type="checkbox" data-key="update.auto_check"
+                   {% if values.get('update.auto_check', True) %}checked{% endif %}>
+            <span></span>
+          </label>
+        </div>
+      </div>
+
+      <div id="update-result" class="update-result hidden"></div>
+
+      <div class="row-actions">
+        <button class="btn" data-save>{{ t('action.save') }}</button>
+        <a class="btn ghost" href="{{ about.releases_url }}" target="_blank" rel="noopener">
+          打开 Releases ↗
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>这台机器上的位置</h2></div>
+    <div class="card-body">
+      <table class="grid">
+        <tbody>
+          <tr><td>数据目录</td><td class="mono tiny">{{ about.home }}</td></tr>
+          <tr><td>数据库</td><td class="mono tiny">{{ about.db_path }}</td></tr>
+        </tbody>
+      </table>
+      <p class="hint" style="margin-top:12px;">
+        「设置 → 备份」可以导出一份完整的数据库快照。换机器时把它放进新的数据目录即可。
+      </p>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>许可</h2></div>
+    <div class="card-body">
+      <p class="hint" style="margin:0;">
+        GPL-3.0。你可以自由使用、修改和分发，修改后的版本也必须以同样的许可发布。
+        这个工具不提供投资建议，也不下单——所有决定都是你自己的。
+      </p>
     </div>
   </section>
 </div>
@@ -695,6 +811,103 @@
       if (!confirm('删除这个自定义数据源？')) return;
       fetch('/api/datasources/custom/' + btn.getAttribute('data-src-del') + '/delete', { method: 'POST' })
         .then(function () { location.reload(); });
+    });
+  });
+
+  /* ---- 检查更新 ---- */
+  var checkBtn = document.getElementById('check-update');
+  var updateBox = document.getElementById('update-result');
+
+  function renderUpdate(res) {
+    if (!updateBox) return;
+    updateBox.classList.remove('hidden');
+    if (!res.ok) {
+      updateBox.className = 'update-result err';
+      updateBox.textContent = res.error || '检查失败';
+      return;
+    }
+    if (res.available) {
+      var latest = res.latest || {};
+      var asset = latest.asset;
+      updateBox.className = 'update-result warn';
+      updateBox.innerHTML =
+        '<b>有新版本 v' + latest.version + '</b>' +
+        '<p>当前 v' + res.current + '。' +
+          (asset
+            ? '可以直接下载并打开安装包，剩下只需把它拖进 Applications。'
+            : '这个版本没有为当前平台提供安装包，请到 Releases 页面下载。') +
+        '</p>' +
+        (latest.notes ? '<pre class="prompt-body">' + latest.notes.replace(/</g, '&lt;') + '</pre>' : '') +
+        (asset ? '<button class="btn sm" id="do-install">下载并安装</button>' : '');
+      var installBtn = document.getElementById('do-install');
+      if (installBtn) {
+        installBtn.addEventListener('click', function () {
+          installBtn.disabled = true;
+          installBtn.textContent = '下载中…';
+          fetch('/api/update/install', { method: 'POST' })
+            .then(function (r) { return r.json(); })
+            .then(function (out) {
+              if (!out.ok) {
+                updateBox.className = 'update-result err';
+                updateBox.textContent = out.error || '安装失败';
+                if (out.url) {
+                  updateBox.insertAdjacentHTML('beforeend',
+                    '<p><a href="' + out.url + '" target="_blank" rel="noopener">去 Releases 手动下载</a></p>');
+                }
+                return;
+              }
+              updateBox.className = 'update-result ok';
+              updateBox.textContent = out.up_to_date
+                ? '已经是最高版本了。'
+                : (out.next || '安装包已打开。');
+            })
+            .catch(function (e) { updateBox.textContent = String(e); });
+        });
+      }
+      return;
+    }
+    updateBox.className = 'update-result ok';
+    updateBox.textContent = '已是最新版本 v' + res.current +
+      (res.reason ? '（' + res.reason + '）' : '') + '。';
+  }
+
+  if (checkBtn) {
+    checkBtn.addEventListener('click', function () {
+      checkBtn.disabled = true;
+      var original = checkBtn.textContent;
+      checkBtn.textContent = '检查中…';
+      fetch('/api/update?force=true')
+        .then(function (r) { return r.json(); })
+        .then(renderUpdate)
+        .catch(function (e) {
+          if (updateBox) { updateBox.classList.remove('hidden'); updateBox.textContent = String(e); }
+        })
+        .finally(function () { checkBtn.disabled = false; checkBtn.textContent = original; });
+    });
+  }
+
+  /* ---- 给 WorkBuddy 的提示词 ---- */
+  var PROMPTS = {{ prompts | tojson }};
+  document.querySelectorAll('[data-copy-prompt]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var key = btn.getAttribute('data-copy-prompt');
+      var text = PROMPTS[key] || '';
+      var done = function () {
+        var original = btn.textContent;
+        btn.textContent = '已复制';
+        setTimeout(function () { btn.textContent = original; }, 1600);
+      };
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(done);
+      } else {
+        var area = document.createElement('textarea');
+        area.value = text;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand('copy');
+        document.body.removeChild(area);
+        done();
+      }
     });
   });
 })();

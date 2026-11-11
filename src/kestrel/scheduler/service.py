@@ -43,6 +43,33 @@ async def _scan_cycle() -> None:
         log.warning("scheduled scan failed: %s", exc)
 
 
+async def _update_cycle() -> None:
+    """每天查一次新版本。
+
+    只提醒、不安装：把应用在用户不知情时替换掉，比晚一天更新糟得多。
+    没有发布过任何 release 时 GitHub 返回 404，这被当成「暂时没有更新」，
+    不会打扰用户。
+    """
+    try:
+        from kestrel.services import updates
+
+        if not updates.auto_enabled():
+            return
+        report = await updates.check()
+        if not report.get("available"):
+            return
+        latest = report.get("latest") or {}
+        dispatcher.queue_text(
+            f"Kestrel 有新版本 v{latest.get('version')}",
+            f"当前 v{report.get('current')}。到「设置 → 关于」点一下就能下载并安装。",
+            url=_absolute("/settings#about"),
+        )
+        await dispatcher.dispatch_outbox()
+        log.info("update available: %s", latest.get("version"))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("update check failed: %s", exc)
+
+
 async def _watch_cycle() -> None:
     """持倉風險檢查：跌破止損、接近止損、到達目標。
 
@@ -109,6 +136,13 @@ def start() -> AsyncIOScheduler | None:
             max_instances=1,
             coalesce=True,
         )
+    scheduler.add_job(
+        _update_cycle,
+        IntervalTrigger(hours=12),
+        id="update_cycle",
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.start()
     _scheduler = scheduler
     log.info(

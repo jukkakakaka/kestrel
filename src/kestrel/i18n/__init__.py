@@ -10,8 +10,20 @@ LOCALES_DIR = Path(__file__).parent / "locales"
 DEFAULT_LOCALE = "zh-CN"
 
 
+# 语言选择器里显示的名字，用**该语言自己**的写法。
+# 选项写成 "en" / "zh-CN" 是在暴露文件名，不是在给用户看的。
+LOCALE_LABELS = {
+    "zh-CN": "简体中文",
+    "en": "English",
+}
+
+
 def available_locales() -> list[str]:
     return sorted(p.stem for p in LOCALES_DIR.glob("*.json"))
+
+
+def locale_label(code: str) -> str:
+    return LOCALE_LABELS.get(code, code)
 
 
 @lru_cache(maxsize=8)

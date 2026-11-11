@@ -110,7 +110,11 @@
   <div class="card-head">
     <h2>最近一次 AI 分析</h2>
     <span class="meta">
-      {{ analyst_runs[0].provider }}{% if analyst_runs[0].model %} · {{ analyst_runs[0].model }}{% endif %}
+      <span class="badge wait">{{ analyst_runs[0].engine_label }}</span>
+      {% if analyst_runs[0].engine_detail %} · {{ analyst_runs[0].engine_detail }}{% endif %}
+      {% if analyst_runs[0].horizon %}
+        · {{ horizon.labels.get(analyst_runs[0].horizon, analyst_runs[0].horizon) }}
+      {% endif %}
       · {{ (analyst_runs[0].finished_at or analyst_runs[0].started_at)[:16] }}
     </span>
   </div>
@@ -201,7 +205,9 @@
               <span class="gloss" data-term="stop_loss">止损</span>、
               <span class="gloss" data-term="target">目标价</span>、
               <span class="gloss" data-term="rr">盈亏比</span>、
-              <span class="gloss" data-term="position">仓位</span>
+              <span class="gloss" data-term="position">仓位</span>、
+              <span class="gloss" data-term="r_multiple">R 倍数</span>、
+              <span class="gloss" data-term="trailing_stop">移动止损</span>
               —— 鼠标停上去看解释。
             </p>
           </div>

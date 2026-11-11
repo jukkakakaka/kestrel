@@ -29,8 +29,10 @@ desktop window, a local browser app, or a container behind a reverse proxy.
 | Planning | `planning/builder.py` | Signal → executable plan: entry zone, ATR stop, 2R/3R targets, lot-aware size, fees, break-even, expiry |
 | Fees | `fees/calculator.py` | Exchange rules + broker plans, all `Decimal` |
 | Execution | `services/execution.py` | Fills → trades: lot checks, FIFO sells, plan snapshots, deviation in % and R, the `BrokerAdapter` seam |
-| Monitor | `services/positions.py` | Open positions with live P&L, distance to stop, R multiple, de-duplicated alerts |
+| Monitor | `services/positions.py` | Open positions with live P&L, distance to stop, R multiple (always against the *initial* risk), de-duplicated alerts |
+| Exits | `services/exits.py` | The one thing to do now: stop hit, scale out at target, trail the stop at +1R / +2R, time stop |
 | Briefing | `services/today.py` | Turns positions and pending advice into a ranked to-do list |
+| Prompts | `services/prompts.py` | Generates the two WorkBuddy cron prompts from the *current* data paths, so they are never stale |
 | Delivery | `notify/` | Outbox pattern (advice and free-standing messages), retry, per-channel adapters |
 | Receipts | `receipts/tokens.py` | HMAC short codes, 72h expiry, mobile page |
 | Journal | `services/journal.py` | Trades, partial closes, IPO ledger, discipline stats |
@@ -44,10 +46,14 @@ desktop window, a local browser app, or a container behind a reverse proxy.
 2. **The planner owns position size.** No agent, LLM or external service may change
    `qty`, `stop` or `target` after the plan is built.
 3. **Agents never block a scan.** Every agent call has a fallback to the rules text.
-4. **A plan without a stop does not exist.** `build()` returns `None` when the stop
+4. **R is measured against the first stop, never the moved one.** Trailing a stop must
+   not make a mediocre trade look like a great one.
+5. **A stop only moves up.** Lowering it is refused by `exits.apply_stop`; that is the
+   behaviour the whole discipline argument rests on.
+6. **A plan without a stop does not exist.** `build()` returns `None` when the stop
    distance is outside the band for its horizon (1.5–15 % daily, 3–18 % weekly,
    5–30 % monthly) or when one lot exceeds the risk budget.
-5. **Every recommendation is stamped with its market, its horizon and an expiry.**
+7. **Every recommendation is stamped with its market, its horizon and an expiry.**
    No open-ended advice. A weekly plan is not allowed to die at tonight's close.
 
 ## Lookahead safety
@@ -79,8 +85,11 @@ exists to make this explicit; any future optimisation that breaks it should rais
    and fill in both percent and risk units.
 8. `services/positions.py` watches what is open — on every scheduler tick, and on
    every page load — and raises a stop / target alert once per position and kind.
-9. `services/today.py` folds the whole picture into the home page: what is urgent,
-   what is pending, and what needs no action at all.
+9. `services/exits.py` decides the single next action per position — exit on a stop
+   break, scale out at target, trail the stop at +1R / +2R, or time-stop a trade that
+   went nowhere. Stop moves are one-way and every move is logged in `stop_change`.
+10. `services/today.py` folds the whole picture into the home page: what is urgent,
+    what is pending, and what needs no action at all.
 
 ## Failure modes
 

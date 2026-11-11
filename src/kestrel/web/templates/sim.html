@@ -74,14 +74,16 @@
       <div class="grid g4">
         <div class="field">
           <label>{{ t('sim.symbol') }}</label>
-          <select name="symbol">
+          <input name="symbol" list="sim-symbols" autocomplete="off"
+                 value="{{ form.symbol }}" placeholder="00700 / US/AAPL / 腾讯">
+          <datalist id="sim-symbols">
             {% for s in symbols %}
-            <option value="{{ s.market }}/{{ s.code }}"
-              {% if form.symbol == s.market ~ '/' ~ s.code %}selected{% endif %}>
-              {{ s.name }} · {{ s.code }}
-            </option>
+            <option value="{{ s.market }}/{{ s.code }}">{{ s.name }}</option>
             {% endfor %}
-          </select>
+          </datalist>
+          <small class="muted" style="font-size:11.5px;">
+            任意标的都可以：直接输代码，或 市场/代码。未缓存的会自动去补。
+          </small>
         </div>
         <div class="field">
           <label>{{ t('sim.strategy') }}</label>
@@ -117,6 +119,7 @@
     {% set st = result.stats %}
     <p class="hint" style="margin:0 0 8px;">
       {{ t('sim.horizon') }}：<b>{{ horizon_labels.get(result.timeframe or 'short') }}</b>
+      {% if result.note %} · {{ result.note }}{% endif %}
     </p>
     {% if st.count %}
     <p style="font-size:14px;line-height:1.8;">

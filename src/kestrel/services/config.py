@@ -32,6 +32,10 @@ DEFAULTS: dict[str, Any] = {
     "agent.model": "",
     "agent.api_key": "",
     "agent.daily_budget": 200,
+    # 更新：默认每天自动检查一次，但不自动安装——安装需要用户确认，
+    # 否则应用会在用户不知情时被替换掉。
+    "update.auto_check": True,
+    "update.auto_install": False,
 }
 
 

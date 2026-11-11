@@ -61,6 +61,11 @@ A USD 1,000 round trip costs roughly **USD 2 (0.2 %)**.
 | `ibkr_us` | IBKR | US | 0 | USD 0.005 / share, min 1 |
 | `cn_generic` | 通用 A 股 | CN | 0.025 %, min 5 | — |
 
+Broker plans are editable in the UI (设置 → 成本计算 → 券商套餐); `fees/plans.py`
+copies the built-ins into the database on first use and pushes the edited values
+back into the calculator at startup. A code change is only needed for a new
+*bulk* default:
+
 Adding a broker is one dataclass line:
 
 ```python
@@ -68,6 +73,15 @@ Adding a broker is one dataclass line:
                         commission_rate=Decimal("0.0003"),
                         platform_fixed=Decimal("10")),
 ```
+
+## Where the fee number shows up
+
+- **Plan cards** — `est_fees` is a full round trip, and the break-even price
+  includes it. A plan whose break-even is not clearly below target is rejected.
+- **Journal** — a sell only adds the sell side, because the buy side was booked
+  when the position was opened. Partial exits apportion fees by quantity, so the
+  first slice does not carry the whole cost.
+- **Cost page** — the same calculator, with an editable broker picker.
 
 ## Why this matters for a 10k account
 
