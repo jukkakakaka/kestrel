@@ -6,9 +6,10 @@ Thanks for taking a look. Kestrel is small on purpose — a few rules keep it th
 
 - **No pandas, no SQLAlchemy, no Node build chain.** The stack is FastAPI + SQLite + Jinja2 + vanilla JS, and that is a feature.
 - **Money is integer micro-units.** Never store or compare floats for prices, fees or P&L. Use `kestrel.core.money`.
-- **Money paths need tests.** Any change to `fees/`, `ledger/` or `planning/sizing.py` must come with a test that pins the expected numbers.
-- **Every new config option goes through Pydantic.** The settings UI is generated from the schema, so a new field appears automatically.
+- **Money paths need tests.** Any change to `fees/`, `services/execution.py`, `services/journal.py` or `planning/` must come with a test that pins the expected numbers.
+- **Every config key is read somewhere.** The settings UI and the code that consumes a setting must use the same key name; a key nothing reads is a lie on screen.
 - **i18n parity is enforced.** `tests/unit/test_i18n_parity.py` fails if a key exists in one locale and not the other.
+- **The suite must pass on an empty `KESTREL_HOME`.** CI has no pre-seeded database — `tests/conftest.py` provides a migrated one, so a test that only passes against your local `data/` is a bug.
 
 ## Development
 

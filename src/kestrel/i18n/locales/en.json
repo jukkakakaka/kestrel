@@ -397,5 +397,9 @@
   "sim.horizon": "Horizon",
   "sim.horizon_hint": "A different horizon means different bars, and a different holding period.",
   "rules.horizon": "Validate on",
-  "rules.horizon_hint": "A rule that loses on daily bars can still work weekly; verdicts are kept per horizon."
+  "rules.horizon_hint": "A rule that loses on daily bars can still work weekly; verdicts are kept per horizon.",
+  "nav.today": "Today",
+  "nav.rules": "Rules",
+  "j.qty_short": "Qty",
+  "j.since": "Opened"
 }

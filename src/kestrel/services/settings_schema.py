@@ -83,16 +83,19 @@ SECTIONS: list[Section] = [
               help_en="A URL your phone can reach"),
     ]),
     Section("agents", "分析引擎", "Analysis engines", [
-        Field("agent.mode", "模式", "Mode", "select", options=[
-            ("rules", "纯规则（免费，默认）"), ("llm", "调用大模型"), ("workbuddy", "WorkBuddy 文件桥")]),
-        Field("agent.llm.base_url", "接口地址", "Base URL", "text",
+        # 键名必须和 engine.py / analyst.py 实际读的一致。历史上这里有第二套
+        # agent.mode / agent.llm.* 键，存进去没人读，页面看起来能配其实无效。
+        Field("agent.provider", "由谁产生建议", "Advice engine", "select", options=[
+            ("rules", "规则引擎（免费，本地计算）"),
+            ("llm", "大模型（实时，按 token 计费）"),
+            ("workbuddy", "WorkBuddy（文件队列，异步）"),
+        ]),
+        Field("agent.base_url", "接口地址", "Base URL", "text",
               help_zh="任何 OpenAI 兼容端点，比如 DeepSeek 或本地 Ollama",
               help_en="Any OpenAI-compatible endpoint"),
-        Field("agent.llm.api_key", "API Key", "API Key", "password"),
-        Field("agent.llm.model", "模型", "Model", "text"),
-        Field("agent.llm.enabled", "用模型润色解释", "Polish explanations", "switch",
-              help_zh="只改写文字，不改仓位和价格", help_en="Rewrites wording only, never sizes or prices"),
-        Field("agent.budget_per_day", "每日调用上限", "Daily call budget", "number", step="10"),
+        Field("agent.api_key", "API Key", "API Key", "password"),
+        Field("agent.model", "模型名", "Model", "text"),
+        Field("agent.daily_budget", "每天最多调用", "Daily call budget", "number", step="10"),
     ]),
 ]
 
@@ -102,12 +105,6 @@ EXTRA_DEFAULTS: dict[str, Any] = {
     "ui.learning_mode": True,
     "ui.glossary": True,
     "scan.min_score": 0.55,
-    "agent.mode": "rules",
-    "agent.llm.base_url": "",
-    "agent.llm.api_key": "",
-    "agent.llm.model": "",
-    "agent.llm.enabled": False,
-    "agent.budget_per_day": 50,
     "notify.ntfy.enabled": False,
     "notify.ntfy.topic": "",
     "notify.ntfy.server": "https://ntfy.sh",
@@ -118,6 +115,16 @@ EXTRA_DEFAULTS: dict[str, Any] = {
     "notify.weclawbot.bot_id": "",
     "notify.weclawbot.api_token": "",
 }
+
+# 旧版本写过这些键，但它们不代表任何真实行为。清理掉，免得用户以为设过什么。
+LEGACY_KEYS = (
+    "agent.mode",
+    "agent.llm.base_url",
+    "agent.llm.api_key",
+    "agent.llm.model",
+    "agent.llm.enabled",
+    "agent.budget_per_day",
+)
 
 
 def defaults() -> dict[str, Any]:

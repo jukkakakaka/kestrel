@@ -28,10 +28,12 @@ desktop window, a local browser app, or a container behind a reverse proxy.
 | Strategies | `strategies/base.py` | Pure functions of the indicator snapshot, return a scored signal |
 | Planning | `planning/builder.py` | Signal → executable plan: entry zone, ATR stop, 2R/3R targets, lot-aware size, fees, break-even, expiry |
 | Fees | `fees/calculator.py` | Exchange rules + broker plans, all `Decimal` |
-| Agents | `services/agent.py` | Optional prose rewriting (rules / LLM / WorkBuddy bridge). Never touches sizes or prices |
-| Delivery | `notify/` | Outbox pattern, retry, per-channel adapters |
+| Execution | `services/execution.py` | Fills → trades: lot checks, FIFO sells, plan snapshots, deviation in % and R, the `BrokerAdapter` seam |
+| Monitor | `services/positions.py` | Open positions with live P&L, distance to stop, R multiple, de-duplicated alerts |
+| Briefing | `services/today.py` | Turns positions and pending advice into a ranked to-do list |
+| Delivery | `notify/` | Outbox pattern (advice and free-standing messages), retry, per-channel adapters |
 | Receipts | `receipts/tokens.py` | HMAC short codes, 72h expiry, mobile page |
-| Journal | `services/journal.py` | Trades, positions, IPO ledger, discipline stats |
+| Journal | `services/journal.py` | Trades, partial closes, IPO ledger, discipline stats |
 | Backtest | `services/backtest.py` | Same strategies over history, event driven |
 | Scheduling | `scheduler/service.py` | Interval scans, expiry sweep, dispatch |
 
@@ -72,8 +74,13 @@ exists to make this explicit; any future optimisation that breaks it should rais
 6. The recommendation is stored with its horizon, a receipt token minted, and a
    notification queued. The exposure ceiling is applied across the whole batch,
    so three plans risking 2 % each are not counted as independent.
-7. `dispatch()` sends it; the phone link writes back a `receipt` row with the
-   deviation between plan and fill.
+7. `dispatch()` sends it; the phone link (or the advice card) records a real
+   `trade` row through `services/execution.py`, with the deviation between plan
+   and fill in both percent and risk units.
+8. `services/positions.py` watches what is open — on every scheduler tick, and on
+   every page load — and raises a stop / target alert once per position and kind.
+9. `services/today.py` folds the whole picture into the home page: what is urgent,
+   what is pending, and what needs no action at all.
 
 ## Failure modes
 

@@ -60,6 +60,7 @@
 html { -webkit-text-size-adjust: 100%; }
 
 body {
+  overflow-x: hidden;
   background: var(--bg);
   color: var(--ink);
   font: 14px/1.65 -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI",
@@ -340,8 +341,14 @@ table.grid th.num, table.grid td.num { text-align: right; }
   list-style: none;
 }
 .advice-body summary::-webkit-details-marker { display: none; }
-.advice-body summary::before { content: "▸ "; }
-.advice-body details[open] summary::before { content: "▾ "; }
+.advice-body summary::before {
+  content: ""; display: inline-block; width: 0; height: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+  margin-right: 7px; vertical-align: 1px;
+  transition: transform .12s;
+}
+.advice-body details[open] summary::before { transform: rotate(90deg); }
 .advice-body .learn { padding: 0 0 14px; font-size: 12.5px; color: var(--ink-2); line-height: 1.8; }
 .advice-body .learn h4 { font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 3px; }
 .advice-body .learn p { margin-bottom: 10px; }
@@ -476,4 +483,172 @@ table.grid th.num, table.grid td.num { text-align: right; }
   padding: 13px 16px;
   font-size: 12.5px; line-height: 1.8; color: var(--ink-2);
   margin-bottom: 16px;
+}
+
+/* ---------- 成交录入 / 持仓监控 ---------- */
+
+.textarea {
+  width: 100%; font: inherit; font-size: 13px; line-height: 1.7;
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--ink); resize: vertical;
+}
+.textarea:focus { outline: none; border-color: var(--brand-2); box-shadow: 0 0 0 3px var(--brand-soft); }
+
+.inline-form { display: flex; gap: 6px; align-items: center; }
+.inline-form input {
+  width: 92px; font: inherit; font-size: 12.5px; padding: 5px 8px;
+  border: 1px solid var(--line); border-radius: 7px;
+  background: var(--surface); color: var(--ink);
+}
+.inline-form input:focus { outline: none; border-color: var(--brand-2); }
+
+.close-form { display: flex; gap: 5px; align-items: center; flex-wrap: nowrap; }
+.close-form input {
+  width: 74px; font: inherit; font-size: 12px; padding: 5px 7px;
+  border: 1px solid var(--line); border-radius: 7px;
+  background: var(--surface); color: var(--ink);
+}
+.close-form input[name="review"] { width: 120px; }
+
+.card.attention { border-color: var(--up); box-shadow: 0 0 0 1px var(--up-soft) inset; }
+.card.attention .card-head h2 { color: var(--up); }
+
+.tiny { font-size: 11.5px; line-height: 1.55; }
+.hint.tight { margin: -4px 0 14px; font-size: 12px; }
+
+/* ---------- 回执页（手机上打开的独立页面） ---------- */
+
+.receipt-wrap { max-width: 480px; padding: 18px 16px 40px; }
+.receipt-wrap .field-pair > label { min-width: 0; }
+.receipt-wrap input { min-width: 0; }
+.receipt-wrap .panel {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 18px; padding: 22px 20px; box-shadow: var(--shadow-2);
+}
+.receipt-wrap h1 { font-size: 20px; font-weight: 650; margin-bottom: 6px; }
+.receipt-head { display: flex; align-items: center; gap: 9px; margin-bottom: 14px; }
+.receipt-head strong { font-size: 17px; }
+.receipt-verdict {
+  font-size: 14px; line-height: 1.75; color: var(--ink-2);
+  background: var(--surface-2); border-radius: var(--radius-sm);
+  padding: 11px 13px; margin-bottom: 16px;
+}
+.receipt-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin-bottom: 18px;
+}
+.receipt-grid dt { font-size: 11.5px; color: var(--muted); margin-bottom: 2px; }
+.receipt-grid dd { font-size: 15px; font-weight: 550; }
+.receipt-form { display: flex; flex-direction: column; gap: 8px; }
+.receipt-form input[type="text"] {
+  font: inherit; font-size: 15px; padding: 11px 13px;
+  border: 1px solid var(--line); border-radius: 11px;
+  background: var(--surface); color: var(--ink); width: 100%;
+}
+.receipt-form input:focus { outline: none; border-color: var(--brand-2); box-shadow: 0 0 0 3px var(--brand-soft); }
+.field-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.field-pair > label { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field-label { font-size: 12px; color: var(--muted); }
+.receipt-actions { display: flex; gap: 9px; margin-top: 14px; }
+.receipt-actions .btn { flex: 1; justify-content: center; padding: 12px 10px; font-size: 14px; }
+.receipt-done { text-align: center; }
+.receipt-done .done-mark {
+  width: 54px; height: 54px; line-height: 54px; border-radius: 50%;
+  background: var(--down-soft); color: var(--down); font-size: 26px;
+  margin: 0 auto 14px;
+}
+.receipt-done .muted-mark { background: var(--warn-soft); color: var(--warn); }
+.receipt-result {
+  text-align: left; background: var(--surface-2); border-radius: var(--radius-sm);
+  padding: 13px 15px; margin: 16px 0;
+}
+.receipt-result .row {
+  display: flex; justify-content: space-between; gap: 12px;
+  font-size: 13px; padding: 4px 0;
+}
+.receipt-result .row span { color: var(--muted); }
+
+/* ---------- 首页：今天该做什么 ---------- */
+
+.today-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; align-items: start; }
+@media (max-width: 860px) { .today-grid { grid-template-columns: 1fr; } }
+
+.todo { display: flex; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--line-soft); }
+.todo:last-child { border-bottom: none; padding-bottom: 0; }
+.todo-mark {
+  width: 26px; height: 26px; border-radius: 8px; flex: 0 0 auto;
+  display: grid; place-items: center; font-size: 13px; font-weight: 700;
+}
+.todo-mark.do { background: var(--brand-soft); color: var(--brand-2); }
+.todo-mark.warn { background: var(--up-soft); color: var(--up); }
+.todo-mark.ok { background: var(--down-soft); color: var(--down); }
+.todo-body { flex: 1 1 auto; min-width: 0; }
+.todo-body b { font-size: 13.5px; }
+.todo-body p { font-size: 12.5px; color: var(--ink-2); line-height: 1.7; margin-top: 3px; }
+.todo-act { flex: 0 0 auto; align-self: center; }
+
+.step-list { counter-reset: step; }
+.step {
+  counter-increment: step; position: relative;
+  padding: 0 0 18px 38px; border-left: 1px solid var(--line);
+  margin-left: 12px;
+}
+.step:last-child { border-left-color: transparent; padding-bottom: 0; }
+.step::before {
+  content: counter(step);
+  position: absolute; left: -13px; top: -2px;
+  width: 25px; height: 25px; border-radius: 50%;
+  background: var(--brand-soft); color: var(--brand-2);
+  display: grid; place-items: center; font-size: 12px; font-weight: 700;
+}
+.step h4 { font-size: 13.5px; font-weight: 620; margin-bottom: 4px; }
+.step p { font-size: 12.5px; line-height: 1.75; color: var(--ink-2); }
+
+/* ---------- 引导页 ---------- */
+
+.welcome-wrap { max-width: 720px; margin: 34px auto 60px; }
+.welcome-head { text-align: center; margin-bottom: 30px; }
+.welcome-head img { border-radius: 14px; margin-bottom: 14px; }
+.welcome-head h1 { font-size: 25px; font-weight: 680; letter-spacing: -.3px; }
+.welcome-head p { font-size: 13.5px; color: var(--ink-2); line-height: 1.85; margin-top: 8px; }
+
+.welcome-step {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 20px 22px; margin-bottom: 14px; position: relative;
+}
+.welcome-step .ws-num {
+  position: absolute; top: -11px; left: 20px;
+  width: 26px; height: 26px; border-radius: 9px;
+  background: var(--brand-2); color: #fff;
+  display: grid; place-items: center; font-size: 12.5px; font-weight: 700;
+  box-shadow: 0 2px 8px rgba(30, 99, 216, .3);
+}
+.welcome-step h3 { font-size: 15.5px; font-weight: 650; margin: 6px 0 4px; }
+
+.market-picks, .horizon-picks { display: grid; gap: 8px; }
+.market-picks { grid-template-columns: repeat(3, 1fr); }
+.horizon-picks { grid-template-columns: 1fr 1fr; }
+@media (max-width: 700px) {
+  .market-picks { grid-template-columns: 1fr; }
+}
+.market-pick {
+  display: flex; gap: 9px; align-items: flex-start; cursor: pointer;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 11px 13px; transition: border-color .12s, background .12s;
+}
+.market-pick:hover { border-color: var(--brand-2); }
+.market-pick:has(input:checked) { border-color: var(--brand-2); background: var(--brand-soft); }
+.market-pick input { margin-top: 3px; accent-color: var(--brand-2); }
+.mp-body { display: flex; flex-direction: column; gap: 2px; }
+.mp-body b { font-size: 13px; font-weight: 620; }
+.mp-body small { font-size: 11.5px; color: var(--muted); line-height: 1.55; }
+
+.welcome-foot { display: flex; gap: 10px; align-items: center; justify-content: center; margin-top: 22px; }
+.btn.lg { padding: 11px 26px; font-size: 14px; }
+
+/* ---------- 执行质量 ---------- */
+
+.quality-lesson {
+  font-size: 13.5px; line-height: 1.9; color: var(--ink);
+  background: var(--brand-soft); border-radius: var(--radius-sm);
+  padding: 14px 16px; margin-bottom: 16px;
 }

@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}开始使用 · {{ t('app.name') }}{% endblock %}
+
+{% block content %}
+<div class="welcome-wrap">
+  <div class="welcome-head">
+    <img src="/static/favicon/favicon-180.png" width="56" height="56" alt="">
+    <h1>欢迎使用 {{ t('app.name') }} 隼</h1>
+    <p>先花一分钟回答三个问题。答案决定它以后给你什么建议——包括要不要建议你今天什么都别做。</p>
+  </div>
+
+  <div class="welcome-steps">
+    <div class="welcome-step">
+      <div class="ws-num">1</div>
+      <h3>你有多少钱，能亏多少？</h3>
+      <p class="hint">股数不是拍脑袋定的，是从「这一笔最多亏多少」倒推出来的。新手建议单笔风险 1%–2%。</p>
+      <div class="grid g2" style="margin-top:12px;">
+        <div class="field">
+          <label>账户本金（人民币折算）</label>
+          <input id="w-capital" type="number" step="1000" value="50000">
+          <span class="help">只用来算仓位，不会上传，也不对接任何账户。</span>
+        </div>
+        <div class="field">
+          <label>单笔最多亏本金的比例</label>
+          <select id="w-risk">
+            <option value="1">1%（保守，推荐新手）</option>
+            <option value="2" selected>2%（常见）</option>
+            <option value="3">3%（偏激进）</option>
+          </select>
+          <span class="help">5 万本金、2% 就是每笔最多亏 1000 元。</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="welcome-step">
+      <div class="ws-num">2</div>
+      <h3>你打算做哪些市场？</h3>
+      <p class="hint">可以多选。没选的市场不会被扫描，也不会出现在建议里。</p>
+      <div class="market-picks" style="margin-top:12px;">
+        {% for code, label, note in [('CN', 'A 股', 'T+1，涨跌停限制，印花税只在卖出时收'),
+                                     ('HK', '港股', '按手交易，印花税买卖双向'),
+                                     ('US', '美股', '可买 1 股，无印花税')] %}
+        <label class="market-pick">
+          <input type="checkbox" name="markets" value="{{ code }}" {% if code != 'US' %}checked{% endif %}>
+          <span class="mp-body">
+            <b>{{ label }}</b>
+            <small>{{ note }}</small>
+          </span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="welcome-step">
+      <div class="ws-num">3</div>
+      <h3>你打算拿多久？</h3>
+      <p class="hint">周期决定它看日线、周线还是月线，也决定止损该宽还是该窄。不确定就选自动，它会按行情和你的资金给建议。</p>
+      <div class="horizon-picks" style="margin-top:12px;">
+        <label class="market-pick">
+          <input type="radio" name="horizon" value="auto" checked>
+          <span class="mp-body">
+            <b>自动（推荐）</b>
+            <small>每次扫描前重新判断，并在建议页说明理由</small>
+          </span>
+        </label>
+        <label class="market-pick">
+          <input type="radio" name="horizon" value="short">
+          <span class="mp-body"><b>短线 · 日线</b><small>持有几天到几周，换手高、费用敏感</small></span>
+        </label>
+        <label class="market-pick">
+          <input type="radio" name="horizon" value="medium">
+          <span class="mp-body"><b>中线 · 周线</b><small>持有几周到两个月，少折腾</small></span>
+        </label>
+        <label class="market-pick">
+          <input type="radio" name="horizon" value="long">
+          <span class="mp-body"><b>长线 · 月线（Beta）</b><small>按月线管理，样本最少</small></span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div class="welcome-foot">
+    <button class="btn lg" id="w-done">保存，开始</button>
+    <button class="btn ghost" id="w-skip">先随便看看</button>
+    <span class="tiny" id="w-msg"></span>
+  </div>
+
+  <p class="tiny muted" style="text-align:center;margin-top:20px;max-width:560px;margin-left:auto;margin-right:auto;">
+    这个工具不会替你下单，也不承诺赚钱。它做的是三件事：把风险算清楚、把计划写下来、把你的实际执行和计划对比给你看。
+  </p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var msg = document.getElementById('w-msg');
+
+  function save(payload, next) {
+    fetch('/api/onboarding', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.ok) { msg.textContent = res.error || '保存失败'; return; }
+        location.href = next || '/';
+      })
+      .catch(function (e) { msg.textContent = String(e); });
+  }
+
+  document.getElementById('w-done').addEventListener('click', function () {
+    var markets = [];
+    document.querySelectorAll('input[name="markets"]:checked').forEach(function (el) {
+      markets.push(el.value);
+    });
+    if (!markets.length) { msg.textContent = '至少选一个市场。'; return; }
+    var horizon = 'auto';
+    var picked = document.querySelector('input[name="horizon"]:checked');
+    if (picked) horizon = picked.value;
+    msg.textContent = '保存中…';
+    save({
+      capital: parseFloat(document.getElementById('w-capital').value) || 50000,
+      risk_pct: parseFloat(document.getElementById('w-risk').value) || 2,
+      markets: markets,
+      horizon: horizon
+    }, '/advice');
+  });
+
+  document.getElementById('w-skip').addEventListener('click', function () {
+    save({ skip: true }, '/');
+  });
+})();
+</script>
+{% endblock %}

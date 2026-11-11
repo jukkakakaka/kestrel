@@ -242,6 +242,25 @@ def render_prompt(brief: dict, locale: str = "zh-CN") -> str:
 
 # ------------------------------------------------------------------- provider
 
+def budget_state(cfg: dict) -> tuple[bool, int]:
+    """今天的模型调用额度还剩多少。返回 (是否允许, 已用次数)。"""
+    limit = int(cfg.get("agent.daily_budget") or 0)
+    if limit <= 0:
+        return True, 0
+    today = datetime.now(UTC).date().isoformat()
+    conn = connect()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM analyst_run"
+            " WHERE provider='llm' AND date(started_at)=? AND error IS NULL",
+            (today,),
+        ).fetchone()
+        used = int(row["n"] or 0)
+    finally:
+        conn.close()
+    return used < limit, used
+
+
 async def ask_model(brief: dict, cfg: dict, timeout: float = 90.0) -> dict:
     """Call an OpenAI-compatible endpoint and return parsed JSON."""
     base_url = str(cfg.get("agent.base_url") or "").rstrip("/")
@@ -425,6 +444,22 @@ async def analyse(
     provider = "dry" if dry_reply is not None else str(cfg.get("agent.provider") or "rules")
     model = str(cfg.get("agent.model") or "")
 
+    # 预算必须在调用模型之前检查。文档一直宣称「超了会明确报错，不会偷偷退回
+    # 规则引擎」，但代码里根本没读这个设置——那等于没有上限。
+    if provider == "llm" and dry_reply is None:
+        allowed, spent = budget_state(cfg)
+        if not allowed:
+            _record_run(provider, model, brief, 0, 0, [], "每日调用次数已达上限", None, started)
+            return {
+                "ok": False,
+                "engine": provider,
+                "error": (
+                    f"今天的模型调用次数已用完（{spent}/{cfg.get('agent.daily_budget')}）。"
+                    "可以调高上限、换规则引擎，或者明天再来。"
+                ),
+                "budget": {"spent": spent, "limit": cfg.get("agent.daily_budget")},
+            }
+
     # WorkBuddy has no synchronous entry point, so the request is queued and the
     # answer is collected later. Pretending otherwise would hang the page.
     if provider == "workbuddy" and dry_reply is None:
@@ -582,7 +617,7 @@ def _store(accepted: list[dict], brief: dict, label: str, raw_reply: dict) -> in
         for item in accepted:
             pick: Pick = item["pick"]
             qty, fees, risk_amount = size_position(
-                pick, brief, lots.get((pick.market, pick.code), 1)
+                pick, brief, lots.get(f"{pick.market}:{pick.code}", 1)
             )
             if qty <= 0:
                 continue
@@ -615,7 +650,7 @@ def _store(accepted: list[dict], brief: dict, label: str, raw_reply: dict) -> in
                     to_micro(pick.entry_low), to_micro(pick.entry_high),
                     to_micro(pick.stop), to_micro(pick.target),
                     to_micro(pick.entry_low + (pick.target - pick.entry_low) * 1.5),
-                    qty, lots.get((pick.market, pick.code), 1),
+                    qty, lots.get(f"{pick.market}:{pick.code}", 1),
                     to_micro(risk_amount), to_micro(fees),
                     to_micro(pick.entry_low + fees / max(1, qty)),
                     round(r_multiple, 2), pick.conviction / 100.0,

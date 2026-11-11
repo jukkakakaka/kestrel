@@ -179,3 +179,79 @@ async def dispatch(limit: int = 20) -> dict:
         return {"sent": sent, "failed": failed}
     finally:
         conn.close()
+
+
+def queue_text(
+    title: str,
+    body: str,
+    url: str = "",
+    priority: str = "default",
+    locale: str = "zh-CN",
+) -> int:
+    """把一条不属于任何建议的消息放进发件箱。
+
+    持仓止损提醒必须能被单独发送：它不依附于某个 recommendation，
+    但和它一样需要「失败了下次还能重试」的语义。
+    """
+    conn = connect()
+    try:
+        cfg = settings_schema.read_all(conn)
+        channels = configured_channels(cfg)
+        if not channels:
+            return 0
+        count = 0
+        for code, _ in channels:
+            conn.execute(
+                "INSERT INTO message_outbox (channel, title, body, url, priority)"
+                " VALUES (?,?,?,?,?)",
+                (code, title, body, url or None, priority),
+            )
+            count += 1
+        conn.commit()
+        return count
+    finally:
+        conn.close()
+
+
+async def dispatch_outbox(limit: int = 20) -> dict:
+    """发送 queue_text 写入的消息，成功后标记 sent。"""
+    conn = connect()
+    sent = failed = 0
+    try:
+        cfg = settings_schema.read_all(conn)
+        channels = dict(configured_channels(cfg))
+        rows = conn.execute(
+            "SELECT * FROM message_outbox WHERE status='pending' ORDER BY id LIMIT ?",
+            (limit,),
+        ).fetchall()
+        for row in rows:
+            code = row["channel"]
+            conf = channels.get(code)
+            channel = build_channel(code, conf) if conf else None
+            if channel is None:
+                conn.execute(
+                    "UPDATE message_outbox SET status='skipped' WHERE id=?", (row["id"],)
+                )
+                continue
+            message = Message(row["title"], row["body"], row["url"] or "",
+                              row["priority"] or "default")
+            try:
+                await channel.send(message)
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                conn.execute(
+                    "UPDATE message_outbox SET attempts=attempts+1, last_error=? WHERE id=?",
+                    (str(exc)[:300], row["id"]),
+                )
+                log.warning("outbox %s failed: %s", code, exc)
+                continue
+            sent += 1
+            conn.execute(
+                "UPDATE message_outbox SET status='sent', sent_at=datetime('now'),"
+                " attempts=attempts+1 WHERE id=?",
+                (row["id"],),
+            )
+        conn.commit()
+        return {"sent": sent, "failed": failed}
+    finally:
+        conn.close()

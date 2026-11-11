@@ -2,9 +2,11 @@
 <html lang="{{ locale }}" data-theme="{{ theme }}">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#16305c">
   <title>{{ t('receipt.title') }} · {{ t('app.name') }}</title>
   <link rel="icon" href="/static/favicon/favicon-32.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/static/favicon/favicon-180.png">
   <link rel="stylesheet" href="/static/css/app.css">
   <script>
     (function () {
@@ -22,13 +24,46 @@
     <h1>{{ t('receipt.invalid') }}</h1>
     <p class="hint">{{ t('receipt.invalid_hint') }}</p>
   </div>
+
+  {% elif expired and not done %}
+  <div class="panel receipt-done">
+    <div class="done-mark muted-mark">⏳</div>
+    <h1>这个链接已经失效</h1>
+    <p class="hint">建议有效期到 {{ rec.valid_until[:16] }}，过期后再回执会把今天的事记成那天的事。请回到电脑上看最新建议。</p>
+  </div>
+
   {% elif done %}
   <div class="panel receipt-done">
     <div class="done-mark">✓</div>
     <h1>{{ t('receipt.thanks') }}</h1>
     <p class="hint">{{ t('receipt.recorded') }}</p>
-    <a class="btn" href="/scan">{{ t('receipt.back') }}</a>
+
+    {% if result and result.ok %}
+    <div class="receipt-result">
+      <div class="row"><span>实际成交</span><b class="mono">{{ rec.name }} · {{ result.qty }} 股</b></div>
+      {% if result.deviation_pct is not none %}
+      <div class="row">
+        <span>相对建议入场价</span>
+        <b class="mono {{ 'down' if result.deviation_pct < 0 else 'up' }}">
+          {{ '%+.2f'|format(result.deviation_pct) }}%
+        </b>
+      </div>
+      <div class="row">
+        <span>偏离风险单位</span>
+        <b class="mono">{{ '%+.2f'|format(result.deviation_r or 0) }} R</b>
+      </div>
+      <p class="hint" style="margin-top:10px;text-align:left;">
+        偏差为负表示买得比建议便宜，为正表示买贵了。这个数字长期比选股准确率更影响你的结果。
+      </p>
+      {% else %}
+      <div class="row"><span>结果</span><b>{{ result.message }}</b></div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <a class="btn" href="/journal">去看持仓</a>
   </div>
+
   {% else %}
   <div class="panel">
     <div class="receipt-head">
@@ -37,6 +72,8 @@
       <strong>{{ rec.name }}</strong>
     </div>
 
+    <div class="receipt-verdict">{{ rec.headline }}</div>
+
     <dl class="receipt-grid">
       <div><dt>{{ t('scan.entry') }}</dt><dd class="mono">{{ rec.entry_low|money(3) }} – {{ rec.entry_high|money(3) }}</dd></div>
       <div><dt>{{ t('scan.stop') }}</dt><dd class="mono down">{{ rec.stop|money(3) }}</dd></div>
@@ -44,16 +81,28 @@
       <div><dt>{{ t('scan.qty') }}</dt><dd class="mono">{{ rec.qty }}</dd></div>
     </dl>
 
+    {% if error %}
+    <div class="notice err" style="margin:0 0 14px;">{{ error }}</div>
+    {% endif %}
+
     <form method="post" class="receipt-form">
-      <label class="field-label">{{ t('receipt.fill_price') }}</label>
-      <input type="text" inputmode="decimal" name="fill_price" placeholder="{{ rec.entry_low|money(3) }}">
+      <div class="field-pair">
+        <label>
+          <span class="field-label">{{ t('receipt.fill_price') }}</span>
+          <input type="text" inputmode="decimal" name="fill_price" placeholder="{{ rec.entry_low|money(3) }}">
+        </label>
+        <label>
+          <span class="field-label">实际数量（股）</span>
+          <input type="text" inputmode="numeric" name="fill_qty" placeholder="{{ rec.qty }}">
+        </label>
+      </div>
+      <p class="hint tight">价格和数量都按你的实际成交填，跟建议不一样没关系——记的本来就是真实发生的事。</p>
 
       <label class="field-label">{{ t('receipt.note') }}</label>
       <input type="text" name="note" placeholder="{{ t('receipt.note_ph') }}">
 
       <div class="receipt-actions">
         <button class="btn ok" name="action" value="executed">{{ t('receipt.executed') }}</button>
-        <button class="btn ghost" name="action" value="partial">{{ t('receipt.partial') }}</button>
         <button class="btn ghost danger" name="action" value="skipped">{{ t('receipt.skipped') }}</button>
       </div>
     </form>

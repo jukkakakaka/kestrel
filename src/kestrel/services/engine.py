@@ -84,6 +84,23 @@ def status() -> EngineStatus:
 
     if provider == LLM:
         configured = bool(base_url and model)
+        budget_hint = ""
+        try:
+            from kestrel.services import analyst
+
+            conn = connect()
+            try:
+                cfg = config_service.all_values(conn)
+            finally:
+                conn.close()
+            allowed, used = analyst.budget_state(cfg)
+            limit = int(cfg.get("agent.daily_budget") or 0)
+            if limit > 0:
+                budget_hint = f"今天已用 {used}/{limit} 次。"
+                if not allowed:
+                    budget_hint += "额度已用完，调高上限或明天再来。"
+        except Exception:  # noqa: BLE001
+            budget_hint = ""
         return EngineStatus(
             provider=LLM,
             label=LABELS[LLM],
@@ -96,7 +113,7 @@ def status() -> EngineStatus:
             banner=(
                 f"当前由大模型（{model or '未配置'}）分析并选股：它看到候选股的完整指标、"
                 "你的账户和已有规则的实测结果，自己决定买什么、为什么。"
-                "仓位和风控仍由本地代码强制执行。"
+                f"仓位和风控仍由本地代码强制执行。{budget_hint}"
             ),
         )
 
@@ -123,6 +140,7 @@ async def run(markets: list[str] | None = None, trigger: str = "manual") -> dict
     if current.provider == RULES:
         result = await scan.run_scan(trigger=trigger, markets=markets)
         result["engine"] = RULES
+        await _notify_new(result)
         return result
 
     if current.provider == LLM and not current.configured:
@@ -132,6 +150,47 @@ async def run(markets: list[str] | None = None, trigger: str = "manual") -> dict
             "error": "大模型还没配置：设置 → 分析引擎，填接口地址和模型名。",
         }
 
+    before = _max_rec_id()
     result = await analyst.analyse(markets=markets)
     result["engine"] = current.provider
+    await _notify_new(result, since=before)
     return result
+
+
+def _max_rec_id() -> int:
+    conn = connect()
+    try:
+        row = conn.execute("SELECT COALESCE(MAX(id), 0) AS n FROM recommendation").fetchone()
+        return int(row["n"])
+    finally:
+        conn.close()
+
+
+async def _notify_new(result: dict, since: int = 0) -> None:
+    """把本次真正新产生的建议推出去。
+
+    早期版本只推「最近 10 条 active」，既可能重复推旧的，也会漏掉第 11 条；
+    而 AI 路径干脆没有推送。用「本次新增的 id」来界定，两条路径就一致了。
+    """
+    if not result.get("ok") or result.get("pending"):
+        return
+    from kestrel.notify import dispatcher
+
+    conn = connect()
+    try:
+        rows = conn.execute(
+            "SELECT id FROM recommendation WHERE status='active' AND id > ?"
+            " ORDER BY id DESC LIMIT 20",
+            (since,),
+        ).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return
+    queued = 0
+    for row in rows:
+        queued += dispatcher.queue(int(row["id"]))
+    result["queued"] = queued
+    if queued:
+        result["notify"] = await dispatcher.dispatch()
+        await dispatcher.dispatch_outbox()

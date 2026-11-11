@@ -81,3 +81,20 @@ data/bridge/failed/             读不出来的
 
 `agent.daily_budget` 限制每天调用次数。超了就**停止调用并明确报错**，
 不会偷偷退回规则引擎——否则你以为在用 AI，其实在用规则。
+
+设置页读写的键与代码读取的键必须是同一套：`agent.provider` / `agent.base_url` /
+`agent.model` / `agent.api_key` / `agent.daily_budget`。早期版本设置页写的是
+`agent.mode` / `agent.llm.*`，存进去没人读，页面看起来能配其实无效——现在
+`services/settings_schema.py` 的 sections 与实际读取点一致，旧的死键会在读取时被忽略。
+
+## 成交与盯盘不属于任何引擎
+
+引擎只决定「建议怎么来」。从建议到真实持仓这一段与引擎无关，统一走：
+
+- `services/execution.py` — 一笔成交 = 一个 `Fill`（市场、代码、方向、数量、价格、
+  费用、时间、可选建议 id）。整手校验、卖出 FIFO 平仓、偏差换算成 % 和 R 都在这里。
+- `services/positions.py` — 持仓的现价、浮盈、距止损、R 倍数，以及去重后的提醒。
+- `services/today.py` — 把上面两者折叠成「今天该做什么」。
+
+将来接入券商 API 时，只需要实现 `execution.BrokerAdapter` 并使用 `record()`，
+台账、提醒、统计都不会变。

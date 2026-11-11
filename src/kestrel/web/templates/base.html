@@ -30,12 +30,13 @@
       <span class="brand-tag">{{ t('app.tagline') }}</span>
     </a>
     <nav class="nav">
-      <a href="/" class="{% if path == '/' or path.startswith('/stock') %}active{% endif %}">{{ t('nav.market') }}</a>
+      <a href="/" class="{% if path == '/' %}active{% endif %}">{{ t('nav.today') }}</a>
+      <a href="/market" class="{% if path == '/market' or path.startswith('/stock') %}active{% endif %}">{{ t('nav.market') }}</a>
       <a href="/advice" class="{% if path.startswith('/advice') %}active{% endif %}">{{ t('nav.advice') }}</a>
       <a href="/journal" class="{% if path.startswith('/journal') %}active{% endif %}">{{ t('nav.journal') }}</a>
       <a href="/cost" class="{% if path.startswith('/cost') %}active{% endif %}">{{ t('nav.cost') }}</a>
       <a href="/sim" class="{% if path.startswith('/sim') %}active{% endif %}">{{ t('nav.sim') }}</a>
-      <a href="/rules" class="{% if path.startswith('/rules') %}active{% endif %}">规则</a>
+      <a href="/rules" class="{% if path.startswith('/rules') %}active{% endif %}">{{ t('nav.rules') }}</a>
       <a href="/settings" class="{% if path.startswith('/settings') %}active{% endif %}">{{ t('nav.settings') }}</a>
     </nav>
     <div class="tools">

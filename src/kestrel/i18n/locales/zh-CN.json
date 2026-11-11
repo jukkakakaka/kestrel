@@ -397,5 +397,9 @@
   "sim.horizon": "周期",
   "sim.horizon_hint": "换周期就是换一种 K 线，回测的持仓长度也跟着变。",
   "rules.horizon": "验证周期",
-  "rules.horizon_hint": "一条规则在日线亏钱，不代表周线也亏；判定按周期分开记。"
+  "rules.horizon_hint": "一条规则在日线亏钱，不代表周线也亏；判定按周期分开记。",
+  "nav.today": "今天",
+  "nav.rules": "规则",
+  "j.qty_short": "股数",
+  "j.since": "买入时间"
 }

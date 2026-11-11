@@ -56,28 +56,76 @@ def add_trade(**kw) -> int:
         conn.close()
 
 
-def close_trade(trade_id: int, exit_price, review: str = "", rule_break: bool = False) -> dict | None:
+def close_trade(
+    trade_id: int,
+    exit_price,
+    review: str = "",
+    rule_break: bool = False,
+    qty: int | None = None,
+) -> dict | None:
+    """平掉某一条持仓（可部分平仓）。
+
+    卖出走的是同一套费用模型：买入时的费用已经在建仓时记过，这里补卖出侧。
+    部分平仓不修改原记录的数量，而是复制出一条已平记录——历史持仓的建仓价
+    和数量不该被后来的操作改写，否则复盘时看到的是一本假账。
+    """
     conn = connect()
     try:
         row = conn.execute("SELECT * FROM trade WHERE id=?", (trade_id,)).fetchone()
-        if row is None:
-            return None
-        amount_in = from_micro(row["entry_price"]) * row["qty"]
-        amount_out = Decimal(str(exit_price)) * row["qty"]
-        fees = (
-            quote_fees(row["market"], amount_in, Decimal(row["qty"]), False).total
-            + quote_fees(row["market"], amount_out, Decimal(row["qty"]), True).total
-        )
-        conn.execute(
-            "UPDATE trade SET exit_price=?, closed_at=?, status='closed', fees=?, review=?,"
-            " rule_break=? WHERE id=?",
-            (
-                to_micro(exit_price), iso(utcnow()), to_micro(fees),
-                review or None, 1 if rule_break else 0, trade_id,
-            ),
-        )
+    finally:
+        conn.close()
+    if row is None:
+        return None
+
+    trade = dict(row)
+    sell_qty = int(qty or trade["qty"])
+    if sell_qty <= 0:
+        return {"ok": False, "error": "卖出数量必须大于 0"}
+    if sell_qty > int(trade["qty"]):
+        return {"ok": False, "error": f"卖出数量超过持仓（{trade['qty']} 股）"}
+
+    price = Decimal(str(exit_price))
+    amount_out = price * sell_qty
+    broker = None
+    try:
+        fee_sell = quote_fees(trade["market"], amount_out, Decimal(sell_qty), True, broker).total
+    except Exception:  # noqa: BLE001
+        fee_sell = Decimal("0")
+    fee_share = (fee_sell * Decimal(sell_qty) / Decimal(trade["qty"])).quantize(Decimal("0.01"))
+
+    conn = connect()
+    try:
+        if sell_qty == int(trade["qty"]):
+            conn.execute(
+                "UPDATE trade SET exit_price=?, closed_at=?, status='closed',"
+                " fees=COALESCE(fees,0)+?, review=COALESCE(?,review), rule_break=? WHERE id=?",
+                (
+                    to_micro(price), iso(utcnow()), to_micro(fee_share),
+                    review or None, 1 if rule_break else 0, trade_id,
+                ),
+            )
+            closed_id = trade_id
+        else:
+            conn.execute("UPDATE trade SET qty=qty-? WHERE id=?", (sell_qty, trade_id))
+            cur = conn.execute(
+                """
+                INSERT INTO trade (market, code, name, currency, side, qty, entry_price,
+                                   exit_price, fees, opened_at, filled_at, closed_at,
+                                   status, rec_id, review, rule_break, source, plan_snapshot,
+                                   stop_price, target_price)
+                SELECT market, code, name, currency, side, ?, entry_price, ?, ?,
+                       opened_at, filled_at, ?, 'closed', rec_id, ?, ?, source, plan_snapshot,
+                       stop_price, target_price
+                FROM trade WHERE id=?
+                """,
+                (
+                    sell_qty, to_micro(price), to_micro(fee_share), iso(utcnow()),
+                    review or None, 1 if rule_break else 0, trade_id,
+                ),
+            )
+            closed_id = cur.lastrowid
         conn.commit()
-        return dict(conn.execute("SELECT * FROM trade WHERE id=?", (trade_id,)).fetchone())
+        return dict(conn.execute("SELECT * FROM trade WHERE id=?", (closed_id,)).fetchone())
     finally:
         conn.close()
 
@@ -159,7 +207,11 @@ def positions() -> list[dict]:
                 "id": t["id"], "market": t["market"], "code": t["code"], "name": t["name"],
                 "qty": t["qty"], "entry": from_micro(t["entry_price"]),
                 "stop": from_micro(t["stop_price"]) if t["stop_price"] else None,
+                "target": from_micro(t["target_price"]) if t["target_price"] else None,
                 "currency": t["currency"], "opened_at": t["opened_at"],
+                "fees": from_micro(t["fees"] or 0),
+                "source": t.get("source") or "manual",
+                "rec_id": t.get("rec_id"),
             }
         )
     return out

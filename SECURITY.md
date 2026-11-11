@@ -5,7 +5,9 @@
 Kestrel runs entirely on your machine and stores everything in `data/`. The things worth
 protecting are:
 
-- `data/secret.key` — encrypts API tokens and webhook URLs at rest
+- `data/secret.key` — signs receipt links (HMAC). It does not encrypt anything; API keys
+  and webhook URLs are stored in plain text in the local SQLite file, protected only by
+  your OS account permissions.
 - `data/kestrel.db` — holdings, trades and receipts
 - notification channel credentials (bot tokens, SMTP passwords)
 

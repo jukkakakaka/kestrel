@@ -137,7 +137,7 @@
 <div data-pane="today">
   {% if recs %}
     {% for r in recs %}
-    <article class="advice" data-rec="{{ r.id }}">
+    <article class="advice" data-rec="{{ r.id }}" id="rec-{{ r.id }}">
       <header class="advice-head">
         <span class="tag tag-{{ r.market|lower }}">{{ r.market }}</span>
         <span class="sym"><a href="/stock/{{ r.market }}/{{ r.code }}">{{ r.name }}</a></span>
@@ -158,8 +158,7 @@
           <span class="badge avoid">{{ t('adv.ignored') }}</span>
         {% endif %}
         <span class="spacer"></span>
-        {% if r.sector %}<span class="tag">{{ r.sector }}</span>{% endif %}
-        <span class="muted" style="font-size:12px;">
+        {% if r.sector %}<span class="tag">{{ r.sector }}</span>{% endif %}        <span class="muted" style="font-size:12px;">
           {% if r.source == 'ai' %}
             {{ r.ai_model or 'AI' }} · 信心 {{ r.ai_confidence or 0 }}
           {% else %}
@@ -181,7 +180,7 @@
 
       {% if ui.learning and r.learn_zh %}
       <div class="advice-body">
-        <details open>
+        <details {% if recs|length <= 3 %}open{% endif %}>
           <summary>{{ t('adv.learn') }}</summary>
           <div class="learn">
             {% for line in r.learn_zh.split('\n') %}
@@ -192,6 +191,10 @@
                 <p>{{ line }}</p>
               {% endif %}
             {% endfor %}
+            {% if r.source == 'ai' and r.ai_thesis %}
+            <h4>模型的原话</h4>
+            <p>{{ r.ai_thesis }}</p>
+            {% endif %}
             <h4>{{ t('adv.learn_terms') }}</h4>
             <p>
               <span class="gloss" data-term="entry_zone">入场区间</span>、
@@ -215,7 +218,7 @@
           <button class="btn sm ghost" data-decide="skipped" data-rec="{{ r.id }}">{{ t('adv.skip') }}</button>
         {% elif r.status == 'executed' %}
           <span class="badge ok-badge">{{ t('adv.done') }}{% if r.fill_price %} @ {{ r.fill_price | cur(r.currency) }}{% endif %}</span>
-          <button class="btn sm ghost" data-decide="skipped" data-rec="{{ r.id }}">{{ t('adv.undo') }}</button>
+          <a class="btn sm ghost" href="/journal">记录卖出 / 看持仓</a>
         {% endif %}
       </footer>
     </article>
@@ -387,6 +390,13 @@
             flash(res.message + ' 处理完刷新这一页就能看到。', 'warn', true);
             return;
           }
+          if (res.engine && res.engine !== 'rules') {
+            flash((res.market_view || '分析完成') + ' · 通过风控 ' + (res.accepted || 0)
+              + ' 条' + (res.rejected && res.rejected.length
+                ? '，被拒 ' + res.rejected.length + ' 条' : ''), 'ok', true);
+            setTimeout(function () { location.reload(); }, 1600);
+            return;
+          }
           var msg = '看了 ' + (res.total || res.candidates || 0) + ' 只，'
             + (res.plans !== undefined ? res.plans + ' 条建议' : res.accepted + ' 条通过风控');
           if (res.rejected && res.rejected.length) {
@@ -413,16 +423,27 @@
       var decision = el.getAttribute('data-decide');
       var body = { decision: decision };
       if (decision === 'executed') {
-        var fill = prompt('实际成交价是多少？（留空表示按建议价）');
+        var fill = prompt('实际成交价是多少？（直接回车表示按建议价成交）');
         if (fill === null) return;
         if (fill.trim()) body.fill_price = parseFloat(fill);
+        var qty = prompt('实际成交了多少股？（直接回车表示按建议股数）');
+        if (qty === null) return;
+        if (qty.trim()) body.qty = parseInt(qty, 10);
       }
       el.disabled = true;
       fetch('/advice/' + id + '/decide', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
-      }).then(function () { location.reload(); });
+      }).then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (!res.ok) {
+            alert('没有记录成功：' + (res.error || '未知错误'));
+            el.disabled = false;
+            return;
+          }
+          location.reload();
+        });
     });
   });
 })();

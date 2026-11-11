@@ -31,7 +31,7 @@
           <small>{{ t('settings.capital_hint') }}</small>
         </div>
         <div class="setting-input">
-          <input data-key="account.capital" type="number" step="100" value="{{ values.get('account.capital') }}">
+          <input data-key="account.capital" type="number" step="100" value="{{ values.get('account.capital') | num }}">
         </div>
       </div>
       <div class="setting-row">
@@ -40,7 +40,17 @@
           <small>{{ t('settings.risk_hint') }}</small>
         </div>
         <div class="setting-input">
-          <input data-key="risk.per_trade_pct" type="number" step="0.5" value="{{ values.get('risk.per_trade_pct') }}">
+          <input data-key="risk.per_trade_pct" type="number" step="0.5" value="{{ values.get('risk.per_trade_pct') | num }}">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">
+          <span>总仓位上限（%）</span>
+          <small>所有持仓加起来不超过本金的比例。设成 0 表示不限制——不建议。</small>
+        </div>
+        <div class="setting-input">
+          <input data-key="risk.max_total_exposure_pct" type="number" step="5" min="0" max="100"
+                 value="{{ values.get('risk.max_total_exposure_pct') | num }}">
         </div>
       </div>
       <div class="setting-row">
@@ -134,7 +144,7 @@
           <small>{{ t('settings.pool_size_hint') }}</small>
         </div>
         <div class="setting-input">
-          <input data-key="scan.pool_size" type="number" min="10" max="100" value="{{ values.get('scan.pool_size', 30) }}">
+          <input data-key="scan.pool_size" type="number" min="10" max="100" value="{{ values.get('scan.pool_size', 30) | num }}">
         </div>
       </div>
       <div class="setting-row">
@@ -143,7 +153,7 @@
           <small>{{ t('settings.min_score_hint') }}</small>
         </div>
         <div class="setting-input">
-          <input data-key="scan.min_score" type="number" step="0.05" min="0.3" max="0.95" value="{{ values.get('scan.min_score', 0.55) }}">
+          <input data-key="scan.min_score" type="number" step="0.05" min="0.3" max="0.95" value="{{ values.get('scan.min_score', 0.55) | num }}">
         </div>
       </div>
       <div class="setting-row">
@@ -164,7 +174,7 @@
           <small>{{ t('settings.interval_hint') }}</small>
         </div>
         <div class="setting-input">
-          <input data-key="scan.interval_minutes" type="number" min="5" step="5" value="{{ values.get('scan.interval_minutes', 60) }}">
+          <input data-key="scan.interval_minutes" type="number" min="5" step="5" value="{{ values.get('scan.interval_minutes', 60) | num }}">
         </div>
       </div>
       <div class="row-actions">
@@ -307,7 +317,7 @@
         </div>
         <div class="setting-row">
           <div class="setting-label"><span>每天最多调用</span><small>超过上限就停止调用并明确提示，不会偷偷退回规则引擎——否则你以为在用 AI，其实在用规则。</small></div>
-          <div class="setting-input"><input data-key="agent.daily_budget" type="number" value="{{ values.get('agent.daily_budget', 200) }}"></div>
+          <div class="setting-input"><input data-key="agent.daily_budget" type="number" value="{{ values.get('agent.daily_budget', 200) | num }}"></div>
         </div>
       </div>
 

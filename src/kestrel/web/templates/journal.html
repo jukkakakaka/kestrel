@@ -8,62 +8,126 @@
     <div class="sub">{{ t('journal.sub') }}</div>
   </div>
   <div class="page-actions">
+    <button class="btn" id="fill-btn">记一笔成交</button>
     <a class="btn ghost" href="/journal?tab=import">{{ t('journal.tab_import') }}</a>
   </div>
 </div>
 
+{% if request.query_params.get('error') %}
+<div class="notice err">{{ request.query_params.get('error') }}</div>
+{% endif %}
+
 <div class="kpi">
-  <div class="k"><div class="v">{{ stats.open }}</div><div class="l">{{ t('j.open') }}</div></div>
+  <div class="k"><div class="v">{{ book.count }}</div><div class="l">{{ t('j.open') }}</div></div>
+  <div class="k">
+    <div class="v mono {{ 'up' if (book.pnl_pct or 0) >= 0 else 'down' }}">
+      {% if book.pnl_pct is none %}—{% else %}{{ '%+.2f'|format(book.pnl_pct) }}%{% endif %}
+    </div>
+    <div class="l">未平仓浮动盈亏</div>
+  </div>
   <div class="k"><div class="v">{{ '%.0f'|format(stats.win_rate * 100) }}%</div><div class="l">{{ t('j.win_rate') }}</div></div>
-  <div class="k"><div class="v">{{ '%.2f'|format(stats.rr) }}</div><div class="l">{{ t('j.rr') }}</div></div>
   <div class="k"><div class="v {{ 'up' if stats.net_cny >= 0 else 'down' }}">¥{{ '%.0f'|format(stats.net_cny) }}</div><div class="l">{{ t('j.net') }}</div></div>
 </div>
+
+{% if book.risky %}
+<section class="card attention">
+  <div class="card-head">
+    <h2>需要注意的持仓</h2>
+    <span class="meta">跌到止损附近，或者已经跌破了</span>
+  </div>
+  <div class="card-body tight">
+    <table class="grid">
+      <thead><tr><th>标的</th><th class="num">现价</th><th class="num">止损</th>
+        <th class="num">距止损</th><th class="num">浮动盈亏</th><th></th></tr></thead>
+      <tbody>
+      {% for p in book.risky %}
+      <tr>
+        <td><a href="/stock/{{ p.market }}/{{ p.code }}">{{ p.name }}</a>
+          <span class="mono muted">{{ p.code }}</span></td>
+        <td class="num mono">{{ '%.3f'|format(p.price) if p.price else '—' }}</td>
+        <td class="num mono down">{{ '%.3f'|format(p.stop) if p.stop else '—' }}</td>
+        <td class="num mono {{ 'down' if p.state == 'stopped' else 'up' }}">
+          {{ '%+.2f%%'|format(p.to_stop_pct) if p.to_stop_pct is not none else '—' }}
+        </td>
+        <td class="num mono {{ 'up' if (p.pnl or 0) >= 0 else 'down' }}">
+          {{ '%+.0f'|format(p.pnl) if p.pnl is not none else '—' }}
+        </td>
+        <td>
+          <form method="post" action="/journal/{{ p.trade_id }}/close" class="inline-form">
+            <input name="exit_price" type="number" step="0.001" required
+                   value="{{ '%.3f'|format(p.price) if p.price else '' }}" aria-label="卖出价">
+            <button class="btn sm danger">卖出</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
 
 <div class="tabs">
   <button class="active" data-tab="positions">{{ t('journal.tab_positions') }} ({{ open_trades|length }})</button>
   <button data-tab="closed">{{ t('journal.tab_closed') }} ({{ closed|length }})</button>
+  <button data-tab="quality">执行质量</button>
   <button data-tab="import">{{ t('journal.tab_import') }}</button>
 </div>
 
 <div data-pane="positions">
   <section class="card">
-    <div class="card-head"><h2>{{ t('j.open_positions') }}</h2></div>
-    <div class="card-body">
-      <form method="post" action="/journal/add" class="grid g4">
-        <div class="field"><label>{{ t('dash.market') }}</label>
-          <select name="market"><option value="HK">港股</option><option value="US">美股</option><option value="CN">A 股</option></select></div>
-        <div class="field"><label>{{ t('dash.code') }}</label><input name="code" required placeholder="00700"></div>
-        <div class="field"><label>{{ t('j.name') }}</label><input name="name" placeholder="腾讯控股"></div>
-        <div class="field"><label>{{ t('scan.qty') }}</label><input name="qty" type="number" step="1" required placeholder="100"></div>
-        <div class="field"><label>{{ t('j.entry') }}</label><input name="entry_price" type="number" step="0.001" required placeholder="400"></div>
-        <div class="field"><label>{{ t('scan.stop') }}</label><input name="stop_price" type="number" step="0.001" placeholder="380"></div>
-        <div class="field"><label>{{ t('scan.target') }}</label><input name="target_price" type="number" step="0.001" placeholder="440"></div>
-        <div class="field"><label>&nbsp;</label><button class="btn block">{{ t('action.add') }}</button></div>
-      </form>
+    <div class="card-head">
+      <h2>{{ t('j.open_positions') }}</h2>
+      <span class="meta">
+        现价来自最近一次行情刷新 ·
+        {% if book.unpriced %}{{ book.unpriced }} 笔没有现价{% else %}全部有现价{% endif %}
+      </span>
     </div>
-  </section>
-
-  <section class="card">
-    <div class="card-head"><h2>{{ t('j.open_positions') }}</h2></div>
-    {% if open_trades %}
+    {% if positions %}
     <div class="card-body tight">
       <table class="grid">
-        <thead><tr><th>{{ t('dash.market') }}</th><th>{{ t('dash.code') }}</th><th class="num">{{ t('scan.qty') }}</th>
-          <th class="num">{{ t('j.entry') }}</th><th class="num">{{ t('scan.stop') }}</th><th class="num">R</th><th></th></tr></thead>
+        <thead><tr>
+          <th>{{ t('dash.market') }}</th><th>标的</th><th class="num">{{ t('scan.qty') }}</th>
+          <th class="num">{{ t('j.entry') }}</th><th class="num">现价</th>
+          <th class="num">浮动盈亏</th><th class="num">{{ t('scan.stop') }}</th>
+          <th class="num">距止损</th><th class="num">R</th><th></th>
+        </tr></thead>
         <tbody>
-        {% for tr in open_trades %}
+        {% for p in positions %}
         <tr>
-          <td><span class="tag tag-{{ tr.market|lower }}">{{ tr.market }}</span></td>
-          <td><a href="/stock/{{ tr.market }}/{{ tr.code }}">{{ tr.name or tr.code }}</a> <span class="mono muted">{{ tr.code }}</span></td>
-          <td class="num mono">{{ tr.qty }}</td>
-          <td class="num mono">{{ tr.entry_price|money(3) }}</td>
-          <td class="num mono down">{{ tr.stop_price|money(3) if tr.stop_price else '—' }}</td>
-          <td class="num mono">{% if tr.stop_price %}{{ ((tr.entry_price - tr.stop_price) / 1e6 * tr.qty)|round(1) }}{% else %}—{% endif %}</td>
+          <td><span class="tag tag-{{ p.market|lower }}">{{ p.market }}</span></td>
           <td>
-            <form method="post" action="/journal/{{ tr.id }}/close" class="close-form">
-              <input name="exit_price" type="number" step="0.001" placeholder="{{ t('j.exit') }}" required>
-              <input name="review" placeholder="{{ t('j.review') }}">
-              <label class="tiny"><input type="checkbox" name="rule_break"> {{ t('j.broke') }}</label>
+            <a href="/stock/{{ p.market }}/{{ p.code }}">{{ p.name }}</a>
+            <div class="tiny muted">
+              <span class="mono">{{ p.code }}</span>
+              {% if p.source == 'link' %} · 回执成交{% elif p.source == 'advice' %} · 按建议成交
+              {% elif p.source == 'import' %} · 对账单导入{% endif %}
+              {% if p.held_days is not none %} · 持有 {{ p.held_days }} 天{% endif %}
+            </div>
+          </td>
+          <td class="num mono">{{ p.qty }}</td>
+          <td class="num mono">{{ '%.3f'|format(p.entry) }}</td>
+          <td class="num mono">{{ '%.3f'|format(p.price) if p.price else '—' }}</td>
+          <td class="num mono {{ 'up' if (p.pnl or 0) >= 0 else 'down' }}">
+            {% if p.pnl is none %}—{% else %}
+              {{ '%+.0f'|format(p.pnl) }}
+              <div class="tiny">{{ '%+.2f%%'|format(p.pnl_pct) }}</div>
+            {% endif %}
+          </td>
+          <td class="num mono down">{{ '%.3f'|format(p.stop) if p.stop else '—' }}</td>
+          <td class="num mono">
+            {% if p.to_stop_pct is none %}—{% else %}
+              <span class="badge {{ 'avoid' if p.state in ('near_stop','stopped') else 'wait' }}">
+                {{ '%+.2f%%'|format(p.to_stop_pct) }}
+              </span>
+            {% endif %}
+          </td>
+          <td class="num mono">{{ '%+.2f'|format(p.r_now) if p.r_now is not none else '—' }}</td>
+          <td>
+            <form method="post" action="/journal/{{ p.trade_id }}/close" class="close-form">
+              <input name="exit_price" type="number" step="0.001" required
+                     placeholder="{{ t('j.exit') }}">
+              <input name="qty" type="number" step="1" min="1" max="{{ p.qty }}" placeholder="数量">
               <button class="btn sm">{{ t('j.close') }}</button>
             </form>
           </td>
@@ -72,7 +136,12 @@
         </tbody>
       </table>
     </div>
-    {% else %}<div class="empty">{{ t('j.no_open') }}</div>{% endif %}
+    {% else %}
+    <div class="empty">
+      <strong>还没有持仓</strong>
+      在「操作建议」里点「已买入」，或者在这里手动记一笔。每一笔都会自动算好止损距离和浮动盈亏。
+    </div>
+    {% endif %}
   </section>
 </div>
 
@@ -83,7 +152,8 @@
     <div class="card-body tight">
       <table class="grid">
         <thead><tr><th>{{ t('dash.code') }}</th><th class="num">{{ t('j.entry') }} → {{ t('j.exit') }}</th>
-          <th class="num">{{ t('j.pnl') }}</th><th class="num">%</th><th>{{ t('j.review') }}</th><th></th></tr></thead>
+          <th class="num">{{ t('j.pnl') }}</th><th class="num">%</th><th>来源</th>
+          <th>{{ t('j.review') }}</th><th></th></tr></thead>
         <tbody>
         {% for tr in closed %}
         {% set p = pnl(tr) %}
@@ -93,6 +163,10 @@
           <td class="num mono">{{ tr.entry_price|money(3) }} → {{ tr.exit_price|money(3) }}</td>
           <td class="num mono {{ 'up' if p.net >= 0 else 'down' }}">{{ '%.2f'|format(p.net) }}</td>
           <td class="num mono {{ 'up' if p.ret >= 0 else 'down' }}">{{ '%.2f'|format(p.ret * 100) }}%</td>
+          <td class="tiny muted">
+            {% if tr.source == 'link' %}回执{% elif tr.source == 'advice' %}建议{% elif tr.source == 'import' %}导入{% else %}手记{% endif %}
+            {% if tr.rec_id %} · <a href="/advice#rec-{{ tr.rec_id }}">建议 #{{ tr.rec_id }}</a>{% endif %}
+          </td>
           <td class="tiny">{{ tr.review or '—' }}</td>
           <td><form method="post" action="/journal/{{ tr.id }}/delete"><button class="btn danger sm">删</button></form></td>
         </tr>
@@ -121,13 +195,78 @@
   {% endif %}
 </div>
 
+<div data-pane="quality" class="hidden">
+  <section class="card">
+    <div class="card-head">
+      <h2>执行质量</h2>
+      <span class="meta">计划和实际之间的差距</span>
+    </div>
+    <div class="card-body">
+      <p class="quality-lesson">{{ lesson }}</p>
+
+      <div class="kpi" style="grid-template-columns: repeat(3, minmax(0,1fr));">
+        <div class="k">
+          <div class="v mono">
+            {% if quality.follow_rate is none %}—{% else %}{{ '%.0f'|format(quality.follow_rate * 100) }}%{% endif %}
+          </div>
+          <div class="l">建议执行率</div>
+        </div>
+        <div class="k">
+          <div class="v mono {{ 'up' if (quality.avg_deviation_r or 0) > 0 else 'down' }}">
+            {% if quality.avg_deviation_r is none %}—{% else %}{{ '%+.2f'|format(quality.avg_deviation_r) }}R{% endif %}
+          </div>
+          <div class="l">平均成交偏离</div>
+        </div>
+        <div class="k">
+          <div class="v mono">
+            {% if quality.avg_deviation_pct is none %}—{% else %}{{ '%+.2f'|format(quality.avg_deviation_pct) }}%{% endif %}
+          </div>
+          <div class="l">平均价格偏离</div>
+        </div>
+      </div>
+
+      <p class="hint" style="margin-top:14px;">
+        到期建议 {{ quality.advice_total }} 条：执行 {{ quality.executed }}、跳过 {{ quality.skipped }}、过期 {{ quality.expired }}。
+        偏离按「成交价 - 建议入场价」计算，负数是买得更便宜。
+      </p>
+    </div>
+  </section>
+
+  {% if quality.samples %}
+  <section class="card">
+    <div class="card-head"><h2>逐笔对照</h2></div>
+    <div class="card-body tight">
+      <table class="grid">
+        <thead><tr><th>标的</th><th class="num">计划数量</th><th class="num">实际数量</th>
+          <th class="num">价格偏离</th><th class="num">R 偏离</th></tr></thead>
+        <tbody>
+          {% for s in quality.samples %}
+          <tr>
+            <td><a href="/advice#rec-{{ s.rec_id }}">{{ s.name }}</a>
+              <span class="mono muted tiny">{{ s.code }}</span></td>
+            <td class="num mono">{{ s.planned_qty }}</td>
+            <td class="num mono">{{ s.filled_qty }}</td>
+            <td class="num mono {{ 'up' if s.deviation_pct > 0 else 'down' }}">
+              {{ '%+.2f%%'|format(s.deviation_pct) }}
+            </td>
+            <td class="num mono {{ 'up' if (s.deviation_r or 0) > 0 else 'down' }}">
+              {% if s.deviation_r is none %}—{% else %}{{ '%+.2f'|format(s.deviation_r) }}{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+</div>
+
 <div data-pane="import" class="hidden">
   <section class="card">
     <div class="card-head"><h2>{{ t('journal.tab_import') }}</h2></div>
     <div class="card-body">
       <p class="hint" style="margin-bottom:12px;">{{ t('journal.import_intro') }}</p>
-      <textarea id="stmt-text" rows="7" style="width:100%;font:inherit;font-size:13px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);"
-                placeholder="{{ t('journal.import_placeholder') }}"></textarea>
+      <textarea id="stmt-text" rows="7" class="textarea"></textarea>
       <div class="row-actions">
         <button class="btn ghost" id="parse-btn">{{ t('journal.parse') }}</button>
         <button class="btn" id="import-btn" disabled>{{ t('journal.import') }}</button>
@@ -145,24 +284,107 @@
     </div>
   </section>
 </div>
+
+<dialog id="fill-dialog" class="modal">
+  <form method="dialog" class="modal-head">
+    <h2>记一笔成交</h2>
+    <button class="btn ghost sm" value="cancel">关闭</button>
+  </form>
+  <div class="modal-body">
+    <p class="hint" style="margin-bottom:14px;">
+      不管你是按建议买的还是自己决定的，都记在这里。价格和数量按券商的成交单填。
+    </p>
+    <div class="grid g2">
+      <div class="field"><label>市场</label>
+        <select id="fd-market"><option value="HK">港股</option><option value="US">美股</option><option value="CN">A 股</option></select>
+      </div>
+      <div class="field"><label>代码</label><input id="fd-code" placeholder="00700"></div>
+      <div class="field"><label>名称（可留空）</label><input id="fd-name" placeholder="腾讯控股"></div>
+      <div class="field"><label>方向</label>
+        <select id="fd-side"><option value="buy">买入</option><option value="sell">卖出</option></select>
+      </div>
+      <div class="field"><label>数量（股）</label><input id="fd-qty" type="number" step="1" min="1" placeholder="100"></div>
+      <div class="field"><label>成交价</label><input id="fd-price" type="number" step="0.001" placeholder="402.5"></div>
+      <div class="field"><label>手续费（可留空）</label><input id="fd-fees" type="number" step="0.01" placeholder="0"></div>
+      <div class="field"><label>成交日期</label><input id="fd-date" type="date"></div>
+      <div class="field"><label>止损价（买入时填）</label><input id="fd-stop" type="number" step="0.001" placeholder="380"></div>
+      <div class="field"><label>目标价（买入时填）</label><input id="fd-target" type="number" step="0.001" placeholder="440"></div>
+    </div>
+    <p class="tiny muted" style="margin-top:8px;">
+      止损不是可选项：没有它，「距止损多远」「该不该走」都算不出来。不知道填多少的话，
+      先回操作建议页看那条建议给的止损。
+    </p>
+    <div class="field" style="margin-top:12px;"><label>备注</label><input id="fd-note" placeholder="为什么买 / 有什么特别的"></div>
+    <p class="tiny" id="fd-msg" style="min-height:18px;margin-top:8px;"></p>
+  </div>
+  <div class="modal-foot">
+    <button class="btn ghost" id="fd-cancel">取消</button>
+    <button class="btn" id="fd-save">记入台账</button>
+  </div>
+</dialog>
 {% endblock %}
 
 {% block scripts %}
 <script>
 (function () {
-  var parsed = [];
+  var dialog = document.getElementById('fill-dialog');
+  var msg = document.getElementById('fd-msg');
+  var fillBtn = document.getElementById('fill-btn');
+  if (fillBtn && dialog) {
+    fillBtn.addEventListener('click', function () {
+      document.getElementById('fd-date').value = new Date().toISOString().slice(0, 10);
+      msg.textContent = '';
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else dialog.setAttribute('open', '');
+    });
+    document.getElementById('fd-cancel').addEventListener('click', function () {
+      if (typeof dialog.close === 'function') dialog.close();
+      else dialog.removeAttribute('open');
+    });
+    document.getElementById('fd-save').addEventListener('click', function () {
+      var payload = {
+        market: document.getElementById('fd-market').value,
+        code: document.getElementById('fd-code').value.trim(),
+        name: document.getElementById('fd-name').value.trim(),
+        side: document.getElementById('fd-side').value,
+        qty: document.getElementById('fd-qty').value,
+        price: document.getElementById('fd-price').value,
+        fees: document.getElementById('fd-fees').value || 0,
+        filled_at: document.getElementById('fd-date').value || null,
+        stop: document.getElementById('fd-stop').value || null,
+        target: document.getElementById('fd-target').value || null,
+        note: document.getElementById('fd-note').value
+      };
+      if (!payload.code || !payload.qty || !payload.price) {
+        msg.textContent = '代码、数量、成交价都要填。';
+        return;
+      }
+      msg.textContent = '保存中…';
+      fetch('/api/journal/fill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (!res.ok) { msg.textContent = res.error || '保存失败'; return; }
+          location.reload();
+        })
+        .catch(function (e) { msg.textContent = String(e); });
+    });
+  }
 
+  /* ---------------- 对账单导入 ---------------- */
+  var parsed = [];
   var parseBtn = document.getElementById('parse-btn');
   var importBtn = document.getElementById('import-btn');
   var text = document.getElementById('stmt-text');
-  var msg = document.getElementById('parse-msg');
+  var pmsg = document.getElementById('parse-msg');
   var box = document.getElementById('parse-result');
   var tbody = box ? box.querySelector('tbody') : null;
-
   if (!parseBtn) return;
 
   parseBtn.addEventListener('click', function () {
-    if (!text.value.trim()) { msg.textContent = '先粘贴点东西。'; return; }
+    if (!text.value.trim()) { pmsg.textContent = '先粘贴点东西。'; return; }
     fetch('/api/journal/parse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -174,7 +396,7 @@
         if (!parsed.length) {
           box.classList.add('hidden');
           importBtn.disabled = true;
-          msg.textContent = '没解析出任何成交行。';
+          pmsg.textContent = '没解析出任何成交行。';
           return;
         }
         parsed.forEach(function (row) {
@@ -193,7 +415,7 @@
         });
         box.classList.remove('hidden');
         importBtn.disabled = false;
-        msg.textContent = '解析出 ' + parsed.length + ' 条，核对无误后写入。';
+        pmsg.textContent = '解析出 ' + parsed.length + ' 条，核对无误后写入。';
       });
   });
 
@@ -206,10 +428,14 @@
     }).then(function (r) { return r.json(); })
       .then(function (res) {
         if (res.ok) {
-          msg.textContent = '已写入 ' + res.saved + ' 条，正在跳转…';
-          setTimeout(function () { location.href = '/journal'; }, 900);
+          var bad = (res.items || []).filter(function (x) { return !x.ok; });
+          pmsg.textContent = '写入 ' + res.saved + ' 条' +
+            (bad.length ? '，' + bad.length + ' 条失败：' + bad.map(function (x) {
+              return x.code + ' ' + x.error;
+            }).join('；') : '') + '，正在跳转…';
+          setTimeout(function () { location.href = '/journal'; }, bad.length ? 4000 : 900);
         } else {
-          msg.textContent = '写入失败：' + res.error;
+          pmsg.textContent = '写入失败：' + res.error;
           importBtn.disabled = false;
         }
       });

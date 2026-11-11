@@ -19,8 +19,8 @@ import shutil
 import subprocess
 from dataclasses import asdict, dataclass, field
 from datetime import date
+from decimal import Decimal
 
-from kestrel.core.money import to_micro
 from kestrel.db.engine import connect
 
 SIDE_BUY = ("买入", "买进", "买入成交", "BUY", "BOT", "Bought")
@@ -161,52 +161,79 @@ def parse(text: str) -> list[dict]:
     return out
 
 
-def save(rows: list[dict]) -> int:
+def save(rows: list[dict]) -> dict:
+    """把解析出来的成交行写进台账。
+
+    卖出会按 FIFO 平掉已有持仓，而不是凭空开一个"做空"——早期版本这么做，
+    导一份月度对账单就能把持仓数翻倍。返回明细而不只是条数，是因为
+    "3 条里 2 条成功"必须说清楚哪条失败、为什么。
+    """
+    from kestrel.services import execution
+
     if not rows:
-        return 0
-    conn = connect()
+        return {"saved": 0, "failed": 0, "items": []}
+
+    items: list[dict] = []
     saved = 0
-    try:
-        conn.execute("BEGIN")
-        for row in rows:
-            try:
-                market = str(row.get("market") or "US").upper()
-                code = str(row.get("code") or "").strip()
-                qty = int(row.get("qty") or 0)
-                price = float(row.get("price") or 0)
-                if not code or qty <= 0 or price <= 0:
-                    continue
-                side = "long" if str(row.get("side", "buy")).lower().startswith("b") else "short"
-                currency = {"HK": "HKD", "CN": "CNY"}.get(market, "USD")
-                conn.execute(
-                    """
-                    INSERT INTO trade (market, code, name, currency, side, qty,
-                                       entry_price, fees, opened_at, status, review)
-                    VALUES (?,?,?,?,?,?,?,?,?, 'open', ?)
-                    """,
-                    (
-                        market,
-                        code,
-                        str(row.get("name") or code),
-                        currency,
-                        side,
-                        qty,
-                        to_micro(price),
-                        to_micro(float(row.get("fee") or 0)),
-                        str(row.get("trade_date") or date.today().isoformat()),
-                        "由成交单导入",
-                    ),
-                )
-                saved += 1
-            except Exception:  # noqa: BLE001, PERF203
+    failed = 0
+    for row in rows:
+        try:
+            market = str(row.get("market") or "US").upper()
+            code = str(row.get("code") or "").strip()
+            qty = int(row.get("qty") or 0)
+            price = float(row.get("price") or 0)
+            if not code or qty <= 0 or price <= 0:
+                failed += 1
+                items.append({"code": code or "?", "ok": False, "error": "缺少代码、数量或价格"})
                 continue
-        conn.execute("COMMIT")
-    except Exception:
-        conn.execute("ROLLBACK")
-        raise
+            side = "buy" if str(row.get("side", "buy")).lower().startswith("b") else "sell"
+            result = execution.record(
+                execution.Fill(
+                    market=market,
+                    code=code,
+                    side=side,
+                    qty=qty,
+                    price=Decimal(str(price)),
+                    fees=Decimal(str(row.get("fee") or 0)),
+                    filled_at=None,
+                    source="import",
+                    note="由成交单导入",
+                    name=str(row.get("name") or code),
+                )
+            )
+            # 导入行自带的交易日期要覆盖默认的"现在"，否则持仓天数全是错的。
+            trade_date = str(row.get("trade_date") or "").strip()
+            if result.get("ok") and trade_date:
+                _stamp(result, trade_date)
+            if result.get("ok"):
+                saved += 1
+            else:
+                failed += 1
+            items.append({"code": code, "side": side, "ok": bool(result.get("ok")),
+                          "error": result.get("error"), "message": result.get("message")})
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            items.append({"code": str(row.get("code") or "?"), "ok": False, "error": str(exc)})
+    return {"saved": saved, "failed": failed, "items": items}
+
+
+def _stamp(result: dict, trade_date: str) -> None:
+    """把成交日期写回刚建的那笔交易。"""
+    
+    ids = [result.get("trade_id")] if result.get("trade_id") else []
+    ids += list(result.get("closed_trades") or [])
+    if not ids:
+        return
+    conn = connect()
+    try:
+        for trade_id in ids:
+            conn.execute(
+                "UPDATE trade SET filled_at=?, opened_at=? WHERE id=?",
+                (trade_date, trade_date, trade_id),
+            )
+        conn.commit()
     finally:
         conn.close()
-    return saved
 
 
 def ocr_available() -> tuple[bool, str]:

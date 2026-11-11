@@ -20,7 +20,7 @@
   <div class="page-actions">
     <a class="btn ghost" href="{{ (quote.source if quote else 'eastmoney') | src_url(sym.market, sym.code) }}"
        target="_blank" rel="noopener">{{ t('stock.external') }} ↗</a>
-    <a class="btn ghost" href="/">{{ t('action.back') }}</a>
+    <a class="btn ghost" href="/market">{{ t('action.back') }}</a>
   </div>
 </div>
 
@@ -90,10 +90,25 @@
   <div class="card-head"><h2>{{ t('stock.position') }}</h2></div>
   <div class="card-body">
     <table class="grid">
-      <tr><td>{{ t('journal.qty') }}</td><td class="mono">{{ trade.qty }}</td>
-          <td>{{ t('journal.entry') }}</td><td class="mono">{{ trade.entry_price | money(3) }}</td>
-          <td>{{ t('journal.stop') }}</td><td class="mono down">{{ trade.stop_price | money(3) if trade.stop_price else '—' }}</td>
-          <td>{{ t('journal.since') }}</td><td class="mono">{{ trade.opened_at[:10] }}</td></tr>
+      <thead><tr><th>{{ t('j.qty_short') }}</th><th class="num">{{ t('j.entry') }}</th>
+        <th class="num">{{ t('adv.stop') }}</th><th class="num">{{ t('scan.target') }}</th>
+        <th class="num">浮盈</th><th>买入时间</th><th></th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="mono">{{ trade.qty }}</td>
+          <td class="num mono">{{ trade.entry_price | money(3) }}</td>
+          <td class="num mono down">{{ trade.stop_price | money(3) if trade.stop_price else '—' }}</td>
+          <td class="num mono up">{{ trade.target_price | money(3) if trade.target_price else '—' }}</td>
+          <td class="num mono">
+            {% if quote and quote.price %}
+              {% set pnl = (quote.price - trade.entry_price) / 1e6 * trade.qty %}
+              <span class="{{ 'up' if pnl >= 0 else 'down' }}">{{ '%+.0f'|format(pnl) }}</span>
+            {% else %}—{% endif %}
+          </td>
+          <td class="mono">{{ (trade.filled_at or trade.opened_at)[:10] }}</td>
+          <td><a class="btn sm ghost" href="/journal">去平仓</a></td>
+        </tr>
+      </tbody>
     </table>
   </div>
 </section>
