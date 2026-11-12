@@ -73,9 +73,16 @@ jobs:
           $env:KESTREL_HOME = "$env:RUNNER_TEMP\kestrel-smoke"
           $exe = "dist\Kestrel\Kestrel.exe"
 
+          # The bundle is built as a windowed app (console=False), so PowerShell's
+          # `&` returns before it finishes and $LASTEXITCODE stays $null. Use
+          # Start-Process -Wait and read the real exit code.
           Write-Host "==> init"
-          & $exe init
-          if ($LASTEXITCODE -ne 0) { throw "kestrel init failed with exit code $LASTEXITCODE" }
+          $init = Start-Process -FilePath $exe -ArgumentList "init" -Wait -PassThru `
+                  -RedirectStandardOutput "$env:RUNNER_TEMP\init.log" `
+                  -RedirectStandardError "$env:RUNNER_TEMP\init.err"
+          Get-Content "$env:RUNNER_TEMP\init.log" -ErrorAction SilentlyContinue
+          Get-Content "$env:RUNNER_TEMP\init.err" -ErrorAction SilentlyContinue
+          if ($init.ExitCode -ne 0) { throw "kestrel init failed with exit code $($init.ExitCode)" }
 
           Write-Host "==> serve"
           $outLog = Join-Path $env:RUNNER_TEMP "kestrel-stdout.log"
