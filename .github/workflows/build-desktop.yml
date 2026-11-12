@@ -11,7 +11,8 @@ permissions:
 jobs:
   macos:
     name: macOS
-    runs-on: macos-14
+    # macos-14 已从公开 runner 池里退役；latest 指向当前可用的 macOS 镜像。
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -64,18 +65,52 @@ jobs:
         run: |
           # A frozen build can start and still serve a blank page when templates
           # are missing, so check a rendered page, not just the process.
+          #
+          # Three probes, cheapest first:
+          #   1. `init` runs migrations — catches "the bundle cannot import itself";
+          #   2. /healthz proves the server is up;
+          #   3. /welcome proves templates render (it needs no market data).
           $env:KESTREL_HOME = "$env:RUNNER_TEMP\kestrel-smoke"
-          $p = Start-Process -FilePath "dist\Kestrel\Kestrel.exe" -ArgumentList "serve","--port","8399" -PassThru
-          $ok = $false
-          foreach ($i in 1..40) {
+          $exe = "dist\Kestrel\Kestrel.exe"
+
+          Write-Host "==> init"
+          & $exe init
+          if ($LASTEXITCODE -ne 0) { throw "kestrel init failed with exit code $LASTEXITCODE" }
+
+          Write-Host "==> serve"
+          $outLog = Join-Path $env:RUNNER_TEMP "kestrel-stdout.log"
+          $errLog = Join-Path $env:RUNNER_TEMP "kestrel-stderr.log"
+          $p = Start-Process -FilePath $exe -ArgumentList "serve","--port","8399" `
+                -PassThru -RedirectStandardOutput $outLog -RedirectStandardError $errLog
+
+          $healthy = $false
+          foreach ($i in 1..60) {
             Start-Sleep -Milliseconds 500
+            if ($p.HasExited) { break }
             try {
-              $body = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 "http://127.0.0.1:8399/advice").Content
-              if ($body -match "操作建议") { $ok = $true; break }
+              $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 "http://127.0.0.1:8399/healthz"
+              if ($r.StatusCode -eq 200) { $healthy = $true; break }
             } catch { }
           }
-          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-          if (-not $ok) { throw "smoke test failed: /advice did not render" }
+
+          $rendered = $false
+          if ($healthy) {
+            try {
+              $body = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 "http://127.0.0.1:8399/welcome").Content
+              if ($body -match "Kestrel") { $rendered = $true }
+            } catch { }
+          }
+
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+
+          if (-not $healthy -or -not $rendered) {
+            Write-Host "==> stdout"; if (Test-Path $outLog) { Get-Content $outLog }
+            Write-Host "==> stderr"; if (Test-Path $errLog) { Get-Content $errLog }
+            $logDir = Join-Path $env:KESTREL_HOME "logs"
+            if (Test-Path $logDir) { Write-Host "==> app log"; Get-ChildItem $logDir | ForEach-Object { Get-Content $_.FullName } }
+            throw "smoke test failed: healthy=$healthy rendered=$rendered"
+          }
+          Write-Host "smoke test ok"
 
       - uses: actions/upload-artifact@v4
         with:
