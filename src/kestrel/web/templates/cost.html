@@ -26,9 +26,9 @@
           <div class="field">
             <label>{{ t('cost.market') }}</label>
             <select name="market">
-              <option value="HK" {% if market == 'HK' %}selected{% endif %}>港股</option>
-              <option value="US" {% if market == 'US' %}selected{% endif %}>美股</option>
-              <option value="CN" {% if market == 'CN' %}selected{% endif %}>A 股</option>
+              <option value="HK" {% if market == 'HK' %}selected{% endif %}>{{ t('cost.market_hk') }}</option>
+              <option value="US" {% if market == 'US' %}selected{% endif %}>{{ t('cost.market_us') }}</option>
+              <option value="CN" {% if market == 'CN' %}selected{% endif %}>{{ t('cost.market_cn') }}</option>
             </select>
           </div>
           <div class="field">
@@ -63,8 +63,12 @@
           <tr><th>{{ t('cost.item') }}</th><th class="num">{{ t('cost.buy') }}</th><th class="num">{{ t('cost.sell') }}</th></tr>
         </thead>
         <tbody>
-          {% for key, label in [('commission','佣金'), ('platform','平台费'), ('stamp','印花税'),
-                                ('exchange','交易所 / 证监会征费'), ('settlement','结算费')] %}
+          {% for key, label in [
+              ('commission', t('cost.fee_commission')),
+              ('platform', t('cost.fee_platform')),
+              ('stamp', t('cost.fee_stamp')),
+              ('exchange', t('cost.fee_exchange')),
+              ('settlement', t('cost.fee_settlement'))] %}
           <tr>
             <td>{{ label }}</td>
             <td class="num mono">{{ result.buy[key] }}</td>
@@ -118,7 +122,7 @@
         <tbody id="plan-rows">
           {% for p in plans %}
           <tr data-plan='{{ p | tojson }}'>
-            <td><b>{{ p.label }}</b>{% if p.builtin %} <span class="muted tiny">内置</span>{% endif %}</td>
+            <td><b>{{ p.label }}</b>{% if p.builtin %} <span class="muted tiny">{{ t('cost.builtin') }}</span>{% endif %}</td>
             <td>{{ p.market }}</td>
             <td class="num mono">{{ '%.4f'|format(p.commission * 100) }}%</td>
             <td class="num mono">{{ p.commission_min }}</td>
@@ -126,8 +130,8 @@
             <td class="num mono">{{ p.platform_per_share }}</td>
             <td class="num mono">{{ p.platform_min }}</td>
             <td>
-              <button class="btn sm ghost" data-edit>改</button>
-              <button class="btn danger sm" data-del="{{ p.key }}">删</button>
+              <button class="btn sm ghost" data-edit>{{ t('cost.edit') }}</button>
+              <button class="btn danger sm" data-del="{{ p.key }}">{{ t('cost.delete') }}</button>
             </td>
           </tr>
           {% endfor %}
@@ -137,22 +141,22 @@
   </section>
 
   <section class="card" id="plan-editor" style="display:none;">
-    <div class="card-head"><h2 id="plan-editor-title">编辑套餐</h2></div>
+    <div class="card-head"><h2 id="plan-editor-title">{{ t('cost.edit_plan') }}</h2></div>
     <div class="card-body">
       <div class="grid g3">
-        <div class="field"><label>名称</label><input id="pl-label"></div>
-        <div class="field"><label>市场</label>
-          <select id="pl-market"><option value="HK">港股</option><option value="US">美股</option><option value="CN">A 股</option></select>
+        <div class="field"><label>{{ t('cost.plan_name') }}</label><input id="pl-label"></div>
+        <div class="field"><label>{{ t('cost.plan_market') }}</label>
+          <select id="pl-market"><option value="HK">{{ t('cost.market_hk') }}</option><option value="US">{{ t('cost.market_us') }}</option><option value="CN">{{ t('cost.market_cn') }}</option></select>
         </div>
-        <div class="field"><label>佣金费率（%）</label><input id="pl-commission" inputmode="decimal" placeholder="0.03"></div>
-        <div class="field"><label>佣金最低</label><input id="pl-commission-min" inputmode="decimal" placeholder="0"></div>
-        <div class="field"><label>平台费（每笔）</label><input id="pl-platform" inputmode="decimal" placeholder="15"></div>
-        <div class="field"><label>平台费（每股）</label><input id="pl-per-share" inputmode="decimal" placeholder="0.005"></div>
-        <div class="field"><label>平台费最低</label><input id="pl-platform-min" inputmode="decimal" placeholder="1"></div>
+        <div class="field"><label>{{ t('cost.commission_rate') }}</label><input id="pl-commission" inputmode="decimal" placeholder="0.03"></div>
+        <div class="field"><label>{{ t('cost.commission_min') }}</label><input id="pl-commission-min" inputmode="decimal" placeholder="0"></div>
+        <div class="field"><label>{{ t('cost.platform_fixed') }}</label><input id="pl-platform" inputmode="decimal" placeholder="15"></div>
+        <div class="field"><label>{{ t('cost.platform_per_share') }}</label><input id="pl-per-share" inputmode="decimal" placeholder="0.005"></div>
+        <div class="field"><label>{{ t('cost.platform_min') }}</label><input id="pl-platform-min" inputmode="decimal" placeholder="1"></div>
       </div>
       <div class="row-actions">
-        <button class="btn" id="plan-save">保存</button>
-        <button class="btn ghost" id="plan-cancel">取消</button>
+        <button class="btn" id="plan-save">{{ t('cost.save') }}</button>
+        <button class="btn ghost" id="plan-cancel">{{ t('cost.cancel') }}</button>
         <span class="tiny" id="plan-msg"></span>
       </div>
     </div>

@@ -8,7 +8,7 @@
     <div class="sub">{{ t('journal.sub') }}</div>
   </div>
   <div class="page-actions">
-    <button class="btn" id="fill-btn">记一笔成交</button>
+    <button class="btn" id="fill-btn">{{ t('journal.add_fill') }}</button>
     <a class="btn ghost" href="/journal?tab=import">{{ t('journal.tab_import') }}</a>
   </div>
 </div>
@@ -23,7 +23,7 @@
     <div class="v mono {{ 'up' if (book.pnl_pct or 0) >= 0 else 'down' }}">
       {% if book.pnl_pct is none %}—{% else %}{{ '%+.2f'|format(book.pnl_pct) }}%{% endif %}
     </div>
-    <div class="l">未平仓浮动盈亏</div>
+    <div class="l">{{ t('journal.open_pnl') }}</div>
   </div>
   <div class="k"><div class="v">{{ '%.0f'|format(stats.win_rate * 100) }}%</div><div class="l">{{ t('j.win_rate') }}</div></div>
   <div class="k"><div class="v {{ 'up' if stats.net_cny >= 0 else 'down' }}">¥{{ '%.0f'|format(stats.net_cny) }}</div><div class="l">{{ t('j.net') }}</div></div>
@@ -32,13 +32,13 @@
 {% if book.risky %}
 <section class="card attention">
   <div class="card-head">
-    <h2>需要注意的持仓</h2>
-    <span class="meta">跌到止损附近，或者已经跌破了</span>
+    <h2>{{ t('journal.attention') }}</h2>
+    <span class="meta">{{ t('journal.attention_hint') }}</span>
   </div>
   <div class="card-body tight">
     <table class="grid">
-      <thead><tr><th>标的</th><th class="num">现价</th><th class="num">止损</th>
-        <th class="num">距止损</th><th class="num">浮动盈亏</th><th></th></tr></thead>
+      <thead><tr><th>{{ t('journal.col_symbol') }}</th><th class="num">{{ t('journal.col_price') }}</th><th class="num">{{ t('journal.col_stop') }}</th>
+        <th class="num">{{ t('journal.col_to_stop') }}</th><th class="num">{{ t('journal.col_pnl') }}</th><th></th></tr></thead>
       <tbody>
       {% for p in book.risky %}
       <tr>
@@ -56,7 +56,7 @@
           <form method="post" action="/journal/{{ p.trade_id }}/close" class="inline-form">
             <input name="exit_price" type="number" step="0.001" required
                    value="{{ '%.3f'|format(p.price) if p.price else '' }}" aria-label="卖出价">
-            <button class="btn sm danger">卖出</button>
+            <button class="btn sm danger">{{ t('journal.sell') }}</button>
           </form>
         </td>
       </tr>
@@ -70,7 +70,7 @@
 <div class="tabs">
   <button class="active" data-tab="positions">{{ t('journal.tab_positions') }} ({{ open_trades|length }})</button>
   <button data-tab="closed">{{ t('journal.tab_closed') }} ({{ closed|length }})</button>
-  <button data-tab="quality">执行质量</button>
+  <button data-tab="quality">{{ t('journal.quality') }}</button>
   <button data-tab="import">{{ t('journal.tab_import') }}</button>
 </div>
 
@@ -79,22 +79,22 @@
     <div class="card-head">
       <h2>{{ t('j.open_positions') }}</h2>
       <span class="meta">
-        现价来自最近一次行情刷新 ·
-        {% if book.unpriced %}{{ book.unpriced }} 笔没有现价{% else %}全部有现价{% endif %}
-        · <span class="gloss" data-term="trailing_stop">移动止损</span>
-        <span class="gloss" data-term="take_profit">分批止盈</span>
-        <span class="gloss" data-term="time_stop">时间止损</span>
+        {{ t('journal.price_meta') }} ·
+        {% if book.unpriced %}{{ t('journal.n_unpriced', n=book.unpriced) }}{% else %}{{ t('journal.all_priced') }}{% endif %}
+        · <span class="gloss" data-term="trailing_stop">{{ t('gloss.trailing_stop') }}</span>
+        <span class="gloss" data-term="take_profit">{{ t('gloss.take_profit') }}</span>
+        <span class="gloss" data-term="time_stop">{{ t('gloss.time_stop') }}</span>
       </span>
     </div>
     {% if positions %}
     <div class="card-body tight">
       <table class="grid">
         <thead><tr>
-          <th>{{ t('dash.market') }}</th><th>标的</th><th class="num">{{ t('scan.qty') }}</th>
-          <th class="num">{{ t('j.entry') }}</th><th class="num">现价</th>
-          <th class="num">浮动盈亏</th><th class="num">{{ t('scan.stop') }}</th>
-          <th class="num">距止损</th><th class="num" title="按最初风险算的倍数">R</th>
-          <th>现在该做什么</th><th></th>
+          <th>{{ t('dash.market') }}</th><th>{{ t('journal.col_symbol') }}</th><th class="num">{{ t('scan.qty') }}</th>
+          <th class="num">{{ t('j.entry') }}</th><th class="num">{{ t('journal.col_price') }}</th>
+          <th class="num">{{ t('journal.col_pnl') }}</th><th class="num">{{ t('scan.stop') }}</th>
+          <th class="num">{{ t('journal.col_to_stop') }}</th><th class="num" title="按最初风险算的倍数">R</th>
+          <th>{{ t('journal.what_now') }}</th><th></th>
         </tr></thead>
         <tbody>
         {% for p in positions %}
@@ -130,31 +130,31 @@
           <td style="min-width:210px;">
             {% if p.exit %}
               <div class="exit-hint {{ 'urgent' if p.exit.urgency == 'urgent' else '' }}">
-                {{ p.exit.reason_zh }}
+                {% if locale.startswith('en') %}{{ p.exit.reason_en }}{% else %}{{ p.exit.reason_zh }}{% endif %}
               </div>
               <div class="exit-actions">
                 {% if p.exit.action == 'move_stop' %}
                   <button class="btn sm" data-move-stop="{{ p.trade_id }}"
-                          data-stop="{{ p.exit.stop }}">把止损改到 {{ '%.3f'|format(p.exit.stop) }}</button>
+                          data-stop="{{ p.exit.stop }}">{{ t('journal.move_stop_to', stop='%.3f'|format(p.exit.stop)) }}</button>
                 {% elif p.exit.action in ('take_partial', 'exit_all') %}
                   <form method="post" action="/journal/{{ p.trade_id }}/close" class="inline-form">
                     <input type="hidden" name="exit_price" value="{{ '%.3f'|format(p.price) }}">
                     <input type="hidden" name="qty" value="{{ p.exit.qty | int }}">
                     <button class="btn sm {{ 'danger' if p.exit.urgency == 'urgent' else '' }}">
-                      卖出 {{ p.exit.qty | int }} 股
+                      {{ t('journal.sell_n', n=p.exit.qty | int) }}
                     </button>
                   </form>
                 {% endif %}
               </div>
             {% else %}
-              <span class="muted tiny">按计划持有</span>
+              <span class="muted tiny">{{ t('journal.hold_plan') }}</span>
             {% endif %}
           </td>
           <td>
             <form method="post" action="/journal/{{ p.trade_id }}/close" class="close-form">
               <input name="exit_price" type="number" step="0.001" required
                      placeholder="{{ t('j.exit') }}">
-              <input name="qty" type="number" step="1" min="1" max="{{ p.qty }}" placeholder="数量">
+              <input name="qty" type="number" step="1" min="1" max="{{ p.qty }}" placeholder="{{ t('journal.close_form_qty') }}">
               <button class="btn sm">{{ t('j.close') }}</button>
             </form>
           </td>
@@ -165,8 +165,8 @@
     </div>
     {% else %}
     <div class="empty">
-      <strong>还没有持仓</strong>
-      在「操作建议」里点「已买入」，或者在这里手动记一笔。每一笔都会自动算好止损距离和浮动盈亏。
+      <strong>{{ t('journal.no_positions_title') }}</strong>
+      {{ t('journal.no_positions_body') }}
     </div>
     {% endif %}
   </section>
@@ -179,7 +179,7 @@
     <div class="card-body tight">
       <table class="grid">
         <thead><tr><th>{{ t('dash.code') }}</th><th class="num">{{ t('j.entry') }} → {{ t('j.exit') }}</th>
-          <th class="num">{{ t('j.pnl') }}</th><th class="num">%</th><th>来源</th>
+          <th class="num">{{ t('j.pnl') }}</th><th class="num">%</th><th>{{ t('journal.source') }}</th>
           <th>{{ t('j.review') }}</th><th></th></tr></thead>
         <tbody>
         {% for tr in closed %}
@@ -195,7 +195,7 @@
             {% if tr.rec_id %} · <a href="/advice#rec-{{ tr.rec_id }}">建议 #{{ tr.rec_id }}</a>{% endif %}
           </td>
           <td class="tiny">{{ tr.review or '—' }}</td>
-          <td><form method="post" action="/journal/{{ tr.id }}/delete"><button class="btn danger sm">删</button></form></td>
+          <td><form method="post" action="/journal/{{ tr.id }}/delete"><button class="btn danger sm">{{ t('journal.delete') }}</button></form></td>
         </tr>
         {% endfor %}
         </tbody>
@@ -225,8 +225,8 @@
 <div data-pane="quality" class="hidden">
   <section class="card">
     <div class="card-head">
-      <h2>执行质量</h2>
-      <span class="meta">计划和实际之间的差距</span>
+      <h2>{{ t('journal.quality') }}</h2>
+      <span class="meta">{{ t('journal.quality_meta') }}</span>
     </div>
     <div class="card-body">
       <p class="quality-lesson">{{ lesson }}</p>
@@ -236,36 +236,36 @@
           <div class="v mono">
             {% if quality.follow_rate is none %}—{% else %}{{ '%.0f'|format(quality.follow_rate * 100) }}%{% endif %}
           </div>
-          <div class="l">建议执行率</div>
+          <div class="l">{{ t('journal.follow_rate') }}</div>
         </div>
         <div class="k">
           <div class="v mono {{ 'up' if (quality.avg_deviation_r or 0) > 0 else 'down' }}">
             {% if quality.avg_deviation_r is none %}—{% else %}{{ '%+.2f'|format(quality.avg_deviation_r) }}R{% endif %}
           </div>
-          <div class="l">平均成交偏离</div>
+          <div class="l">{{ t('journal.avg_dev_r') }}</div>
         </div>
         <div class="k">
           <div class="v mono">
             {% if quality.avg_deviation_pct is none %}—{% else %}{{ '%+.2f'|format(quality.avg_deviation_pct) }}%{% endif %}
           </div>
-          <div class="l">平均价格偏离</div>
+          <div class="l">{{ t('journal.avg_dev_pct') }}</div>
         </div>
       </div>
 
       <p class="hint" style="margin-top:14px;">
-        到期建议 {{ quality.advice_total }} 条：执行 {{ quality.executed }}、跳过 {{ quality.skipped }}、过期 {{ quality.expired }}。
-        偏离按「成交价 - 建议入场价」计算，负数是买得更便宜。
+        {{ t('journal.expired_line', n=quality.advice_total, a=quality.executed,
+             b=quality.skipped, c=quality.expired) }}
       </p>
     </div>
   </section>
 
   {% if quality.samples %}
   <section class="card">
-    <div class="card-head"><h2>逐笔对照</h2></div>
+    <div class="card-head"><h2>{{ t('journal.breakdown') }}</h2></div>
     <div class="card-body tight">
       <table class="grid">
-        <thead><tr><th>标的</th><th class="num">计划数量</th><th class="num">实际数量</th>
-          <th class="num">价格偏离</th><th class="num">R 偏离</th></tr></thead>
+        <thead><tr><th>{{ t('journal.col_symbol') }}</th><th class="num">{{ t('journal.planned_qty') }}</th><th class="num">{{ t('journal.filled_qty') }}</th>
+          <th class="num">{{ t('journal.dev_pct') }}</th><th class="num">{{ t('journal.dev_r') }}</th></tr></thead>
         <tbody>
           {% for s in quality.samples %}
           <tr>
@@ -302,7 +302,7 @@
 
       <div id="parse-result" class="hidden" style="margin-top:18px;">
         <table class="grid" id="parse-table">
-          <thead><tr><th>市场</th><th>代码</th><th>方向</th><th class="num">数量</th><th class="num">价格</th><th>日期</th><th>提示</th></tr></thead>
+          <thead><tr><th>{{ t('journal.import_col_market') }}</th><th>{{ t('journal.import_col_code') }}</th><th>{{ t('journal.import_col_side') }}</th><th class="num">{{ t('journal.import_col_qty') }}</th><th class="num">{{ t('journal.import_col_price') }}</th><th>{{ t('journal.import_col_date') }}</th><th>{{ t('journal.import_col_hint') }}</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -314,39 +314,38 @@
 
 <dialog id="fill-dialog" class="modal">
   <form method="dialog" class="modal-head">
-    <h2>记一笔成交</h2>
-    <button class="btn ghost sm" value="cancel">关闭</button>
+    <h2>{{ t('journal.add_fill') }}</h2>
+    <button class="btn ghost sm" value="cancel">{{ t('journal.close') }}</button>
   </form>
   <div class="modal-body">
     <p class="hint" style="margin-bottom:14px;">
-      不管你是按建议买的还是自己决定的，都记在这里。价格和数量按券商的成交单填。
+      {{ t('journal.fill_intro') }}
     </p>
     <div class="grid g2">
-      <div class="field"><label>市场</label>
-        <select id="fd-market"><option value="HK">港股</option><option value="US">美股</option><option value="CN">A 股</option></select>
+      <div class="field"><label>{{ t('journal.import_col_market') }}</label>
+        <select id="fd-market"><option value="HK">{{ t('journal.market_hk') }}</option><option value="US">{{ t('journal.market_us') }}</option><option value="CN">{{ t('journal.market_cn') }}</option></select>
       </div>
-      <div class="field"><label>代码</label><input id="fd-code" placeholder="00700"></div>
-      <div class="field"><label>名称（可留空）</label><input id="fd-name" placeholder="腾讯控股"></div>
-      <div class="field"><label>方向</label>
-        <select id="fd-side"><option value="buy">买入</option><option value="sell">卖出</option></select>
+      <div class="field"><label>{{ t('journal.import_col_code') }}</label><input id="fd-code" placeholder="00700"></div>
+      <div class="field"><label>{{ t('journal.name_optional') }}</label><input id="fd-name" placeholder="{{ t('journal.fd_name_ph') }}"></div>
+      <div class="field"><label>{{ t('journal.import_col_side') }}</label>
+        <select id="fd-side"><option value="buy">{{ t('journal.side_buy') }}</option><option value="sell">{{ t('journal.side_sell') }}</option></select>
       </div>
-      <div class="field"><label>数量（股）</label><input id="fd-qty" type="number" step="1" min="1" placeholder="100"></div>
-      <div class="field"><label>成交价</label><input id="fd-price" type="number" step="0.001" placeholder="402.5"></div>
-      <div class="field"><label>手续费（可留空）</label><input id="fd-fees" type="number" step="0.01" placeholder="0"></div>
-      <div class="field"><label>成交日期</label><input id="fd-date" type="date"></div>
-      <div class="field"><label>止损价（买入时填）</label><input id="fd-stop" type="number" step="0.001" placeholder="380"></div>
-      <div class="field"><label>目标价（买入时填）</label><input id="fd-target" type="number" step="0.001" placeholder="440"></div>
+      <div class="field"><label>{{ t('journal.qty_shares') }}</label><input id="fd-qty" type="number" step="1" min="1" placeholder="100"></div>
+      <div class="field"><label>{{ t('journal.fill_price') }}</label><input id="fd-price" type="number" step="0.001" placeholder="402.5"></div>
+      <div class="field"><label>{{ t('journal.fees_optional') }}</label><input id="fd-fees" type="number" step="0.01" placeholder="0"></div>
+      <div class="field"><label>{{ t('journal.fill_date') }}</label><input id="fd-date" type="date"></div>
+      <div class="field"><label>{{ t('journal.stop_on_buy') }}</label><input id="fd-stop" type="number" step="0.001" placeholder="380"></div>
+      <div class="field"><label>{{ t('journal.target_on_buy') }}</label><input id="fd-target" type="number" step="0.001" placeholder="440"></div>
     </div>
     <p class="tiny muted" style="margin-top:8px;">
-      止损不是可选项：没有它，「距止损多远」「该不该走」都算不出来。不知道填多少的话，
-      先回操作建议页看那条建议给的止损。
+      {{ t('journal.stop_required') }}
     </p>
-    <div class="field" style="margin-top:12px;"><label>备注</label><input id="fd-note" placeholder="为什么买 / 有什么特别的"></div>
+    <div class="field" style="margin-top:12px;"><label>{{ t('journal.note') }}</label><input id="fd-note" placeholder="{{ t('journal.fd_note_ph') }}"></div>
     <p class="tiny" id="fd-msg" style="min-height:18px;margin-top:8px;"></p>
   </div>
   <div class="modal-foot">
-    <button class="btn ghost" id="fd-cancel">取消</button>
-    <button class="btn" id="fd-save">记入台账</button>
+    <button class="btn ghost" id="fd-cancel">{{ t('journal.cancel') }}</button>
+    <button class="btn" id="fd-save">{{ t('journal.save_fill') }}</button>
   </div>
 </dialog>
 {% endblock %}
@@ -356,6 +355,24 @@
 (function () {
   var dialog = document.getElementById('fill-dialog');
   var msg = document.getElementById('fd-msg');
+  window.I18N = Object.assign(window.I18N || {}, {
+    requireFill: {{ t('journal.require_fill') | tojson }},
+    movingStop: {{ t('journal.moving_stop') | tojson }},
+    confirmStop: {{ t('journal.confirm_stop') | tojson }},
+    stopReason: {{ t('journal.stop_reason') | tojson }},
+    stopFailed: {{ t('journal.stop_failed') | tojson }},
+    pasteFirst: {{ t('journal.paste_first') | tojson }},
+    parseEmpty: {{ t('journal.parse_empty') | tojson }},
+    buy: {{ t('journal.side_buy') | tojson }},
+    sell: {{ t('journal.side_sell') | tojson }},
+    normal: {{ t('journal.normal') | tojson }},
+    parsedOk: {{ t('journal.parsed_ok') | tojson }},
+    saved: {{ t('journal.saved') | tojson }},
+    savedWithFailures: {{ t('journal.saved_with_failures') | tojson }},
+    saveFailed: {{ t('journal.save_failed') | tojson }},
+    saveFailedPlain: {{ t('journal.save_failed_plain') | tojson }},
+    saving: {{ t('journal.saving') | tojson }}
+  });
   var fillBtn = document.getElementById('fill-btn');
   if (fillBtn && dialog) {
     fillBtn.addEventListener('click', function () {
@@ -383,17 +400,17 @@
         note: document.getElementById('fd-note').value
       };
       if (!payload.code || !payload.qty || !payload.price) {
-        msg.textContent = '代码、数量、成交价都要填。';
+        msg.textContent = window.I18N.requireFill;
         return;
       }
-      msg.textContent = '保存中…';
+      msg.textContent = window.I18N.saving;
       fetch('/api/journal/fill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       }).then(function (r) { return r.json(); })
         .then(function (res) {
-          if (!res.ok) { msg.textContent = res.error || '保存失败'; return; }
+          if (!res.ok) { msg.textContent = res.error || window.I18N.saveFailedPlain; return; }
           location.reload();
         })
         .catch(function (e) { msg.textContent = String(e); });
@@ -405,15 +422,15 @@
     btn.addEventListener('click', function () {
       var id = btn.getAttribute('data-move-stop');
       var stop = btn.getAttribute('data-stop');
-      if (!confirm('把止损上移到 ' + stop + '？\n\n止损只能往上抬，之后不能改回去。')) return;
+      if (!confirm(window.I18N.confirmStop.replace('{stop}', stop))) return;
       btn.disabled = true;
       fetch('/api/journal/' + id + '/stop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stop: stop, reason: '按移动止损规则采纳' })
+        body: JSON.stringify({ stop: stop, reason: window.I18N.stopReason })
       }).then(function (r) { return r.json(); })
         .then(function (res) {
-          if (!res.ok) { alert(res.error || '修改失败'); btn.disabled = false; return; }
+          if (!res.ok) { alert(res.error || window.I18N.stopFailed); btn.disabled = false; return; }
           location.reload();
         })
         .catch(function (e) { alert(String(e)); btn.disabled = false; });
@@ -431,7 +448,7 @@
   if (!parseBtn) return;
 
   parseBtn.addEventListener('click', function () {
-    if (!text.value.trim()) { pmsg.textContent = '先粘贴点东西。'; return; }
+    if (!text.value.trim()) { pmsg.textContent = window.I18N.pasteFirst; return; }
     fetch('/api/journal/parse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -443,12 +460,12 @@
         if (!parsed.length) {
           box.classList.add('hidden');
           importBtn.disabled = true;
-          pmsg.textContent = '没解析出任何成交行。';
+          pmsg.textContent = window.I18N.parseEmpty;
           return;
         }
         parsed.forEach(function (row) {
           var tr = document.createElement('tr');
-          var side = row.side === 'buy' ? '买入' : '卖出';
+          var side = row.side === 'buy' ? window.I18N.buy : window.I18N.sell;
           tr.innerHTML =
             '<td>' + row.market + '</td>' +
             '<td class="mono">' + row.code + '</td>' +
@@ -457,12 +474,12 @@
             '<td class="num mono">' + row.price + '</td>' +
             '<td class="mono">' + row.trade_date + '</td>' +
             '<td class="tiny ' + (row.problems.length ? 'up' : 'muted') + '">' +
-              (row.problems.length ? row.problems.join('、') : '正常') + '</td>';
+              (row.problems.length ? row.problems.join(', ') : window.I18N.normal) + '</td>';
           tbody.appendChild(tr);
         });
         box.classList.remove('hidden');
         importBtn.disabled = false;
-        pmsg.textContent = '解析出 ' + parsed.length + ' 条，核对无误后写入。';
+        pmsg.textContent = window.I18N.parsedOk.replace('{n}', parsed.length);
       });
   });
 
@@ -476,13 +493,14 @@
       .then(function (res) {
         if (res.ok) {
           var bad = (res.items || []).filter(function (x) { return !x.ok; });
-          pmsg.textContent = '写入 ' + res.saved + ' 条' +
-            (bad.length ? '，' + bad.length + ' 条失败：' + bad.map(function (x) {
-              return x.code + ' ' + x.error;
-            }).join('；') : '') + '，正在跳转…';
+          pmsg.textContent = bad.length
+            ? window.I18N.savedWithFailures
+                .replace('{ok}', res.saved).replace('{bad}', bad.length)
+                .replace('{detail}', bad.map(function (x) { return x.code + ' ' + x.error; }).join('; '))
+            : window.I18N.saved.replace('{n}', res.saved);
           setTimeout(function () { location.href = '/journal'; }, bad.length ? 4000 : 900);
         } else {
-          pmsg.textContent = '写入失败：' + res.error;
+          pmsg.textContent = window.I18N.saveFailed + res.error;
           importBtn.disabled = false;
         }
       });

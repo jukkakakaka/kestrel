@@ -21,11 +21,23 @@ def _home() -> Path:
     return settings.home
 
 
+def _bridge_dirs() -> dict[str, Path]:
+    """桥目录的实际位置。用户在设置里改过 ``bridge.root`` 就跟着改。
+
+    提示词里写死 `data/bridge` 是最容易出错的一件事：源码运行时它在仓库里，
+    打包版在 `~/Library/Application Support/Kestrel`，容器里在 `/data`，
+    三者互相看不到。所以每次都从配置现算。
+    """
+    from kestrel.services import bridge
+
+    return bridge.paths()
+
+
 def analyse_prompt() -> str:
     """消费分析队列的定时任务提示词。"""
-    home = _home()
-    pending = home / "bridge" / "pending"
-    done = home / "bridge" / "done"
+    folders = _bridge_dirs()
+    pending = folders["pending"]
+    done = folders["done"]
     return f"""你是一个定时任务。每次触发时按下面步骤执行，不要问我问题，直接做。
 
 1. 读取目录 `{pending}` 下所有 `.json` 文件（按文件名排序，最多处理 3 个）。
@@ -39,8 +51,8 @@ def analyse_prompt() -> str:
    - 不要给股数，仓位由程序计算；
    - 没有合适的标的就返回空的 `picks` 数组，并在 `pass_reason` 里说明原因。
 4. 把 JSON 写入 `{done}/<原文件名>.json`（文件名必须与请求文件同名）。
-5. 写完后把原请求文件移动到 `{home / "bridge" / "archive"}`，避免重复处理。
-6. 如果你判断某个请求无法完成，把原因写进 `{home / "bridge" / "failed"}/<原文件名>.json`。
+5. 写完后把原请求文件移动到 `{folders["archive"]}`，避免重复处理。
+6. 如果你判断某个请求无法完成，把原因写进 `{folders["failed"]}/<原文件名>.json`。
 
 注意：`done` 里的文件会被程序收走并入库，写到别的位置等于没回答。"""
 

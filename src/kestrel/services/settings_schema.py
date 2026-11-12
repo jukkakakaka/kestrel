@@ -96,6 +96,9 @@ SECTIONS: list[Section] = [
         Field("agent.api_key", "API Key", "API Key", "password"),
         Field("agent.model", "模型名", "Model", "text"),
         Field("agent.daily_budget", "每天最多调用", "Daily call budget", "number", step="10"),
+        Field("bridge.root", "WorkBuddy 队列目录", "WorkBuddy queue directory", "text",
+              help_zh="留空则跟随数据目录。容器部署时填一个宿主机也能访问的共享目录。",
+              help_en="Empty follows the data directory. In containers, point this at a shared path."),
     ]),
 ]
 

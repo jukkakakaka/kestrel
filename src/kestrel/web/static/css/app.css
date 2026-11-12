@@ -180,6 +180,13 @@ main { flex: 1 0 auto; padding: 26px 0 56px; }
   border: 2px solid rgba(255,255,255,.35); border-top-color: #fff;
   animation: spin .7s linear infinite;
 }
+/* 次要按钮是白底，白色转圈根本看不见——这是「点了没反应」的来源。
+   按按钮的实际前景色画，才在任何背景上都可见。 */
+.btn.ghost .spin, .btn.subtle .spin {
+  border-color: color-mix(in srgb, var(--ink-2) 30%, transparent);
+  border-top-color: var(--ink-2);
+}
+.btn.ghost:disabled, .btn.subtle:disabled { opacity: 1; color: var(--ink-2); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------- forms ---------- */
@@ -463,11 +470,17 @@ table.grid th.num, table.grid td.num { text-align: right; }
   .setting-input { flex: 1 1 auto; }
   .advice-figs { grid-template-columns: 1fr 1fr; }
   .page-head { flex-direction: column; }
+  /* 工具区（语言 / 主题）必须始终可见：窄屏时它是唯一能切主题的入口，
+     不能因为一行放不下就被挤到看不见的地方。 */
+  .tools { order: 2; margin-left: auto; flex-wrap: nowrap; }
+  .tools select { max-width: 116px; }
 }
 
 @media (max-width: 560px) {
   .g2, .g3, .g4, .g5 { grid-template-columns: 1fr; }
   .brand-tag { display: none; }
+  .brand-name { display: none; }
+  .tools select { max-width: 96px; font-size: 12px; padding: 5px 6px; }
 }
 
 /* ---------- inline add field ---------- */
@@ -478,6 +491,16 @@ table.grid th.num, table.grid td.num { text-align: right; }
 }
 .add-input:focus { outline: none; border-color: var(--brand-2); box-shadow: 0 0 0 3px var(--brand-soft); }
 .add-input::placeholder { color: var(--muted); }
+
+.inline-select {
+  font: inherit; font-size: 12.5px; height: 36px; padding: 0 26px 0 10px;
+  border: 1px solid var(--line); border-radius: 9px;
+  background-color: var(--surface); color: var(--ink-2);
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%237b8598' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 9px center;
+  cursor: pointer;
+}
 
 /* ---------- advice card spacing fix ---------- */
 .advice-body .learn h4 { margin-top: 2px; }

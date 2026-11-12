@@ -483,7 +483,8 @@ async def analyse(
             "rejected": [],
             "message": (
                 "任务已经放进队列，等 WorkBuddy 处理。"
-                f" 文件在 {bridge.PENDING}，处理完写到 {bridge.DONE}。"
+                f" 文件在 {bridge.bridge_info()['pending_dir']}，"
+                f"处理完写到 {bridge.bridge_info()['done_dir']}。"
             ),
             "bridge": bridge.bridge_info(),
         }

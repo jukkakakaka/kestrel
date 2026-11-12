@@ -21,7 +21,7 @@
   <strong>提醒：当前建议由 {{ engine.label }} 产生，这个页面不参与选股。</strong>
   这里的作用是检验规则到底有没有用——AI 模式下的建议不受这些规则约束，
   但它们的实测结果会作为参考资料交给 AI。想看 AI 的判断，去
-  <a href="/advice">操作建议</a>。
+  <a href="/advice">{{ t('nav.advice') }}</a>。
 </div>
 {% endif %}
 
@@ -32,19 +32,19 @@
     <div class="k">
       <div class="v" style="font-size:15px;">
         {{ r.name }}
-        {% if r.last_verdict == '有优势' %}<span class="badge ok-badge" style="font-size:11px;">有优势</span>
-        {% elif r.last_verdict == '无优势' %}<span class="badge avoid" style="font-size:11px;">无优势</span>
+        {% if r.last_verdict == '有优势' %}<span class="badge ok-badge" style="font-size:11px;">{{ t('sim.rule_advantage') }}</span>
+        {% elif r.last_verdict == '无优势' %}<span class="badge avoid" style="font-size:11px;">{{ t('sim.rule_none') }}</span>
         {% elif r.last_verdict %}<span class="badge wait" style="font-size:11px;">{{ r.last_verdict }}</span>
-        {% else %}<span class="badge wait" style="font-size:11px;">未验证</span>{% endif %}
+        {% else %}<span class="badge wait" style="font-size:11px;">{{ t('sim.rule_unproven') }}</span>{% endif %}
       </div>
       <div class="l" style="margin-top:8px;font-size:12.5px;line-height:1.7;">
         {% if r.validation and r.validation.folds %}
           {% set f = r.validation.folds[-1] %}
-          <div>最近一折：<b class="mono">{{ f.n }}</b> 笔 · 胜率 <b class="mono">{{ '%.0f'|format(f.win) }}%</b></div>
-          <div>每笔 <b class="mono {{ 'up' if f.exp > 0 else 'down' }}">{{ '%+.2f'|format(f.exp) }}R</b>
-               超额 <b class="mono {{ 'up' if f.edge > 0 else 'down' }}">{{ '%+.2f'|format(f.edge) }}</b></div>
+          <div>{{ t('sim.last_fold') }}<b class="mono">{{ f.n }}</b> {{ t('sim.trades_win') }} <b class="mono">{{ '%.0f'|format(f.win) }}%</b></div>
+          <div>{{ t('sim.per_trade') }} <b class="mono {{ 'up' if f.exp > 0 else 'down' }}">{{ '%+.2f'|format(f.exp) }}R</b>
+               {{ t('sim.excess') }} <b class="mono {{ 'up' if f.edge > 0 else 'down' }}">{{ '%+.2f'|format(f.edge) }}</b></div>
         {% else %}
-          <div class="muted">还没有验证结果</div>
+          <div class="muted">{{ t('sim.no_validation') }}</div>
         {% endif %}
       </div>
     </div>
@@ -52,7 +52,7 @@
   </div>
 
   <p class="hint" style="margin:6px 0 14px;">
-    完整数据、逐折明细和规则编辑在 <a href="/rules">规则</a> 页。
+    {{ t('sim.full_data') }} <a href="/rules">{{ t('sim.page_rules') }}</a> {{ t('sim.page_suffix') }}
   </p>
 </div>
 {% else %}
@@ -75,14 +75,14 @@
         <div class="field">
           <label>{{ t('sim.symbol') }}</label>
           <input name="symbol" list="sim-symbols" autocomplete="off"
-                 value="{{ form.symbol }}" placeholder="00700 / US/AAPL / 腾讯">
+                 value="{{ form.symbol }}" placeholder="{{ t('sim.symbol_ph') }}">
           <datalist id="sim-symbols">
             {% for s in symbols %}
             <option value="{{ s.market }}/{{ s.code }}">{{ s.name }}</option>
             {% endfor %}
           </datalist>
           <small class="muted" style="font-size:11.5px;">
-            任意标的都可以：直接输代码，或 市场/代码。未缓存的会自动去补。
+            {{ t('sim.symbol_hint') }}
           </small>
         </div>
         <div class="field">
@@ -172,16 +172,17 @@
 {% block scripts %}
 <script>
 (function () {
+  window.I18N = Object.assign(window.I18N || {}, { failed: {{ t('sim.failed') | tojson }} });
   var btn = document.getElementById('recheck');
   if (!btn) return;
   btn.addEventListener('click', function () {
     var original = btn.textContent;
     btn.disabled = true;
-    btn.innerHTML = '<span class="spin"></span><span class="label">计算中</span>';
+    btn.innerHTML = '<span class="spin"></span><span class="label">{{ t('sim.calculating') }}</span>';
     fetch('/api/edge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        if (!res.ok) { alert(res.error || '计算失败'); return; }
+        if (!res.ok) { alert(res.error || window.I18N.failed); return; }
         // "Nothing saved" has to be visible: reloading to an unchanged page
         // looks like the button did nothing at all.
         if (res.note) {

@@ -39,6 +39,7 @@ def _templates():
     tpl.env.filters["src_url"] = _src_url
     tpl.env.filters["pct"] = _pct
     tpl.env.filters["px"] = _px
+    tpl.env.filters["quote"] = _quote
     tpl.env.filters["num"] = _num
     return tpl
 
@@ -162,6 +163,48 @@ def _money(value, places: int = 2) -> str:
 
 _CUR_SYMBOL = {"CNY": "¥", "HKD": "HK$", "USD": "US$"}
 _FX_CNY = {"CNY": 1.0, "HKD": 0.92, "USD": 7.1}
+_MARKET_CURRENCY = {"CN": "CNY", "HK": "HKD", "US": "USD"}
+
+
+def _display_currency() -> str:
+    """用户选择的显示货币；``local`` 表示各市场用自己的本币。"""
+    try:
+        from kestrel.services import config as config_service
+
+        conn = connect()
+        try:
+            value = str(config_service.get(conn, "ui.display_currency", "local") or "local")
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        value = "local"
+    value = value.strip()
+    return value.upper() if value.lower() != "local" else "local"
+
+
+def _quote(value, market: str = "US", display: str = "local") -> str:
+    """带货币符号的价格。
+
+    行情页以前只给数字——「409.600」既可能是港币也可能是美元，三个市场同屏时
+    这是实实在在的误读来源。``display`` 不是 ``local`` 时按固定汇率折算。
+    """
+    if value is None or value == "":
+        return "—"
+    currency = _MARKET_CURRENCY.get(str(market).upper(), "USD")
+    try:
+        amount = int(value) / 1_000_000
+    except (TypeError, ValueError):
+        return str(value)
+
+    target = currency if display == "local" else display
+    if target not in _FX_CNY:
+        target = currency
+    if target != currency:
+        # 先折成人民币，再折到目标货币，保持一个统一的中转口径。
+        amount = amount * _FX_CNY.get(currency, 1.0) / _FX_CNY[target]
+
+    digits = _PX_DIGITS.get(str(market).upper(), 2)
+    return f"{_CUR_SYMBOL.get(target, '')}{amount:,.{digits}f}"
 
 
 def _cur(value, currency: str = "CNY", places: int = 2) -> str:
@@ -372,7 +415,7 @@ def create_app() -> FastAPI:
             return RedirectResponse("/welcome", status_code=303)
 
         try:
-            brief = today_service.briefing()
+            brief = today_service.briefing(request.cookies.get("locale") or "zh-CN")
         except Exception as exc:  # noqa: BLE001
             log.warning("today briefing failed: %s", exc)
             brief = {"todos": [], "urgent": 0, "headline": "暂时算不出来",
@@ -411,6 +454,7 @@ def create_app() -> FastAPI:
                 items=[dict(r) for r in rows],
                 watch_count=watch_count,
                 markets=calendar_service.all_status(enabled),
+                display_currency=_display_currency(),
             ),
         )
 
@@ -447,6 +491,7 @@ def create_app() -> FastAPI:
                 items=[dict(r) for r in rows],
                 markets=calendar_service.all_status(enabled),
                 enabled_markets=enabled,
+                display_currency=_display_currency(),
             ),
         )
 
@@ -1092,7 +1137,9 @@ def create_app() -> FastAPI:
                          positions=open_positions,
                          book=position_service.summary(open_positions),
                          quality=quality,
-                         lesson=execution.lesson(quality),
+                         lesson=execution.lesson(
+                             quality, request.cookies.get("locale") or "zh-CN"
+                         ),
                          pnl=journal.pnl),
         )
 
@@ -1253,7 +1300,11 @@ def create_app() -> FastAPI:
         from kestrel.services import engine as engine_service
         from kestrel.services import rules as rule_service
 
-        report = {"ok": True, "rules": rule_service.all_rules(), "engine": engine_service.status()}
+        report = {
+            "ok": True,
+            "rules": _translated_rules(request, rule_service.all_rules()),
+            "engine": engine_service.status(),
+        }
         report["symbols"] = len({r["code"] for r in report["rules"]})
         validated = [r for r in report["rules"] if r.get("validation")]
         report["validated"] = len(validated)
@@ -1280,11 +1331,20 @@ def create_app() -> FastAPI:
         # 试跑必须能跑任意标的，而且策略下拉要列出**全部**规则——
         # 早先这里写死了三条策略的标签，用户自建或后来新增的规则根本选不到。
         rules = report["rules"]
-        options = [(r["code"], r["name"]) for r in rules if r.get("enabled", 1)]
+        locale = request.cookies.get("locale") or "zh-CN"
+
+        def rule_name(item: dict) -> str:
+            # 规则名是数据，但同时有 i18n 词条；有词条就按语言显示，
+            # 用户自建的规则没有词条，退回它自己的名字。
+            key = f"rule.{item['code']}"
+            translated = translate(locale, key)
+            return item["name"] if translated == key else translated
+
+        disabled_suffix = " (disabled)" if str(locale).lower().startswith("en") else "（已停用）"
+        options = [(r["code"], rule_name(r)) for r in rules if r.get("enabled", 1)]
         for item in rules:
             if not item.get("enabled", 1):
-                options.append((item["code"], f'{item["name"]}（已停用）'))
-        locale = request.cookies.get("locale") or "zh-CN"
+                options.append((item["code"], rule_name(item) + disabled_suffix))
         context = {
             "report": report,
             "symbols": symbols,
@@ -1668,6 +1728,18 @@ def create_app() -> FastAPI:
 
     # ---------------------------------------------------------------- rules
 
+    def _translated_rules(request: Request, rules: list[dict]) -> list[dict]:
+        locale = request.cookies.get("locale") or "zh-CN"
+        out = []
+        for item in rules:
+            row = dict(item)
+            key = f"rule.{row['code']}"
+            translated = translate(locale, key)
+            if translated != key:
+                row["name"] = translated
+            out.append(row)
+        return out
+
     @app.get("/rules", response_class=HTMLResponse)
     async def rules_page(request: Request):
         from kestrel.services import engine as engine_service
@@ -1681,7 +1753,7 @@ def create_app() -> FastAPI:
             name="rules.html",
             context=_ctx(
                 request,
-                rules=rule_service.all_rules(),
+                rules=_translated_rules(request, rule_service.all_rules()),
                 fields=sorted(FIELDS),
                 ai_prompt=prompt_for_ai(),
                 engine=engine_service.status(),

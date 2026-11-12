@@ -19,7 +19,7 @@
   <button data-tab="notify">{{ t('settings.tab_notify') }}</button>
   <button data-tab="data">{{ t('settings.tab_data') }}</button>
   <button data-tab="glossary">{{ t('settings.tab_glossary') }}</button>
-  <button data-tab="about">关于</button>
+  <button data-tab="about">{{ t('settings.about_tab') }}</button>
 </div>
 
 <div data-pane="general">
@@ -38,7 +38,7 @@
       <div class="setting-row">
         <div class="setting-label">
           <span>{{ t('settings.risk') }}</span>
-          <small>一笔最多亏本金的百分之几。新手 1–2%，经验多了可以自己定，没有上限。</small>
+          <small>{{ t('settings.risk_help') }}</small>
         </div>
         <div class="setting-input">
           <input data-key="risk.per_trade_pct" type="number" step="0.1" min="0.1" max="100"
@@ -47,8 +47,8 @@
       </div>
       <div class="setting-row">
         <div class="setting-label">
-          <span>总仓位上限（%）</span>
-          <small>所有持仓加起来不超过本金的比例。设成 0 表示不限制——不建议。</small>
+          <span>{{ t('settings.exposure') }}</span>
+          <small>{{ t('settings.exposure_hint') }}</small>
         </div>
         <div class="setting-input">
           <input data-key="risk.max_total_exposure_pct" type="number" step="5" min="0" max="100"
@@ -90,7 +90,7 @@
   <section class="card">
     <div class="card-head">
       <h2>{{ t('settings.scan_title') }}</h2>
-      <span class="meta">这些设置对规则引擎和 AI 都生效</span>
+      <span class="meta">{{ t('settings.scan_meta') }}</span>
     </div>
     <div class="card-body">
       <div class="setting-row" style="border-bottom:none;padding-bottom:2px;">
@@ -104,9 +104,9 @@
          用户一眼就知道「关掉 = 这个市场彻底不参与」。 #}
       {% set mk = values.get('scan.markets', ['CN','HK','US']) %}
       {% for code, label, note in [
-          ('CN', 'A 股', 'T+1，涨跌停限制，卖出时收印花税'),
-          ('HK', '港股', '按手交易，印花税买卖双向'),
-          ('US', '美股', '可以只买 1 股，无印花税')] %}
+          ('CN', t('market.cn'), t('settings.market_cn_hint')),
+          ('HK', t('market.hk'), t('settings.market_hk_hint')),
+          ('US', t('market.us'), t('settings.market_us_hint'))] %}
       <div class="setting-row">
         <div class="setting-label">
           <span>{{ label }}</span>
@@ -144,7 +144,9 @@
         </div>
         <div class="setting-input">
           <select data-key="scan.universe">
-            {% for key, label in [('both','自选 + 候选池（推荐）'), ('pool','只看候选池'), ('watchlist','只看自选')] %}
+            {% for key, label in [('both', t('settings.watchlist_pool')),
+                                  ('pool', t('settings.watchlist_pool_only')),
+                                  ('watchlist', t('settings.watchlist_only'))] %}
             <option value="{{ key }}" {% if values.get('scan.universe','both') == key %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
@@ -193,7 +195,7 @@
         <button class="btn" data-save>{{ t('action.save') }}</button>
         <button class="btn ghost" id="refresh-pool">{{ t('settings.refresh_pool') }}</button>
         <span class="tiny" id="pool-msg">
-          {% for m, n in pool.items() %}{{ m }} {{ n }} 只 {% endfor %}
+          {% for m, n in pool.items() %}{{ m }} {{ n }} {{ t('settings.pool_unit') }} {% endfor %}
         </span>
       </div>
     </div>
@@ -226,7 +228,7 @@
                 <span></span>
               </label>
               {% else %}
-              <button class="btn danger sm" data-src-del="{{ s.key }}">删除</button>
+              <button class="btn danger sm" data-src-del="{{ s.key }}">{{ t('settings.cs_delete') }}</button>
               {% endif %}
             </td>
           </tr>
@@ -256,37 +258,37 @@
       </div>
 
       <div class="grid g2">
-        <div class="field"><label>名称</label><input id="cs-label" placeholder="我的券商行情"></div>
-        <div class="field"><label>覆盖市场</label>
+        <div class="field"><label>{{ t('settings.cs_name') }}</label><input id="cs-label" placeholder="我的券商行情"></div>
+        <div class="field"><label>{{ t('settings.cs_markets') }}</label>
           <input id="cs-markets" placeholder="US,HK（留空=全部）">
         </div>
         <div class="field" style="grid-column:1 / -1;">
-          <label>URL 模板</label>
+          <label>{{ t('settings.cs_url') }}</label>
           <input id="cs-url" placeholder="https://example.com/quote?symbol={code}">
           <span class="help">占位符：{code} {market} {symbol} {yf_symbol} {key}</span>
         </div>
         <div class="field"><label>API Key</label><input id="cs-key" type="password" placeholder="付费源填这里"></div>
-        <div class="field"><label>请求方式</label>
+        <div class="field"><label>{{ t('settings.cs_method') }}</label>
           <select id="cs-method"><option>GET</option><option>POST</option></select>
         </div>
         <div class="field" style="grid-column:1 / -1;">
-          <label>POST 请求体（仅 POST 用）</label>
+          <label>{{ t('settings.cs_body') }}</label>
           <input id="cs-body" placeholder='{"codes":"{code}","token":"{key}"}'>
         </div>
-        <div class="field"><label>价格字段路径</label><input id="cs-price" value="price" placeholder="data.last"></div>
-        <div class="field"><label>昨收字段路径</label><input id="cs-prev" placeholder="data.prevClose"></div>
-        <div class="field"><label>涨跌幅字段路径</label><input id="cs-change" placeholder="data.changePct"></div>
-        <div class="field"><label>名称字段路径</label><input id="cs-name" placeholder="data.name"></div>
-        <div class="field"><label>换算系数</label><input id="cs-scale" value="1" placeholder="1000"></div>
-        <div class="field"><label>测试用代码</label><input id="cs-test-code" placeholder="AAPL"></div>
-        <div class="field"><label>测试用市场</label>
+        <div class="field"><label>{{ t('settings.cs_price') }}</label><input id="cs-price" value="price" placeholder="data.last"></div>
+        <div class="field"><label>{{ t('settings.cs_prev') }}</label><input id="cs-prev" placeholder="data.prevClose"></div>
+        <div class="field"><label>{{ t('settings.cs_change') }}</label><input id="cs-change" placeholder="data.changePct"></div>
+        <div class="field"><label>{{ t('settings.cs_name_path') }}</label><input id="cs-name" placeholder="data.name"></div>
+        <div class="field"><label>{{ t('settings.cs_scale') }}</label><input id="cs-scale" value="1" placeholder="1000"></div>
+        <div class="field"><label>{{ t('settings.cs_test_code') }}</label><input id="cs-test-code" placeholder="AAPL"></div>
+        <div class="field"><label>{{ t('settings.cs_test_market') }}</label>
           <select id="cs-test-market"><option>US</option><option>HK</option><option>CN</option></select>
         </div>
       </div>
       <div class="row-actions">
-        <button class="btn ghost" id="cs-test">先测一下</button>
-        <button class="btn" id="cs-save">保存数据源</button>
-        <button class="btn subtle" id="cs-add-builtin">把 Yahoo 设为内置备用源</button>
+        <button class="btn ghost" id="cs-test">{{ t('settings.cs_test') }}</button>
+        <button class="btn" id="cs-save">{{ t('settings.cs_save') }}</button>
+        <button class="btn subtle" id="cs-add-builtin">{{ t('settings.cs_yahoo') }}</button>
         <span class="tiny" id="cs-msg"></span>
       </div>
       <p class="tiny muted" style="margin-top:10px;">{{ t('settings.custom_source_fields') }}</p>
@@ -307,7 +309,9 @@
         </div>
         <div class="setting-input">
           <select data-key="agent.provider" id="engine-provider">
-            {% for key, label in [('rules','规则引擎（本地计算，免费）'), ('llm','大模型（AI 选股，同步）'), ('workbuddy','WorkBuddy（AI 选股，排队异步）')] %}
+            {% for key, label in [('rules', t('settings.engine_rules_option')),
+                                  ('llm', t('settings.engine_llm_option')),
+                                  ('workbuddy', t('settings.engine_wb_option'))] %}
             <option value="{{ key }}" {% if values.get('agent.provider','rules') == key %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
@@ -316,41 +320,46 @@
 
       <div id="engine-llm" class="hidden">
         <div class="setting-row">
-          <div class="setting-label"><span>接口地址</span><small>任何 OpenAI 兼容端点都可以，比如 DeepSeek、通义、本地 Ollama。</small></div>
+          <div class="setting-label"><span>{{ t('settings.engine_base') }}</span><small>{{ t('settings.engine_base_hint') }}</small></div>
           <div class="setting-input"><input data-key="agent.base_url" value="{{ values.get('agent.base_url','') }}" placeholder="https://api.deepseek.com/v1"></div>
         </div>
         <div class="setting-row">
-          <div class="setting-label"><span>模型名</span><small>例如 deepseek-chat、qwen-plus、llama3。</small></div>
+          <div class="setting-label"><span>{{ t('settings.engine_model') }}</span><small>{{ t('settings.engine_model_hint') }}</small></div>
           <div class="setting-input"><input data-key="agent.model" value="{{ values.get('agent.model','') }}" placeholder="deepseek-chat"></div>
         </div>
         <div class="setting-row">
-          <div class="setting-label"><span>API Key</span><small>只存在本机数据库，不会上传。</small></div>
+          <div class="setting-label"><span>{{ t('settings.engine_key') }}</span><small>{{ t('settings.engine_key_hint') }}</small></div>
           <div class="setting-input"><input data-key="agent.api_key" type="password" value="{{ values.get('agent.api_key','') }}"></div>
         </div>
         <div class="setting-row">
-          <div class="setting-label"><span>每天最多调用</span><small>超过上限就停止调用并明确提示，不会偷偷退回规则引擎——否则你以为在用 AI，其实在用规则。</small></div>
+          <div class="setting-label"><span>{{ t('settings.engine_budget') }}</span><small>{{ t('settings.engine_budget_hint') }}</small></div>
           <div class="setting-input"><input data-key="agent.daily_budget" type="number" value="{{ values.get('agent.daily_budget', 200) | num }}"></div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span>{{ t('settings.bridge_root') }}</span>
+            <small>{{ t('settings.bridge_root_hint') }}</small>
+          </div>
+          <div class="setting-input"><input data-key="bridge.root" value="{{ values.get('bridge.root','') }}" placeholder="{{ about.home }}/bridge"></div>
         </div>
       </div>
 
       <div id="engine-workbuddy" class="hidden">
         <div class="notice">
-          <strong>WorkBuddy 模式不需要接口地址，也不需要 API Key。</strong>
-          程序把任务（候选股指标 + 你的账户 + 规则实测结果）写进队列，WorkBuddy 的定时任务读取后给出建议，
-          结果自动回填到操作建议页。因为是排队处理，点完之后要等一轮（通常几分钟），不是即时出结果。
+          <strong>{{ t('settings.wb_title') }}</strong>
+          {{ t('settings.wb_body') }}
           <br><br>
-          队列位置：<span class="mono" style="font-size:12px;">{{ prompts.analyse.split('`')[1] if '`' in prompts.analyse else 'data/bridge/pending' }}</span>
-          。需要在 WorkBuddy 里建一个定时任务来消费队列，
-          <strong>下面的提示词可以直接复制粘贴过去</strong>。
+          {{ t('settings.wb_queue') }}<span class="mono" style="font-size:12px;">{{ prompts.analyse.split('`')[1] if '`' in prompts.analyse else 'data/bridge/pending' }}</span>
+          {{ t('settings.wb_need_cron') }}
         </div>
 
         <div class="prompt-card">
           <div class="prompt-head">
             <div>
-              <b>① 分析队列的定时任务</b>
-              <div class="tiny muted">建议每 30–60 分钟跑一次。它读队列、写答案，程序下次打开页面时自动收。</div>
+              <b>{{ t('settings.wb_job1') }}</b>
+              <div class="tiny muted">{{ t('settings.wb_job1_hint') }}</div>
             </div>
-            <button class="btn sm ghost" data-copy-prompt="analyse">复制提示词</button>
+            <button class="btn sm ghost" data-copy-prompt="analyse">{{ t('settings.copy_prompt') }}</button>
           </div>
           <pre class="prompt-body">{{ prompts.analyse }}</pre>
         </div>
@@ -358,25 +367,22 @@
         <div class="prompt-card">
           <div class="prompt-head">
             <div>
-              <b>② 把消息转进微信的定时任务</b>
-              <div class="tiny muted">建议每 5–15 分钟跑一次。配合「推送 → WorkBuddy」渠道使用。</div>
+              <b>{{ t('settings.wb_job2') }}</b>
+              <div class="tiny muted">{{ t('settings.wb_job2_hint') }}</div>
             </div>
-            <button class="btn sm ghost" data-copy-prompt="notify">复制提示词</button>
+            <button class="btn sm ghost" data-copy-prompt="notify">{{ t('settings.copy_prompt') }}</button>
           </div>
           <pre class="prompt-body">{{ prompts.notify }}</pre>
         </div>
       </div>
 
       <div id="engine-rules" class="notice">
-        <strong>规则引擎</strong>：条件全部写死在规则里，可复现、可审计，每条规则都经过历史验证，
-        测下来没有优势的会自动停用。不调用任何外部接口，不花钱，秒出结果。
-        缺点是它只能表达你事先想到的情形——遇到规则没覆盖的行情，它不会告诉你。
+        <strong>{{ t('settings.rules_engine') }}</strong>：{{ t('settings.rule_engine_hint') }}
+        {{ t('settings.rule_engine_limit') }}
       </div>
 
       <div id="engine-llm-note" class="notice hidden">
-        <strong>大模型模式</strong>：把候选股的完整指标、你的账户约束、以及每条规则的实测结果一起交给模型，
-        由它自己选股、给理由、定止损目标。本地代码会逐项校验它的数字，不合格的直接丢弃并记录原因；
-        仓位永远由本地按风险预算计算，不采用模型给的数量。点一次约消耗几万 token。
+        <strong>{{ t('settings.llm_mode') }}</strong>：{{ t('settings.llm_note') }}
       </div>
 
       <div class="row-actions"><button class="btn" data-save>{{ t('action.save') }}</button></div>
@@ -407,23 +413,20 @@
         {% endfor %}
       </div>
       <div class="row-actions">
-        <button class="btn" data-ch-save="{{ ch.key }}">保存</button>
-        <button class="btn ghost" data-ch-test="{{ ch.key }}">发送测试消息</button>
+        <button class="btn" data-ch-save="{{ ch.key }}">{{ t('settings.save') }}</button>
+        <button class="btn ghost" data-ch-test="{{ ch.key }}">{{ t('settings.send_test') }}</button>
         <span class="tiny">
-          {% if ch.last_test %}<span class="down">上次测试成功 {{ ch.last_test[5:16] }}</span>{% endif %}
-          {% if ch.last_error %}<span class="up">上次失败：{{ ch.last_error }}</span>{% endif %}
+          {% if ch.last_test %}<span class="down">{{ t('settings.last_test_ok') }} {{ ch.last_test[5:16] }}</span>{% endif %}
+          {% if ch.last_error %}<span class="up">{{ t('settings.last_test_failed') }}{{ ch.last_error }}</span>{% endif %}
         </span>
       </div>
       {% if ch.key == 'workbuddy' %}
       <div class="divider"></div>
-      <p class="hint" style="margin-bottom:8px;">
-        这个渠道靠 WorkBuddy 的定时任务把文件转进微信。把下面的提示词贴到 WorkBuddy 新建一个定时任务即可，
-        目录路径已经按你填的 outbox 生成好了。
-      </p>
+      <p class="hint" style="margin-bottom:8px;">{{ t('settings.wb_channel_hint') }}</p>
       <div class="prompt-card">
         <div class="prompt-head">
-          <b class="tiny">转发消息的定时任务提示词</b>
-          <button class="btn sm ghost" data-copy-prompt="notify">复制提示词</button>
+          <b class="tiny">{{ t('settings.wb_forward_prompt') }}</b>
+          <button class="btn sm ghost" data-copy-prompt="notify">{{ t('settings.copy_prompt') }}</button>
         </div>
         <pre class="prompt-body">{{ prompts.notify }}</pre>
       </div>
@@ -453,23 +456,23 @@
 <div data-pane="about" class="hidden">
   <section class="card">
     <div class="card-head">
-      <h2>版本与更新</h2>
+      <h2>{{ t('settings.about_version') }}</h2>
       <span class="meta">{{ about.platform }} · {{ about.mode }}</span>
     </div>
     <div class="card-body">
       <div class="setting-row">
         <div class="setting-label">
-          <span>当前版本</span>
+          <span>{{ t('settings.about_current') }}</span>
           <small>v{{ about.current }} · Python {{ about.python }}</small>
         </div>
         <div class="setting-input">
-          <button class="btn ghost" id="check-update">检查更新</button>
+          <button class="btn ghost" id="check-update">{{ t('settings.check_update') }}</button>
         </div>
       </div>
       <div class="setting-row">
         <div class="setting-label">
-          <span>每天自动检查</span>
-          <small>只检查并提示，不会替你安装。关掉就只能手动点上面那个按钮。</small>
+          <span>{{ t('settings.auto_check') }}</span>
+          <small>{{ t('settings.auto_check_hint') }}</small>
         </div>
         <div class="setting-input">
           <label class="switch">
@@ -485,34 +488,31 @@
       <div class="row-actions">
         <button class="btn" data-save>{{ t('action.save') }}</button>
         <a class="btn ghost" href="{{ about.releases_url }}" target="_blank" rel="noopener">
-          打开 Releases ↗
+          {{ t('settings.releases') }}
         </a>
       </div>
     </div>
   </section>
 
   <section class="card">
-    <div class="card-head"><h2>这台机器上的位置</h2></div>
+    <div class="card-head"><h2>{{ t('settings.paths') }}</h2></div>
     <div class="card-body">
       <table class="grid">
         <tbody>
-          <tr><td>数据目录</td><td class="mono tiny">{{ about.home }}</td></tr>
-          <tr><td>数据库</td><td class="mono tiny">{{ about.db_path }}</td></tr>
+          <tr><td>{{ t('settings.data_dir') }}</td><td class="mono tiny">{{ about.home }}</td></tr>
+          <tr><td>{{ t('settings.db_file') }}</td><td class="mono tiny">{{ about.db_path }}</td></tr>
         </tbody>
       </table>
       <p class="hint" style="margin-top:12px;">
-        「设置 → 备份」可以导出一份完整的数据库快照。换机器时把它放进新的数据目录即可。
+        {{ t('settings.paths_hint') }}
       </p>
     </div>
   </section>
 
   <section class="card">
-    <div class="card-head"><h2>许可</h2></div>
+    <div class="card-head"><h2>{{ t('settings.license') }}</h2></div>
     <div class="card-body">
-      <p class="hint" style="margin:0;">
-        GPL-3.0。你可以自由使用、修改和分发，修改后的版本也必须以同样的许可发布。
-        这个工具不提供投资建议，也不下单——所有决定都是你自己的。
-      </p>
+      <p class="hint" style="margin:0;">{{ t('settings.license_body') }}</p>
     </div>
   </section>
 </div>
@@ -529,8 +529,13 @@
         <tbody>
           {% for g in glossary %}
           <tr>
+            {% if locale.startswith('en') %}
+            <td><b>{{ g.term_en }}</b><div class="tiny muted">{{ g.term_zh }}</div></td>
+            <td class="tiny">{{ g.body_en }}</td>
+            {% else %}
             <td><b>{{ g.term_zh }}</b><div class="tiny muted">{{ g.term_en }}</div></td>
             <td class="tiny">{{ g.body_zh }}</td>
+            {% endif %}
             <td>
               <form method="post" action="/glossary/{{ g.key }}/toggle">
                 <button class="btn sm {{ 'ghost' if g.suppressed else 'subtle' }}" type="submit">
@@ -591,7 +596,9 @@
       })
         .then(function (r) { return r.json(); })
         .then(function (res) {
-          say(res.ok ? '已保存，共 ' + res.saved + ' 项。' : '保存失败：' + res.error, res.ok ? 'ok' : 'err');
+          say(res.ok ? window.I18N.savedN.replace('{n}', res.saved)
+                     : window.I18N.saveFailed + (res.error || ''),
+              res.ok ? 'ok' : 'err');
         });
     });
   });
@@ -618,7 +625,7 @@
         body: JSON.stringify({ items: items })
       }).then(function (r) { return r.json(); })
         .then(function (res) {
-          say(res.ok ? '数据源已更新，立即生效。' : '更新失败', res.ok ? 'ok' : 'err');
+          say(res.ok ? window.I18N.sourcesSaved : window.I18N.saveFailed, res.ok ? 'ok' : 'err');
         });
     });
   });
@@ -637,7 +644,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       }).then(function (r) { return r.json(); })
-        .then(function (res) { say(res.ok ? '已保存' : '保存失败', res.ok ? 'ok' : 'err'); });
+        .then(function (res) { say(res.ok ? window.I18N.saved : window.I18N.saveFailed, res.ok ? 'ok' : 'err'); });
     });
   });
 
@@ -654,10 +661,11 @@
       }).then(function (r) { return r.json(); })
         .then(function (res) {
           if (res.ok) {
-            say('测试消息已发出，去微信/手机看看有没有收到。', 'ok');
+            say(window.I18N.testSent, 'ok');
           } else {
-            var detail = (res.results && res.results[0] && res.results[0].error) || res.error || '未知错误';
-            say('发送失败：' + detail, 'err');
+            var detail = (res.results && res.results[0] && res.results[0].error) ||
+              res.error || window.I18N.unknownError;
+            say(window.I18N.sendFailed + detail, 'err');
           }
         })
         .finally(function () { btn.disabled = false; btn.textContent = original; });
@@ -669,12 +677,12 @@
     poolBtn.addEventListener('click', function () {
       poolBtn.disabled = true;
       var msg = document.getElementById('pool-msg');
-      msg.textContent = '正在拉取候选池…';
+      msg.textContent = window.I18N.poolLoading;
       fetch('/api/pool/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
         .then(function (r) { return r.json(); })
         .then(function (res) {
           msg.textContent = Object.keys(res.total || {}).map(function (k) {
-            return k + ' ' + res.total[k] + ' 只';
+            return k + ' ' + res.total[k] + ' ' + window.I18N.poolUnit;
           }).join('  ');
         })
         .finally(function () { poolBtn.disabled = false; });
@@ -696,7 +704,9 @@
           body: reader.result
         }).then(function (r) { return r.json(); })
           .then(function (res) {
-            say(res.ok ? '导入完成，写入 ' + res.rows + ' 行。' : '导入失败：' + res.error, res.ok ? 'ok' : 'err');
+            say(res.ok
+              ? window.I18N.imported.replace('{n}', res.rows)
+              : window.I18N.importFailed + (res.error || ''), res.ok ? 'ok' : 'err');
           });
       };
       reader.readAsText(file);
@@ -749,7 +759,7 @@
       payload.code = document.getElementById('cs-test-code').value.trim();
       payload.market = document.getElementById('cs-test-market').value;
       if (!payload.code) { csMsg.textContent = '先填一个测试代码。'; return; }
-      csMsg.textContent = '正在请求…';
+      csMsg.textContent = window.I18N.csRequesting;
       fetch('/api/datasources/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -757,8 +767,13 @@
       }).then(function (r) { return r.json(); })
         .then(function (res) {
           csMsg.textContent = res.ok
-            ? '通了：价格 ' + res.price + (res.change_pct !== null ? '，涨跌 ' + res.change_pct.toFixed(2) + '%' : '')
-            : '失败：' + res.error;
+            ? window.I18N.csOk.replace('{price}', res.price).replace(
+                '{change}',
+                res.change_pct !== null && res.change_pct !== undefined
+                  ? ' · ' + res.change_pct.toFixed(2) + '%'
+                  : ''
+              )
+            : window.I18N.csFailed + res.error;
         });
     });
   }

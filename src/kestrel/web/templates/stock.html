@@ -3,7 +3,7 @@
 
 {% block content %}
 {% if not sym %}
-<div class="card"><div class="empty"><strong>没有这只标的</strong>{{ market }} {{ code }} 不在本地数据库里，先去行情页添加。</div></div>
+<div class="card"><div class="empty"><strong>{{ t('stock.missing_title') }}</strong>{{ market }} {{ code }}</div></div>
 {% else %}
 
 <div class="page-head">
@@ -60,7 +60,7 @@
       {{ t('stock.range') }}：{{ chart.min | round(2) }} – {{ chart.max | round(2) }}
     </div>
     {% else %}
-    <div class="empty">还没有日线数据。这个标的可能没有被扫描过。</div>
+    <div class="empty">{{ t('stock.no_bars') }}</div>
     {% endif %}
   </div>
 </section>
@@ -92,7 +92,7 @@
     <table class="grid">
       <thead><tr><th>{{ t('j.qty_short') }}</th><th class="num">{{ t('j.entry') }}</th>
         <th class="num">{{ t('adv.stop') }}</th><th class="num">{{ t('scan.target') }}</th>
-        <th class="num">浮盈</th><th>买入时间</th><th></th></tr></thead>
+        <th class="num">{{ t('stock.open_pnl') }}</th><th>{{ t('stock.bought_at') }}</th><th></th></tr></thead>
       <tbody>
         <tr>
           <td class="mono">{{ trade.qty }}</td>
@@ -106,7 +106,7 @@
             {% else %}—{% endif %}
           </td>
           <td class="mono">{{ (trade.filled_at or trade.opened_at)[:10] }}</td>
-          <td><a class="btn sm ghost" href="/journal">去平仓</a></td>
+          <td><a class="btn sm ghost" href="/journal">{{ t('stock.go_close') }}</a></td>
         </tr>
       </tbody>
     </table>
@@ -123,10 +123,10 @@
       <div class="field"><label>MA60</label><div class="mono">{{ '%0.2f'|format(ind.sma60) }}</div></div>
       <div class="field"><label>RSI14</label><div class="mono">{{ '%0.1f'|format(ind.rsi14) }}</div></div>
       <div class="field"><label>ATR%</label><div class="mono">{{ '%0.2f'|format(ind.atr_pct) }}%</div></div>
-      <div class="field"><label>20 日高</label><div class="mono">{{ '%0.2f'|format(ind.high20) }}</div></div>
-      <div class="field"><label>20 日低</label><div class="mono">{{ '%0.2f'|format(ind.low20) }}</div></div>
-      <div class="field"><label>距 MA20</label><div class="mono">{{ '%0.2f'|format(ind.dist_sma20) }}%</div></div>
-      <div class="field"><label>量比</label><div class="mono">{{ '%0.2f'|format(ind.vol_ratio) }}</div></div>
+      <div class="field"><label>{{ t('stock.high20') }}</label><div class="mono">{{ '%0.2f'|format(ind.high20) }}</div></div>
+      <div class="field"><label>{{ t('stock.low20') }}</label><div class="mono">{{ '%0.2f'|format(ind.low20) }}</div></div>
+      <div class="field"><label>{{ t('stock.dist_ma20') }}</label><div class="mono">{{ '%0.2f'|format(ind.dist_sma20) }}%</div></div>
+      <div class="field"><label>{{ t('stock.vol_ratio') }}</label><div class="mono">{{ '%0.2f'|format(ind.vol_ratio) }}</div></div>
     </div>
   </div>
 </section>

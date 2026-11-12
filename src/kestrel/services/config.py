@@ -36,6 +36,12 @@ DEFAULTS: dict[str, Any] = {
     # 否则应用会在用户不知情时被替换掉。
     "update.auto_check": True,
     "update.auto_install": False,
+    # 显示货币：local = 各市场用本币；也可以统一折成一种货币。
+    # 同时持有腾讯和英伟达的人，需要把两个数字放在同一个尺度上比较。
+    "ui.display_currency": "local",
+    # WorkBuddy 桥目录。空 = 跟随数据目录（<home>/bridge）；
+    # 容器部署时要指向宿主机与容器都能看到的共享目录。
+    "bridge.root": "",
 }
 
 

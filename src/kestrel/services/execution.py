@@ -519,37 +519,78 @@ def quality_report() -> dict:
     }
 
 
-def lesson(report: dict) -> str:
-    """把上面的数字翻译成一句人话。新手需要的是结论，不是表格。"""
+def lesson(report: dict, locale: str = "zh-CN") -> str:
+    """把上面的数字翻译成一句人话。新手需要的是结论，不是表格。
+
+    英文页面不能显示中文结论，所以两种语言都生成，调用方按 locale 取。
+    """
+    english = str(locale).lower().startswith("en")
     if not report["advice_total"]:
-        return "还没有执行过任何建议。先跑一次扫描，挑一条看得懂的做。"
+        return (
+            "No advice acted on yet. Run a scan and take one you understand."
+            if english
+            else "还没有执行过任何建议。先跑一次扫描，挑一条看得懂的做。"
+        )
+
     rate = report["follow_rate"] or 0
     pieces: list[str] = []
     if rate < 0.2:
         pieces.append(
-            f"你只执行了 {rate * 100:.0f}% 的建议。这可能说明建议不合你的口味，"
-            "也可能是你在犹豫——两种情况都值得先把它调成你会照做的样子。"
+            f"You followed {rate * 100:.0f}% of the advice. Either it does not suit you, "
+            "or you hesitate — both are worth fixing before anything else."
+            if english
+            else (
+                f"你只执行了 {rate * 100:.0f}% 的建议。这可能说明建议不合你的口味，"
+                "也可能是你在犹豫——两种情况都值得先把它调成你会照做的样子。"
+            )
         )
     elif rate > 0.8:
-        pieces.append(f"你执行了 {rate * 100:.0f}% 的建议，纪律很好。")
+        pieces.append(
+            f"You followed {rate * 100:.0f}% of the advice. That is real discipline."
+            if english
+            else f"你执行了 {rate * 100:.0f}% 的建议，纪律很好。"
+        )
     else:
-        pieces.append(f"你执行了 {rate * 100:.0f}% 的建议，属于正常范围。")
+        pieces.append(
+            f"You followed {rate * 100:.0f}% of the advice — a normal range."
+            if english
+            else f"你执行了 {rate * 100:.0f}% 的建议，属于正常范围。"
+        )
 
     avg_r = report.get("avg_deviation_r")
     if avg_r is not None:
         if avg_r > 0.15:
             pieces.append(
-                f"但平均买贵了 {avg_r:.2f}R——等于你的止损距离被吃掉 {avg_r * 100:.0f}%。"
-                "挂限价单，或者干脆等回踩，比追进去划算。"
+                f"But you paid {avg_r:.2f}R above plan on average — that ate "
+                f"{avg_r * 100:.0f}% of your stop distance. Use limit orders."
+                if english
+                else (
+                    f"但平均买贵了 {avg_r:.2f}R——等于你的止损距离被吃掉 {avg_r * 100:.0f}%。"
+                    "挂限价单，或者干脆等回踩，比追进去划算。"
+                )
             )
         elif avg_r < -0.15:
             pieces.append(
-                f"平均买得比计划便宜 {abs(avg_r):.2f}R，执行得比计划还好。"
-                "注意这可能是价格已经走坏才等到你的单，别把接刀当成讲价。"
+                f"You paid {abs(avg_r):.2f}R less than plan. Make sure that was a better "
+                "entry and not a falling knife."
+                if english
+                else (
+                    f"平均买得比计划便宜 {abs(avg_r):.2f}R，执行得比计划还好。"
+                    "注意这可能是价格已经走坏才等到你的单，别把接刀当成讲价。"
+                )
             )
         else:
-            pieces.append(f"成交价平均偏离 {avg_r:+.2f}R，基本贴着计划走。")
+            pieces.append(
+                f"Fills averaged {avg_r:+.2f}R away from plan — essentially on plan."
+                if english
+                else f"成交价平均偏离 {avg_r:+.2f}R，基本贴着计划走。"
+            )
 
     if report.get("partial_fills"):
-        pieces.append(f"有 {report['partial_fills']} 笔只成交了一部分——台账记的就是实际数量，不是计划数量。")
+        pieces.append(
+            f"{report['partial_fills']} fill(s) were partial — the journal records what "
+            "actually filled, not what was planned."
+            if english
+            else f"有 {report['partial_fills']} 笔只成交了一部分——台账记的就是实际数量，不是计划数量。"
+        )
     return " ".join(pieces)

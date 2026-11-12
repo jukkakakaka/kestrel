@@ -42,8 +42,9 @@
       var code = addInput.value.trim();
       if (!code) return;
       addBtn.disabled = true;
+      addBtn.classList.add('busy');
       var originalBtn = addBtn.textContent;
-      addBtn.textContent = '…';
+      addBtn.innerHTML = '<span class="spin"></span>';
       fetch('/api/watchlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -54,14 +55,16 @@
           if (res.body.ok) {
             location.reload();
           } else {
-            say((res.body && res.body.error) || '添加失败', 'err', true);
+            say((res.body && res.body.error) || window.I18N.addFailed, 'err', true);
             addBtn.disabled = false;
+            addBtn.classList.remove('busy');
             addBtn.textContent = originalBtn;
           }
         })
         .catch(function (e) {
-          say('网络错误：' + e, 'err', true);
+          say(window.I18N.networkError + e, 'err', true);
           addBtn.disabled = false;
+          addBtn.classList.remove('busy');
           addBtn.textContent = originalBtn;
         });
     };
@@ -72,10 +75,23 @@
   document.querySelectorAll('[data-remove]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var path = btn.getAttribute('data-remove');
-      if (!confirm('从自选里移除 ' + path + '？')) return;
+      if (!confirm(window.I18N.confirmRemove.replace('{code}', path))) return;
       fetch('/api/watchlist/' + path, { method: 'DELETE' }).then(function () { location.reload(); });
     });
   });
+
+  /* ---------------- 显示货币 ---------------- */
+
+  var currencySel = document.getElementById('display-currency');
+  if (currencySel) {
+    currencySel.addEventListener('change', function () {
+      fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: { 'ui.display_currency': currencySel.value } })
+      }).then(function () { location.reload(); });
+    });
+  }
 
   /* ---------------- quotes refresh ---------------- */
 
@@ -111,32 +127,63 @@
   }
 
   if (refreshBtn) {
-    refreshBtn.addEventListener('click', function () {
-      var label = refreshBtn.querySelector('.label') || refreshBtn;
-      var original = label.textContent;
-      refreshBtn.disabled = true;
-      refreshBtn.innerHTML = '<span class="spin"></span><span class="label">刷新中</span>';
+    var timer = null;
+    var LAST_KEY = 'kestrel.lastQuoteAt';
 
-      fetch('/api/quotes')
+    function stamp() {
+      var now = new Date();
+      if (updatedAt) {
+        updatedAt.textContent = (window.I18N ? window.I18N.updated : 'Updated') + ' ' +
+          now.toTimeString().slice(0, 8);
+      }
+      try { localStorage.setItem(LAST_KEY, String(now.getTime())); } catch (e) { /* ignore */ }
+    }
+
+    function pull(manual) {
+      if (manual) {
+        var label = refreshBtn.querySelector('.label') || refreshBtn;
+        var original = label.textContent;
+        refreshBtn.disabled = true;
+        refreshBtn.classList.add('busy');
+        refreshBtn.innerHTML = '<span class="spin"></span><span class="label">' +
+          (window.I18N ? window.I18N.refreshing : 'Refreshing') + '</span>';
+        refreshBtn.setAttribute('data-original', original);
+      }
+      return fetch('/api/quotes')
         .then(function (r) { return r.json(); })
         .then(function (res) {
           if (res.quotes) paint(res.quotes);
-          var now = new Date();
-          if (updatedAt) {
-            updatedAt.textContent = '更新于 ' + now.toTimeString().slice(0, 8);
-          }
-          if (res.stale) {
-            say('部分行情来自缓存，数据源可能暂时不可用。', 'warn');
+          stamp();
+          if (res.stale && manual) {
+            say(window.I18N ? window.I18N.stale : 'Some quotes are cached.', 'warn');
           }
         })
         .catch(function (e) {
-          say('刷新失败：' + e + '（数据源可能被限流，稍等再试）', 'err', true);
+          if (manual) say((window.I18N ? window.I18N.refreshFailed : 'Refresh failed: ') + e, 'err', true);
         })
         .finally(function () {
-          refreshBtn.disabled = false;
-          refreshBtn.innerHTML = '<span class="label">' + original + '</span>';
+          if (manual) {
+            refreshBtn.disabled = false;
+            refreshBtn.classList.remove('busy');
+            refreshBtn.innerHTML = '<span class="label">' + refreshBtn.getAttribute('data-original') + '</span>';
+          }
         });
-    });
+    }
+
+    refreshBtn.addEventListener('click', function () { pull(true); });
+
+    // 自动刷新：行情页开着的时候每 60 秒拉一次。
+    // 停在一个过期的价格上做决定，比看不到价格更危险。
+    var interval = (window.KESTREL_REFRESH_SECONDS || 60) * 1000;
+    if (interval > 0) {
+      timer = setInterval(function () {
+        if (document.visibilityState === 'visible') pull(false);
+      }, interval);
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') pull(false);
+      });
+      window.addEventListener('beforeunload', function () { clearInterval(timer); });
+    }
   }
 
   /* ---------------- tabs ---------------- */

@@ -69,6 +69,31 @@
 </footer>
 
 <script src="/static/js/app.js"></script>
+<script>
+  window.I18N = Object.assign(window.I18N || {}, {
+    updated: {{ t('market.updated') | tojson }},
+    refreshing: {{ t('market.refreshing') | tojson }},
+    stale: {{ t('market.stale') | tojson }},
+    refreshFailed: {{ t('market.refresh_failed') | tojson }},
+    addFailed: {{ t('market.add_failed') | tojson }},
+    networkError: {{ t('market.network_error') | tojson }},
+    confirmRemove: {{ t('market.confirm_remove') | tojson }},
+    saved: {{ t('settings.saved') | tojson }},
+    savedN: {{ t('settings.saved_n') | tojson }},
+    saveFailed: {{ t('settings.save_failed') | tojson }},
+    sourcesSaved: {{ t('settings.sources_saved') | tojson }},
+    testSent: {{ t('settings.test_sent') | tojson }},
+    sendFailed: {{ t('settings.send_failed') | tojson }},
+    unknownError: {{ t('settings.unknown_error') | tojson }},
+    poolLoading: {{ t('settings.pool_loading') | tojson }},
+    poolUnit: {{ t('settings.pool_unit') | tojson }},
+    imported: {{ t('settings.imported') | tojson }},
+    importFailed: {{ t('settings.import_failed') | tojson }},
+    csRequesting: {{ t('settings.cs_requesting') | tojson }},
+    csOk: {{ t('settings.cs_ok') | tojson }},
+    csFailed: {{ t('settings.cs_failed') | tojson }}
+  });
+</script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

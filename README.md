@@ -4,10 +4,11 @@
 
 <h1>Kestrel</h1>
 
-**Watch first. Then act.**
+**What to buy today, how much, and when to sell.**
 
-A self-hosted trading companion: tells you what to do today, sizes the position and
-places the stop for you, then records what you *actually* paid — and shows you the gap.
+A trading tool that runs on your own machine: it screens A-shares, Hong Kong and US names,
+hands you a plan you can place as-is, records the price you *actually* paid, and then manages
+the position until it is closed.
 
 <br/>
 
@@ -15,61 +16,77 @@ places the stop for you, then records what you *actually* paid — and shows you
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [Docs](docs/) · [Engines](docs/engines.md) · [Architecture](docs/architecture.md)
 
-<img src="docs/screenshots/today.png" width="900" alt="Today: position risk, pending advice and watchlist quotes in one place">
+<img src="docs/screenshots/today.en.png" width="900" alt="Today: position risk, pending advice and watchlist quotes">
 
 </div>
 
 ---
 
-## What it is for
+## Four things it does for you
 
-Open a trading app for the first time and you get three hundred flashing numbers and a
-search box. The questions that actually matter are only three:
+1. **Pick** — a market-cap-ranked candidate pool per market, indicator by indicator, filtered
+   against your horizon and your capital.
+2. **Size** — every idea arrives with an entry band, a stop, a target, a share count, fees,
+   a break-even price and an expiry. You place it as written.
+3. **Manage** — while you hold it, it tells you how far the stop is, whether to raise it, and
+   whether to take half off.
+4. **Record** — the fill price and quantity are whatever you actually got (**they may differ
+   from the plan**), and the gap between plan and reality becomes a number.
 
-1. **Do I need to do anything with what I already hold?**
-2. **Is there anything worth buying — how much, at what price, and where do I admit I was wrong?**
-3. **What did I actually do last time, and how far was it from the plan?**
-
-Kestrel is organised around those three. The home page is called *Today* and lists only
-things to do. Every plan carries a stop, a target, a share count and the money you lose
-if it goes wrong. After you fill, you come back and record the real fill — **the price and
-quantity are allowed to differ from the suggestion**. The journal then shows you how much
-you overpaid, and by how many risk units you drifted.
-
-The point is not to make you feel an AI is picking stocks. It is that after a few dozen
-trades you understand *why* the stop was there and *why* the size was that size.
+Multiple markets and multiple frequencies are the point, not a feature list: A-shares and Hong
+Kong trade in lots and charge stamp duty, the US trades single shares; a swing trader and a
+position trader need different stop widths, plan lifetimes and time limits. Those settings
+change every number the tool produces.
 
 ## Three-minute start
 
-**Install the app** (macOS, Apple Silicon and Intel)
+**Install** (macOS, Apple Silicon and Intel)
 
-Grab the latest `Kestrel-*.dmg` from [releases](https://github.com/jukkakakaka/kestrel/releases)
-and drag it into Applications. The bundle is ad-hoc signed, so clear the quarantine flag once:
+Grab `Kestrel-*.dmg` from [releases](https://github.com/jukkakakaka/kestrel/releases) and drag it
+into Applications. The bundle is ad-hoc signed, so clear the quarantine flag once:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Kestrel.app
 open /Applications/Kestrel.app
 ```
 
-**The first run asks three questions**: how much capital, how much you are willing to lose
-per trade, and which markets you trade. Those answers drive every size and stop calculation
-from then on.
+**The first run asks three questions**: capital, loss per trade, and which markets you trade.
+The last one decides what gets scanned — a market you switch off disappears from every page.
 
 **Then**:
 
-1. Go to *Advice* → *Start scan*. It pulls a market-cap-ranked candidate pool per market and
-   computes indicators for each name.
+1. *Advice* → *Start scan*.
 2. Qualified setups appear as cards: entry band, stop, target, share count, reward-to-risk,
-   and the worst-case loss in money.
-3. Place the order in your broker app, then come back and press *I bought it* —
-   **enter the real fill price and quantity**.
-4. *Today* keeps telling you each day which position is near its stop, which advice is about
-   to expire, and when it is time to sell.
+   worst-case loss in money.
+3. Place the order in your broker app, then press *I bought it* and enter **the real fill price
+   and quantity**.
+4. *Today* keeps telling you which position is near its stop, which advice is about to expire,
+   and when to sell.
 
-> A rejected setup is information too. The page names the reason — *"one lot already exceeds
-> your risk budget"*, *"stop distance of 22% is too wide"* — instead of pretending nothing came up.
+> A rejected setup is information too. The page names the reason — *"one lot already exceeds your
+> risk budget"*, *"stop distance of 22% is too wide"* — instead of pretending nothing came up.
 
-<img src="docs/screenshots/advice.png" width="900" alt="Advice: entry band, stop, target, size, reward-to-risk, worst-case loss, and a plain-language explanation">
+<img src="docs/screenshots/advice.en.png" width="900" alt="Advice: entry band, stop, target, size, reward-to-risk, worst-case loss">
+
+## Selling is the main event
+
+You buy once; you sell across the whole life of the trade. The two classic beginner losses live
+here: refusing to take a profit, and refusing to admit a mistake. So every open position gets
+**one** recommendation, with a price attached:
+
+| Trigger | Action | Why |
+|---|---|---|
+| Price below the stop | Exit now | The stop is a pre-agreed admission, not a suggestion |
+| +1R | Move the stop to **break-even** | Worst case becomes a scratch |
+| +2R | Move the stop to **+1R** | Lock one unit, let the rest run |
+| First target reached | **Sell at least half** | Trail the rest instead of guessing the top |
+| Held past the horizon limit with nothing to show | **Time stop** | Capital and attention have a cost |
+
+A stop may only move up — the app refuses any downward edit, because lowering a stop is the same
+as removing it. Every move is logged (when, from, to, why) so a review can tell discipline from
+panic.
+
+<img src="docs/screenshots/journal.en.png" width="900" alt="Journal: live price, open P&L, distance to stop, R multiple and what to do now">
 
 ## Plan → fill → journal, closed end to end
 
@@ -77,22 +94,17 @@ from then on.
 scan → advice (entry / stop / target / qty / fees / expiry)
      → you fill at your own price and quantity
      → record the fill (receipt page or journal)
-     → position monitor (live price, open P&L, distance to stop, R multiple)
+     → position monitor (live price, open P&L, distance to stop, R multiple) + exit advice
      → push alert on stop hit / near stop / target reached
-     → close (partial closes allowed) → execution quality: follow rate, average drift in R
+     → close (partial closes allowed) → execution quality: follow rate, drift in R
 ```
 
-This is what separates it from a screener: **it records facts, and does not prettify them.**
-
 - Advice said buy 100 at 400–404. You got 60 filled at 402.5 — record 60 at 402.5. The journal
-  marks it a partial fill, and execution quality counts it as *planned 100 / actual 60*.
-- Sells can be partial. Each sell closes the oldest position first (FIFO); the original entry
-  row is never rewritten.
-- Paid 0.5R above plan and execution quality says so: *"that ate half your stop distance."*
-- Not following the plan is recorded too. A low follow rate is a signal, not a sin: the advice
-  does not suit you, or you are not ready to act on it.
-
-<img src="docs/screenshots/journal.png" width="900" alt="Journal: live price, open P&L, distance to stop and R multiple per position, with a one-click exit">
+  marks it partial, and execution quality counts it as *planned 100 / actual 60*.
+- Sells can be partial. Each sell closes the oldest position first (FIFO); the original entry row
+  is never rewritten.
+- Paid 0.5R above plan and the quality page says so: *"that ate half your stop distance."*
+- Not following the plan is recorded too. A low follow rate is a signal, not a sin.
 
 ## Markets and frequencies
 
@@ -102,53 +114,46 @@ This is what separates it from a screener: **it records facts, and does not pret
 | **Hong Kong** | lot size varies per stock (100/500/1000), no price limits | commission + platform fee + **0.1% stamp each side** + four levies |
 | **US** | single shares, no stamp duty | per-share platform fee + SEC/TAF on sells |
 
-**Frequency** is the *horizon*, and the three tiers move everything together:
-
 | Horizon | Bars | Typical hold | Plan lifetime | Stop band |
 | :--- | :--- | :--- | :--- | :--- |
 | Swing | daily | days to weeks | next session close | 1.5%–15% |
 | Position | weekly | weeks to two months | 10 days | 3%–18% |
 | Long (Beta) | monthly | months | 45 days | 5%–30% |
 
-Leave it on *auto* and it weighs pool breadth, median daily range, your capital and your actual
-fee schedule, picks one, and **explains why** (*"capital of 50k is small — fees dominate, so trade
-less rather than faster"*). Pin a horizon at any time and it stops arguing.
+On *auto* it weighs pool breadth, median daily range, your capital and your actual fee schedule,
+picks one and **explains why**. Pin a horizon at any time and it stops arguing.
 
 ## Three engines
 
-Who produces advice is one global switch. The advice page has one button and the label follows it.
+Who produces advice is one global switch. The advice page has one button whose label follows it.
 
 | Engine | Decides | Latency | Cost |
 | :--- | :--- | :--- | :--- |
 | **Rules** | fixed conditions over indicators; rules are JSON you can edit in the UI | instant | free |
-| **Model** (OpenAI-compatible) | reads indicators, your account, and each rule's measured record | ~30 s | per token |
-| **WorkBuddy** | same, but over a file queue serviced by a scheduled agent | minutes | free |
+| **Model** (OpenAI-compatible) | reads indicators, your account and each rule's measured record | ~30 s | per token |
+| **WorkBuddy** | same, over a file queue serviced by a scheduled job | minutes | free |
 
-In both AI modes **risk and sizing stay in local code**: the model's share count is discarded,
-the stop must sit inside the current horizon's band, reward must clear 1.5R, the ticker must be
-in the candidate list, one sector may not dominate, and total exposure is capped. Rejected picks
-are logged with a reason and shown in the UI.
+In both AI modes **risk and sizing stay in local code**: the model's share count is discarded, the
+stop must sit inside the current horizon's band, reward must clear 1.5R, the ticker must be in the
+candidate list, one sector may not dominate, exposure is capped. Rejected picks are logged with a
+reason and shown in the UI.
 
-Model calls have a daily budget. When it runs out the app **says so and stops** — it never
-quietly falls back to rules, because then you would think you were using a model when you were not.
+Model calls have a daily budget. When it runs out the app **says so and stops** — it never quietly
+falls back to rules.
 
-## Rules must prove themselves
+## Automatic updates
 
-Every built-in rule is walk-forward tested against a fair benchmark: the same entry, the same
-holding period, no stop. Beat holding or do not get published.
+Settings → About shows the version and a *Check for updates* button. When a release exists it can
+download the installer and open it; **the final drag is yours**, because a running app cannot safely
+replace itself. On Docker it says to pull the image again instead of pretending otherwise.
 
-Measured over ~100 names and 25 years of daily bars (refolded to weekly and monthly):
+Same thing from a terminal:
 
-| Horizon | Result |
-| :--- | :--- |
-| Daily | 5 rules "no edge", 1 "unstable"; expectancy comes mostly from the 2:1 payoff, not the entry |
-| Weekly | 2 "unstable", 3 "no edge" |
-| Monthly | only *Trend pullback* (96 trades) and *Washout bounce* (42) have enough trades to judge; the rest read "insufficient sample" |
-
-One rule set gives three different answers on three horizons, so verdicts are stored per horizon:
-a rule that loses on daily is disabled on daily only, not removed. **The value here is discipline
-and cost, not prediction** — and the rules page says exactly that, including the verdicts that
-read "insufficient sample".
+```bash
+kestrel version          # version, platform, data directory, update state
+kestrel update --check   # check now
+kestrel update --install # download and open the installer
+```
 
 ## Data sources
 
@@ -159,20 +164,20 @@ read "insufficient sample".
 | Yahoo | free, no key | CN / HK / US | used to cross-check the others |
 | Finnhub · Alpha Vantage · Twelve Data · Polygon · Tiingo | free tier or paid | per provider | paste a key |
 
-Built-in sources can be toggled individually; disabling one falls through to the next. You can
-also define your own source: URL template, JSON field paths, a scale divisor, and a **test** button
-that shows the parsed number before you save it.
+Built-in sources toggle individually; disabling one falls through to the next. You can also define
+your own: URL template, JSON field paths, a scale divisor, and a **test** button that shows the
+parsed number before you save it.
 
 ## Install
 
-**macOS app** (the dmg above, or build it yourself)
+**macOS app**
 
 ```bash
 make package        # dist/Kestrel.app
 make package-dmg    # plus dist/Kestrel-*.dmg
 ```
 
-**From source** (Python 3.11+, [uv](https://docs.astral.sh/uv/) required)
+**From source** (Python 3.11+, [uv](https://docs.astral.sh/uv/))
 
 ```bash
 uv sync --extra desktop
@@ -183,8 +188,8 @@ uv run kestrel serve       # or the browser: http://127.0.0.1:8000
 
 **Windows**
 
-GitHub Actions builds a `Kestrel-windows` zip (Windows 10/11, no Python needed) — download it
-from the Artifacts of the *Build desktop app* workflow and run `Kestrel.exe`.
+GitHub Actions builds a `Kestrel-windows` zip (Windows 10/11, no Python needed) — download it from
+the *Build desktop app* workflow artifacts and run `Kestrel.exe`.
 
 **Docker**
 
@@ -193,7 +198,7 @@ docker compose up          # http://127.0.0.1:8000, data in a named volume
 ```
 
 **Everything stays on your machine**: SQLite lives in `~/Library/Application Support/Kestrel`
-(macOS), `%APPDATA%\Kestrel` (Windows) or `./data` (source). No account, no telemetry, nothing uploaded.
+(macOS), `%APPDATA%\Kestrel` (Windows) or `./data` (source). No account, no telemetry.
 
 ## Configuration
 
@@ -202,30 +207,46 @@ Bootstrap values are environment variables:
 
 | Variable | Default | Meaning |
 | :--- | :--- | :--- |
-| `KESTREL_HOME` | `./data`, or the OS app-data dir when bundled | database, cache, logs, bridge queue |
+| `KESTREL_HOME` | `./data`, or the OS app-data dir when bundled | database, cache, logs, WorkBuddy queue |
 | `KESTREL_HOST` | `127.0.0.1` | bind address |
 | `KESTREL_PORT` | `8000` | port |
 | `KESTREL_DEBUG` | `false` | verbose logging |
 
+When WorkBuddy is used for analysis or notifications, the queue paths depend on how the app runs
+(browser, bundled app, container). The settings page generates the cron-job prompts from the current
+configuration, so you never have to assemble a path by hand.
+
+## Learning comes second
+
+Learning is the second layer, not a course. It sits next to the numbers:
+
+- **Learning mode** expands every plan into *what this is / why now / what if it goes wrong*,
+  in plain language.
+- **60 glossary terms** — stop, reward-to-risk, R multiple, trailing stop, scaling out, time stop,
+  T+1, price limits — hover for a definition, and suppress the ones you already know.
+- **Execution quality** turns "did you follow the plan" and "how many risk units did you overspend"
+  into numbers. Over time those matter more than stock picking.
+- **Rules page** shows every rule's measured record, including the verdicts that read
+  "insufficient sample".
+
 ## Honest limits
 
-The part most READMEs leave out.
-
 - **Daily bars only.** No order book, no fund flows, no earnings expectations. On that information
-  set the selection edge is close to zero, and the rules page will show you exactly that:
-  expectancy is positive, but almost all of it comes from the 2:1 payoff, not from the entry.
-- **The stop and the size do the work.** Measured against holding the same entry for the same number
-  of days with no stop, the excess return of every shipped rule is near zero. Treat this as a
-  discipline and cost tool, not an oracle.
-- **The horizon recommendation is a heuristic**, not a model: breadth, volatility, capital and fee
-  drag, weighted and explained. It can be wrong. Pin the horizon you want and it stops arguing.
-- **Long-term is Beta.** Monthly bars see price and volume and nothing else, and the sample is
-  thinnest — only two of the seven rules produce enough trades to judge.
-- **No broker API, no automatic orders.** That is deliberate: placing an order is irreversible.
-  Every fill goes through one `BrokerAdapter` interface, so wiring a real broker later means
-  replacing one class — the journal, alerts and statistics stay as they are.
+  set the selection edge is close to zero, and the rules page says exactly that: expectancy is
+  positive, but almost all of it comes from the 2:1 payoff, not from the entry.
+- **The stop and the size do the work.** Against holding the same entry for the same number of days
+  with no stop, the excess return of every shipped rule is near zero.
+- **The horizon recommendation is a heuristic**, not a model. It can be wrong; pin a horizon and it
+  stops arguing.
+- **Long-term is Beta.** Monthly bars see price and volume only, and only two of the seven rules
+  produce enough trades to judge.
+- **No broker API, no automatic orders.** Deliberate: placing an order is irreversible. Every fill
+  goes through one `BrokerAdapter` interface, so wiring a real broker later means replacing one
+  class — the journal, alerts and statistics stay as they are.
+- **"Automatic update" stops at the download.** A running app cannot safely replace itself; the last
+  drag is yours.
 - **WorkBuddy mode is asynchronous** and its finest schedule is hourly.
-- **OCR is not implemented.** Pasting text is more accurate, and less likely to misread a digit.
+- **No OCR.** Pasting text is more accurate, and less likely to misread a digit.
 
 ## Project layout
 
@@ -233,25 +254,27 @@ The part most READMEs leave out.
 src/kestrel/
   app.py            FastAPI app, routes, template filters
   services/         scan / analyst / engine / rules / universe / calendar /
-                    execution (fills) / positions (monitor) / today (briefing) /
-                    advisor (horizon) / timeframe (bar folding)
+                    execution (fills) / positions (monitor) / exits (sell rules) /
+                    today (briefing) / advisor (horizon) / timeframe (bar folding) /
+                    updates (version + update) / prompts (WorkBuddy cron prompts)
   strategies/       rule compiler, built-in rule library, AI-facing JSON Schema
   datasources/      provider chain, Eastmoney/Tencent/Sina, resolver, presets, custom
   planning/         position sizing, stop/target placement, fee-aware plans
   fees/             exchange levy model, broker plans
   web/              Jinja templates + static assets
   db/               schema and versioned migrations
-packaging/          PyInstaller spec, macOS build script, icons
+packaging/          PyInstaller spec, macOS build script and dmg layout, icons
+scripts/            single source for brand assets, icons and the dmg background
 ```
 
 ## Documentation
 
 | Document | Contents |
 | :--- | :--- |
-| [docs/engines.md](docs/engines.md) | The three engines, shared risk checks, what each page does in AI mode |
-| [docs/architecture.md](docs/architecture.md) | Module map, data flow, storage |
+| [docs/engines.md](docs/engines.md) | The three engines, shared risk checks, testing rules in AI mode |
+| [docs/architecture.md](docs/architecture.md) | Module map, data flow, non-negotiables |
 | [docs/fee-model.md](docs/fee-model.md) | Exchange levies and broker plans |
-| [docs/notifications.md](docs/notifications.md) | Channels, receipts, signature scheme |
+| [docs/notifications.md](docs/notifications.md) | Channels, receipts, position alerts, the two WorkBuddy jobs |
 | [docs/ui-map.md](docs/ui-map.md) | Route table and naming rationale |
 
 ## Development
@@ -259,21 +282,24 @@ packaging/          PyInstaller spec, macOS build script, icons
 ```bash
 uv sync --extra desktop --extra dev
 uv run kestrel init
-uv run pytest            # 133 tests
+uv run pytest            # 169 tests
 uv run ruff check src tests
 uv run uvicorn kestrel.app:app --reload --app-dir src
 ```
 
-The suite must pass against an **empty data directory**: CI has no pre-seeded database, and an
-earlier version was green locally and red in CI. `tests/conftest.py` now guarantees a migrated
-database for every session.
+The suite must pass against an **empty data directory**: CI has no pre-seeded database, and
+`tests/conftest.py` guarantees a migrated one for every session.
+
+After changing the brand or icons, run `uv run python scripts/make_brand_assets.py`. It regenerates
+the web assets, favicons and app icon from the single definition in `scripts/brand.py`;
+`scripts/make_dmg_background.py` owns the installer window. They must agree — otherwise users see
+four different marks in four places.
 
 ## Disclaimer
 
-Kestrel is a research and learning tool. It does **not** provide investment advice, forecast
-prices, or place orders. Nothing it produces is an offer to buy or sell any security.
-Markets carry risk; the decisions are yours. Its most useful feature may be telling you that
-today is not the day.
+Kestrel gives no investment advice, forecasts no prices and places no orders. Nothing it produces is
+an offer to buy or sell any security. Markets carry risk; the decisions are yours. Its most useful
+feature may be telling you that today is not the day.
 
 ## License
 

@@ -1,3 +1,4 @@
+{% set _ = t %}
 <!DOCTYPE html>
 <html lang="{{ locale }}" data-theme="{{ theme }}">
 <head>
@@ -28,8 +29,8 @@
   {% elif expired and not done %}
   <div class="panel receipt-done">
     <div class="done-mark muted-mark">⏳</div>
-    <h1>这个链接已经失效</h1>
-    <p class="hint">建议有效期到 {{ rec.valid_until[:16] }}，过期后再回执会把今天的事记成那天的事。请回到电脑上看最新建议。</p>
+    <h1>{{ t('receipt.expired_title') }}</h1>
+    <p class="hint">{{ t('receipt.expired_body') }}</p>
   </div>
 
   {% elif done %}
@@ -40,28 +41,28 @@
 
     {% if result and result.ok %}
     <div class="receipt-result">
-      <div class="row"><span>实际成交</span><b class="mono">{{ rec.name }} · {{ result.qty }} 股</b></div>
+      <div class="row"><span>{{ t('receipt.filled') }}</span><b class="mono">{{ rec.name }} · {{ result.qty }} 股</b></div>
       {% if result.deviation_pct is not none %}
       <div class="row">
-        <span>相对建议入场价</span>
+        <span>{{ t('receipt.deviation_pct') }}</span>
         <b class="mono {{ 'down' if result.deviation_pct < 0 else 'up' }}">
           {{ '%+.2f'|format(result.deviation_pct) }}%
         </b>
       </div>
       <div class="row">
-        <span>偏离风险单位</span>
+        <span>{{ t('receipt.deviation_r') }}</span>
         <b class="mono">{{ '%+.2f'|format(result.deviation_r or 0) }} R</b>
       </div>
       <p class="hint" style="margin-top:10px;text-align:left;">
-        偏差为负表示买得比建议便宜，为正表示买贵了。这个数字长期比选股准确率更影响你的结果。
+        {{ t('receipt.deviation_hint') }}
       </p>
       {% else %}
-      <div class="row"><span>结果</span><b>{{ result.message }}</b></div>
+      <div class="row"><span>{{ t('receipt.result') }}</span><b>{{ result.message }}</b></div>
       {% endif %}
     </div>
     {% endif %}
 
-    <a class="btn" href="/journal">去看持仓</a>
+    <a class="btn" href="/journal">{{ t('receipt.go_positions') }}</a>
   </div>
 
   {% else %}
@@ -92,11 +93,11 @@
           <input type="text" inputmode="decimal" name="fill_price" placeholder="{{ rec.entry_low|money(3) }}">
         </label>
         <label>
-          <span class="field-label">实际数量（股）</span>
+          <span class="field-label">{{ t('receipt.fill_qty') }}</span>
           <input type="text" inputmode="numeric" name="fill_qty" placeholder="{{ rec.qty }}">
         </label>
       </div>
-      <p class="hint tight">价格和数量都按你的实际成交填，跟建议不一样没关系——记的本来就是真实发生的事。</p>
+      <p class="hint tight">{{ t('receipt.fill_hint') }}</p>
 
       <label class="field-label">{{ t('receipt.note') }}</label>
       <input type="text" name="note" placeholder="{{ t('receipt.note_ph') }}">

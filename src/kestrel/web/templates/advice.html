@@ -7,9 +7,9 @@
     <h1>{{ t('adv.title') }}</h1>
     <div class="sub">
       {% if engine.is_ai %}
-        <span class="badge wait">AI 决策</span>
+        <span class="badge wait">{{ t('adv.ai_decided') }}</span>
       {% else %}
-        <span class="badge avoid">规则计算</span>
+        <span class="badge avoid">{{ t('adv.rules_decided') }}</span>
       {% endif %}
       {{ engine.label }}{% if engine.model and engine.model != 'workbuddy' %} · {{ engine.model }}{% endif %}
       {% if engine.pending %} · 队列 {{ engine.pending }} 条待处理{% endif %}
@@ -30,12 +30,12 @@
   {% if engine.reason %}<br><strong class="up">{{ engine.reason }}</strong>{% endif %}
   {% if engine.is_ai %}
     <br><span class="muted">
-      规则引擎仍在后台为 AI 提供「哪些路已经被验证过」的参考，但不再直接产出建议。
-      想单独检验规则，去 <a href="/sim">快速模拟</a>；想改规则，去 <a href="/rules">规则</a>。
+      {{ t('adv.ai_note') }}
+      <a href="/sim">{{ t('adv.quick_sim') }}</a>{{ t('adv.edit_rules_hint') }}<a href="/rules">{{ t('adv.rules_link') }}</a>。
     </span>
   {% else %}
     <br><span class="muted">
-      想换成 AI 选股：<a href="/settings#engine">设置 → 分析引擎</a>。
+      {{ t('adv.switch_ai_hint') }}<a href="/settings#engine">{{ t('adv.engine_settings') }}</a>。
     </span>
   {% endif %}
 </div>
@@ -108,7 +108,7 @@
 {% if analyst_runs %}
 <section class="card">
   <div class="card-head">
-    <h2>最近一次 AI 分析</h2>
+    <h2>{{ t('adv.last_run') }}</h2>
     <span class="meta">
       <span class="badge wait">{{ analyst_runs[0].engine_label }}</span>
       {% if analyst_runs[0].engine_detail %} · {{ analyst_runs[0].engine_detail }}{% endif %}
@@ -147,7 +147,7 @@
         <span class="sym"><a href="/stock/{{ r.market }}/{{ r.code }}">{{ r.name }}</a></span>
         <span class="code">{{ r.code }}</span>
         {% if r.source == 'ai' %}
-          <span class="badge wait" title="{{ r.ai_thesis or '' }}">AI 分析</span>
+          <span class="badge wait" title="{{ r.ai_thesis or '' }}">{{ t('adv.ai_badge') }}</span>
         {% else %}
           <span class="badge avoid" title="由规则计算">{{ t('strategy.' + r.strategy) }}</span>
         {% endif %}
@@ -196,19 +196,19 @@
               {% endif %}
             {% endfor %}
             {% if r.source == 'ai' and r.ai_thesis %}
-            <h4>模型的原话</h4>
+            <h4>{{ t('adv.model_words') }}</h4>
             <p>{{ r.ai_thesis }}</p>
             {% endif %}
             <h4>{{ t('adv.learn_terms') }}</h4>
             <p>
-              <span class="gloss" data-term="entry_zone">入场区间</span>、
-              <span class="gloss" data-term="stop_loss">止损</span>、
-              <span class="gloss" data-term="target">目标价</span>、
-              <span class="gloss" data-term="rr">盈亏比</span>、
-              <span class="gloss" data-term="position">仓位</span>、
-              <span class="gloss" data-term="r_multiple">R 倍数</span>、
-              <span class="gloss" data-term="trailing_stop">移动止损</span>
-              —— 鼠标停上去看解释。
+              <span class="gloss" data-term="entry_zone">{{ t('gloss.entry_zone') }}</span>、
+              <span class="gloss" data-term="stop_loss">{{ t('gloss.stop_loss') }}</span>、
+              <span class="gloss" data-term="target">{{ t('gloss.target') }}</span>、
+              <span class="gloss" data-term="rr">{{ t('gloss.rr') }}</span>、
+              <span class="gloss" data-term="position">{{ t('gloss.position') }}</span>、
+              <span class="gloss" data-term="r_multiple">{{ t('gloss.r_multiple') }}</span>、
+              <span class="gloss" data-term="trailing_stop">{{ t('gloss.trailing_stop') }}</span>
+              {{ t('adv.terms_hint') }}
             </p>
           </div>
         </details>
@@ -224,7 +224,7 @@
           <button class="btn sm ghost" data-decide="skipped" data-rec="{{ r.id }}">{{ t('adv.skip') }}</button>
         {% elif r.status == 'executed' %}
           <span class="badge ok-badge">{{ t('adv.done') }}{% if r.fill_price %} @ {{ r.fill_price | cur(r.currency) }}{% endif %}</span>
-          <a class="btn sm ghost" href="/journal">记录卖出 / 看持仓</a>
+          <a class="btn sm ghost" href="/journal">{{ t('adv.sell_link') }}</a>
         {% endif %}
       </footer>
     </article>
@@ -262,7 +262,7 @@
             <td><a href="/stock/{{ h.market }}/{{ h.code }}">{{ h.name }}</a> <span class="mono muted">{{ h.code }}</span></td>
             <td>
               <span class="badge {{ 'buy' if h.action == 'buy' else 'wait' }}">{{ t('adv.action_' + h.action) }}</span>
-              {% if h.source == 'ai' %}<span class="tiny muted">AI</span>{% else %}<span class="tiny muted">规则</span>{% endif %}
+              {% if h.source == 'ai' %}<span class="tiny muted">{{ t('adv.ai_badge') }}</span>{% else %}<span class="tiny muted">{{ t('adv.rules_badge') }}</span>{% endif %}
             </td>
             <td class="num mono">{{ h.entry_low | cur(h.currency) }}</td>
             <td class="num mono down">{{ h.stop | cur(h.currency) }}</td>
@@ -279,7 +279,7 @@
     </div>
   </section>
   {% else %}
-  <div class="card"><div class="empty"><strong>还没有历史</strong>建议被处理或过期后会出现在这里。</div></div>
+  <div class="card"><div class="empty"><strong>{{ t('adv.no_history_title') }}</strong>{{ t('adv.no_history_body') }}</div></div>
   {% endif %}
 </div>
 
@@ -320,7 +320,7 @@
     </div>
   </section>
   {% else %}
-  <div class="card"><div class="empty"><strong>还没扫描过</strong>点右上角「立即扫描」。</div></div>
+  <div class="card"><div class="empty"><strong>{{ t('adv.no_scan_title') }}</strong>{{ t('adv.no_scan_body') }}</div></div>
   {% endif %}
 </div>
 {% endblock %}

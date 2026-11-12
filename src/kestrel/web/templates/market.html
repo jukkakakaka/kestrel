@@ -8,6 +8,14 @@
     <div class="sub">{{ t('market.sub') }}</div>
   </div>
   <div class="page-actions">
+    <select id="display-currency" class="inline-select" aria-label="{{ t('market.currency') }}">
+      {% for code, label in [('local', t('market.currency_local')),
+                             ('CNY', t('market.currency_cny')),
+                             ('HKD', t('market.currency_hkd')),
+                             ('USD', t('market.currency_usd'))] %}
+      <option value="{{ code }}" {% if code == display_currency %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
     <input id="add-code" class="add-input" placeholder="{{ t('market.add_placeholder') }}" autocomplete="off">
     <button class="btn" id="add-btn">{{ t('action.add') }}</button>
     <button class="btn ghost" id="refresh-btn">
@@ -25,9 +33,9 @@
       <span class="tag tag-{{ m.market|lower }}">{{ m.market }}</span>
     </div>
     <div class="state">
-      {{ m.label }} · 当地 {{ m.local_time }}
+      {{ m.label }} · {{ t('market.local_time') }} {{ m.local_time }}
       {% if m.state != 'open' and m.seconds_to_open %}
-        · {{ (m.seconds_to_open // 3600) }} 小时后开盘
+        · {{ t('market.opens_in_hours', n=(m.seconds_to_open // 3600)) }}
       {% endif %}
     </div>
   </div>
@@ -64,17 +72,17 @@
           <td class="mono"><a href="/stock/{{ it.market }}/{{ it.code }}">{{ it.code }}</a></td>
           <td><a href="/stock/{{ it.market }}/{{ it.code }}">{{ it.name }}</a></td>
           <td class="num mono" data-field="price">
-            {% if it.price %}{{ it.price | px(it.market) }}{% else %}—{% endif %}
+            {% if it.price %}{{ it.price | quote(it.market, display_currency) }}{% else %}—{% endif %}
           </td>
           <td class="num mono {% if it.change_pct is not none %}{{ 'up' if it.change_pct >= 0 else 'down' }}{% endif %}" data-field="chg">
-            {% if it.price and it.prev_close %}{{ (it.price - it.prev_close) | px(it.market) }}{% else %}—{% endif %}
+            {% if it.price and it.prev_close %}{{ (it.price - it.prev_close) | quote(it.market, display_currency) }}{% else %}—{% endif %}
           </td>
           <td class="num mono {% if it.change_pct is not none %}{{ 'up' if it.change_pct >= 0 else 'down' }}{% endif %}" data-field="pct">
             {% if it.change_pct is not none %}{{ it.change_pct | pct }}{% else %}—{% endif %}
           </td>
           <td>
             <a class="src" href="{{ it.source | src_url(it.market, it.code) }}" target="_blank" rel="noopener">
-              {% if it.source %}查看来源 ↗{% else %}—{% endif %}
+              {% if it.source %}{{ t('market.view_source') }} ↗{% else %}—{% endif %}
             </a>
           </td>
           <td>

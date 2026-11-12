@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}规则 · {{ t('app.name') }}{% endblock %}
+{% block title %}{{ t('rules.title') }} · {{ t('app.name') }}{% endblock %}
 
 {% block content %}
 <div class="page-head">
   <div>
-    <h1>选股规则</h1>
-    <div class="sub">规则是数据，不是代码。任何人都能加一条，然后由验证器决定它值不值得用。</div>
+    <h1>{{ t('rules.title') }}</h1>
+    <div class="sub">{{ t('rules.sub') }}</div>
   </div>
   <div class="page-actions">
     <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:6px;">
@@ -16,8 +16,8 @@
         {% endfor %}
       </select>
     </label>
-    <button class="btn ghost" id="validate-all">全部重新验证</button>
-    <button class="btn" id="new-rule">写一条新规则</button>
+    <button class="btn ghost" id="validate-all">{{ t('rules.validate_all') }}</button>
+    <button class="btn" id="new-rule">{{ t('rules.new') }}</button>
   </div>
 </div>
 
@@ -32,22 +32,19 @@
 
 {% if engine.is_ai %}
 <div class="notice warn">
-  <strong>注意：当前建议由 {{ engine.label }} 产生，规则不直接参与选股。</strong>
-  这些规则仍在为 AI 提供「哪些路已经被验证过」的参考，也是你理解行情结构的工具；
-  可以随时在下方单独验证任何一条规则的实测表现。想改回让规则直接出建议：
-  <a href="/settings#engine">设置 → 分析引擎</a>。
+  <strong>{{ t('rules.ai_notice_title', engine=engine.label) }}</strong>
+  {{ t('rules.ai_notice_body') }}
+  <a href="/settings#engine">{{ t('adv.engine_settings') }}</a>。
 </div>
 {% else %}
 <div class="notice">
-  <strong>当前建议由规则引擎产生。</strong>
-  每条规则都按同一套流程验证：三折滚动、和「同样入场但不设止损」比较，
-  测下来没有超额收益的会被自动停用（仍保留，可随时重测）。
+  <strong>{{ t('rules.rules_notice_title') }}</strong>
+  {{ t('rules.rules_notice_body') }}
 </div>
 {% endif %}
 
 <div class="notice">
-  判定看的是<strong>超额收益</strong>：同样的入场点、同样的持有天数、不设止损，能跑赢它才算有本事。
-  只看「赚了多少钱」没有意义——牛市里随便买都赚。
+  {{ t('rules.verdict_intro') }}
   <br><span class="muted" style="font-size:12.5px;">{{ t('rules.horizon_hint') }}</span>
 </div>
 
@@ -56,30 +53,30 @@
   <header class="advice-head">
     <span class="sym">{{ r.name }}</span>
     <span class="code">{{ r.code }}</span>
-    {% if r.builtin %}<span class="tag">内置</span>{% endif %}
-    {% if r.last_verdict == '有优势' %}<span class="badge ok-badge">有优势</span>
-    {% elif r.last_verdict == '无优势' %}<span class="badge avoid">无优势</span>
+    {% if r.builtin %}<span class="tag">{{ t('rules.builtin') }}</span>{% endif %}
+    {% if r.last_verdict == '有优势' %}<span class="badge ok-badge">{{ t('sim.rule_advantage') }}</span>
+    {% elif r.last_verdict == '无优势' %}<span class="badge avoid">{{ t('sim.rule_none') }}</span>
     {% elif r.last_verdict %}<span class="badge wait">{{ r.last_verdict }}</span>
-    {% else %}<span class="badge wait">未验证</span>{% endif %}
+    {% else %}<span class="badge wait">{{ t('sim.rule_unproven') }}</span>{% endif %}
     {% set tf_states = states.get(r.code, {}) %}
     {% for h in horizon_options %}
       {% set s = tf_states.get(h.code) %}
       {% if s %}
-      <span class="tiny muted" title="最近验证 {{ s.validated_at[:16] }} · {{ s.symbols }} 只">
+      <span class="tiny muted" title="{{ t('rules.validated_title', at=s.validated_at[:16], n=s.symbols) }}">
         {{ h.label.split(' · ')[0] }}
         <b class="{{ 'up' if s.verdict == '有优势' else ('down' if s.verdict == '无优势' else '') }}">{{ s.verdict }}</b>
       </span>
       {% endif %}
     {% endfor %}
     <span class="spacer"></span>
-    <label class="switch" title="启用后才会产生建议">
+    <label class="switch">
       <input type="checkbox" class="rule-toggle" data-code="{{ r.code }}" {% if r.enabled %}checked{% endif %}>
       <span></span>
     </label>
   </header>
 
   <div class="advice-verdict">
-    <b>条件：</b>{{ r.summary }}
+    <b>{{ t('rules.conditions') }}</b>{{ r.summary }}
     {% if r.note %}<div class="muted" style="font-size:12px;margin-top:4px;">{{ r.note }}</div>{% endif %}
   </div>
 
@@ -87,15 +84,15 @@
   <div class="advice-figs" style="grid-template-columns: repeat({{ r.validation.folds|length }}, minmax(0,1fr));">
     {% for f in r.validation.folds %}
     <div>
-      <span class="k">第 {{ f.fold }} 折 · {{ f.n }} 笔</span>
+      <span class="k">{{ t('rules.fold', n=f.fold, trades=f.n) }}</span>
       <span class="v {{ 'up' if f.exp > 0 else 'down' }}">{{ '%+.3f' % f.exp }}R</span>
       <div class="tiny muted" style="margin-top:2px;">
-        不动持有 {{ '%+.3f' % f.bench }} · 超额
+        {{ t('rules.hold_bench') }} {{ '%+.3f' % f.bench }} · {{ t('sim.excess') }}
         <span class="{{ 'up' if f.edge > 0 else 'down' }}">{{ '%+.3f' % f.edge }}</span>
       </div>
       {% if f.pf is defined %}
       <div class="tiny muted" style="margin-top:1px;">
-        PF {{ '%.2f' | format(f.pf) }} · 回撤 {{ '%.1f' | format(f.dd) }}R · 连亏 {{ f.streak }}
+        {{ t('rules.pf_dd_streak', pf='%.2f'|format(f.pf), dd='%.1f'|format(f.dd), streak=f.streak) }}
       </div>
       {% endif %}
     </div>
@@ -105,58 +102,57 @@
 
   <footer class="advice-foot">
     <span class="deadline">
-      {% if r.last_validated %}上次验证 {{ r.last_validated[:16] }}{% else %}还没验证过{% endif %}
+      {% if r.last_validated %}{{ t('rules.last_validated') }} {{ r.last_validated[:16] }}{% else %}{{ t('rules.never_validated') }}{% endif %}
       {% if r.validation %}
         · {{ horizon_labels.get(r.validation.timeframe or 'short', r.validation.timeframe or 'short') }}
-        · {{ r.validation.symbols }} 只
-        · {{ r.validation.folds | sum(attribute='n') }} 笔
+        · {{ t('rules.symbols_n', n=r.validation.symbols) }}
+        · {{ t('rules.trades_n', n=r.validation.folds | sum(attribute='n')) }}
       {% endif %}
     </span>
-    <button class="btn sm ghost" data-validate="{{ r.code }}">验证这一条</button>
-    <button class="btn sm ghost" data-edit="{{ r.code }}">改</button>
-    <button class="btn sm ghost" data-copy="{{ r.code }}">复制一份</button>
-    {% if not r.builtin %}<button class="btn sm danger" data-del="{{ r.code }}">删除</button>{% endif %}
+    <button class="btn sm ghost" data-validate="{{ r.code }}">{{ t('rules.validate_one') }}</button>
+    <button class="btn sm ghost" data-edit="{{ r.code }}">{{ t('cost.edit') }}</button>
+    <button class="btn sm ghost" data-copy="{{ r.code }}">{{ t('rules.duplicate') }}</button>
+    {% if not r.builtin %}<button class="btn sm danger" data-del="{{ r.code }}">{{ t('cost.delete') }}</button>{% endif %}
   </footer>
 </article>
 {% endfor %}
 
 <dialog id="editor" class="modal">
   <form method="dialog" class="modal-head">
-    <h2 id="editor-title">规则编辑器</h2>
-    <button class="btn ghost sm" value="cancel">关闭</button>
+    <h2 id="editor-title">{{ t('rules.editor') }}</h2>
+    <button class="btn ghost sm" value="cancel">{{ t('journal.close') }}</button>
   </form>
   <div class="modal-body">
     <div class="grid g2" style="margin-bottom:12px;">
-      <div class="field"><label>名称</label><input id="ed-name" placeholder="我的回踩规则"></div>
-      <div class="field"><label>备注（为什么这么设计）</label><input id="ed-note" placeholder=""></div>
+      <div class="field"><label>{{ t('cost.plan_name') }}</label><input id="ed-name"></div>
+      <div class="field"><label>{{ t('rules.note') }}</label><input id="ed-note" placeholder=""></div>
     </div>
     <div class="field">
-      <label>规则 JSON</label>
+      <label>{{ t('rules.json') }}</label>
       <textarea id="ed-spec" rows="18" spellcheck="false"
         style="font-family:var(--mono);font-size:12.5px;line-height:1.7;padding:12px;width:100%;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);color:var(--ink);resize:vertical;"></textarea>
-      <span class="help">可用指标：<span class="mono" style="font-size:11px;">{{ fields | join(', ') }}</span></span>
+      <span class="help">{{ t('rules.fields') }}<span class="mono" style="font-size:11px;">{{ fields | join(', ') }}</span></span>
     </div>
     <p class="tiny" id="ed-msg" style="min-height:18px;"></p>
   </div>
   <div class="modal-foot">
-    <button class="btn ghost" id="ed-cancel">取消</button>
-    <button class="btn" id="ed-save">保存并验证</button>
+    <button class="btn ghost" id="ed-cancel">{{ t('journal.cancel') }}</button>
+    <button class="btn" id="ed-save">{{ t('rules.save_validate') }}</button>
   </div>
 </dialog>
 
 <section class="card" id="for-ai">
   <div class="card-head">
-    <h2>让别的 AI 帮你写规则</h2>
-    <span class="meta">机器可读 · 也可以直接喂给任何模型</span>
+    <h2>{{ t('rules.for_ai') }}</h2>
+    <span class="meta">{{ t('rules.for_ai_meta') }}</span>
   </div>
   <div class="card-body">
     <p class="hint" style="margin-bottom:12px;">
-      下面这段话把指标、操作符、语义、硬约束和两个范例都写进去了，粘给任何模型就能让它生成一条合规规则。
-      生成后回到上面「写一条新规则」粘贴，保存时会自动编译和验证。
+      {{ t('rules.for_ai_body') }}
     </p>
     <div class="row-actions" style="margin-top:0;margin-bottom:12px;">
-      <button class="btn sm" id="copy-prompt">复制提示词</button>
-      <a class="btn sm ghost" href="/api/rules/schema" target="_blank">查看 JSON Schema</a>
+      <button class="btn sm" id="copy-prompt">{{ t('settings.copy_prompt') }}</button>
+      <a class="btn sm ghost" href="/api/rules/schema" target="_blank">{{ t('rules.view_schema') }}</a>
       <span class="tiny" id="copy-msg"></span>
     </div>
     <pre id="ai-prompt" class="mono" style="font-size:11.5px;line-height:1.7;background:var(--surface-2);padding:14px;border-radius:9px;overflow:auto;max-height:320px;white-space:pre-wrap;">{{ ai_prompt }}</pre>
@@ -164,11 +160,10 @@
 </section>
 
 <section class="card">
-  <div class="card-head"><h2>规则怎么写</h2></div>
+  <div class="card-head"><h2>{{ t('rules.how_to_write') }}</h2></div>
   <div class="card-body">
     <p class="hint" style="margin-bottom:10px;">
-      一条规则就是「所有条件都满足才进场」。score 里的 bonus 只在条件成立时加分，
-      用来排序——分高的排前面，但不会改变「是否进场」。
+      {{ t('rules.how_to_write_body') }}
     </p>
     <pre class="mono" style="font-size:12px;line-height:1.75;background:var(--surface-2);padding:14px;border-radius:9px;overflow:auto;">{
   "code": "my_rule",
@@ -188,9 +183,7 @@
   "target": {"field": "high20"}
 }</pre>
     <p class="hint" style="margin-top:10px;">
-      操作符：<span class="mono">&gt; &gt;= &lt; &lt;= between is_true is_false</span>。
-      <span class="mono">right</span> 既可以写数字，也可以写另一个指标名（比如 <span class="mono">"high20"</span>），
-      表示两者比较。
+      {{ t('rules.operators') }}
     </p>
   </div>
 </section>

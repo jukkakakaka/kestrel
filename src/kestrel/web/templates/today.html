@@ -4,7 +4,7 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <h1>今天</h1>
+    <h1>{{ t('today.title') }}</h1>
     <div class="sub">
       {{ brief.headline }}
       {% if brief.book.count %}
@@ -16,7 +16,7 @@
     </div>
   </div>
   <div class="page-actions">
-    <a class="btn" href="/advice">看操作建议</a>
+    <a class="btn" href="/advice">{{ t('today.actions') }}</a>
     <a class="btn ghost" href="/market">{{ t('nav.market') }}</a>
   </div>
 </div>
@@ -43,9 +43,9 @@
   <div>
     <section class="card">
       <div class="card-head">
-        <h2>待办</h2>
+        <h2>{{ t('today.todo') }}</h2>
         <span class="meta">
-          {% if brief.urgent %}<b class="up">{{ brief.urgent }} 件紧急</b>{% else %}没有紧急的事{% endif %}
+          {% if brief.urgent %}<b class="up">{{ t('today.n_urgent', n=brief.urgent) }}</b>{% else %}{{ t('today.none_urgent') }}{% endif %}
         </span>
       </div>
       <div class="card-body">
@@ -68,8 +68,8 @@
           {% endfor %}
         {% else %}
           <div class="empty">
-            <strong>今天不用动手</strong>
-            没有持仓风险，也没有待处理的建议。空仓等待也是一种操作。
+            <strong>{{ t('today.quiet_title') }}</strong>
+            {{ t('today.quiet_body') }}
           </div>
         {% endif %}
       </div>
@@ -78,13 +78,13 @@
     {% if brief.positions %}
     <section class="card">
       <div class="card-head">
-        <h2>持仓</h2>
-        <a class="meta" href="/journal">全部 →</a>
+        <h2>{{ t('today.positions') }}</h2>
+        <a class="meta" href="/journal">{{ t('today.all') }}</a>
       </div>
       <div class="card-body tight">
         <table class="grid">
-          <thead><tr><th>标的</th><th class="num">现价</th><th class="num">浮动盈亏</th>
-            <th class="num">距止损</th></tr></thead>
+          <thead><tr><th>{{ t('today.col_symbol') }}</th><th class="num">{{ t('today.col_price') }}</th><th class="num">{{ t('today.col_pnl') }}</th>
+            <th class="num">{{ t('today.col_to_stop') }}</th></tr></thead>
           <tbody>
           {% for p in brief.positions %}
           <tr>
@@ -113,19 +113,19 @@
 
   <div>
     <section class="card">
-      <div class="card-head"><h2>自选行情</h2>
+      <div class="card-head"><h2>{{ t('today.watchlist') }}</h2>
         <span class="meta">{{ watch_count }} 只</span>
       </div>
       {% if items %}
       <div class="card-body tight">
         <table class="grid">
-          <thead><tr><th>代码</th><th class="num">现价</th><th class="num">涨跌</th></tr></thead>
+          <thead><tr><th>{{ t('today.col_code') }}</th><th class="num">{{ t('today.col_price') }}</th><th class="num">{{ t('today.col_change') }}</th></tr></thead>
           <tbody>
           {% for it in items %}
           <tr>
             <td><a href="/stock/{{ it.market }}/{{ it.code }}">{{ it.name }}</a>
               <div class="tiny muted mono">{{ it.code }}</div></td>
-            <td class="num mono">{% if it.price %}{{ it.price | px(it.market) }}{% else %}—{% endif %}</td>
+            <td class="num mono">{% if it.price %}{{ it.price | quote(it.market, display_currency) }}{% else %}—{% endif %}</td>
             <td class="num mono {% if it.change_pct is not none %}{{ 'up' if it.change_pct >= 0 else 'down' }}{% endif %}">
               {% if it.change_pct is not none %}{{ it.change_pct | pct }}{% else %}—{% endif %}
             </td>
@@ -135,33 +135,33 @@
         </table>
         {% if watch_count > items|length %}
         <p class="tiny muted" style="margin-top:10px;">
-          只显示前 {{ items|length }} 只，<a href="/market">去行情页看全部</a>。
+          <a href="/market">{{ t('today.more') }}</a>
         </p>
         {% endif %}
       </div>
       {% else %}
       <div class="empty">
-        <strong>还没有自选</strong>
-        在行情页输入代码就能加，比如 <span class="mono">00700</span> 或 <span class="mono">AAPL</span>。
+        <strong>{{ t('today.no_watch_title') }}</strong>
+        {{ t('today.no_watch_body') }} <span class="mono">00700</span> {{ t('today.or') }} <span class="mono">AAPL</span>。
       </div>
       {% endif %}
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>新手三步</h2></div>
+      <div class="card-head"><h2>{{ t('today.steps') }}</h2></div>
       <div class="card-body">
         <div class="step-list">
           <div class="step">
-            <h4>告诉它你有多少钱</h4>
-            <p>设置 → 通用，填本金和「单笔能亏多少」。所有股数都从这里倒推，不是拍脑袋。</p>
+            <h4>{{ t('today.step1_title') }}</h4>
+            <p>{{ t('today.step1_body') }}</p>
           </div>
           <div class="step">
-            <h4>跑一次扫描</h4>
-            <p>它会按你的周期和本金挑出符合条件的标的，并算好止损、目标和股数。</p>
+            <h4>{{ t('today.step2_title') }}</h4>
+            <p>{{ t('today.step2_body') }}</p>
           </div>
           <div class="step">
-            <h4>照做，然后回来记账</h4>
-            <p>成交后点「已买入」填真实价格和数量。台账会把计划和实际的差距算给你看。</p>
+            <h4>{{ t('today.step3_title') }}</h4>
+            <p>{{ t('today.step3_body') }}</p>
           </div>
         </div>
       </div>
@@ -169,11 +169,10 @@
 
     {% if not brief.positions and not brief.active_advice %}
     <section class="card">
-      <div class="card-head"><h2>为什么第一步是「不亏」</h2></div>
+      <div class="card-head"><h2>{{ t('today.why_title') }}</h2></div>
       <div class="card-body">
         <p class="hint" style="margin:0;">
-          一笔亏 50% 需要涨 100% 才回本。所以这个工具先帮你定止损、算仓位，
-          再谈选股——顺序反过来的人，最后大多在给券商交手续费。
+          {{ t('today.why_body') }}
         </p>
       </div>
     </section>

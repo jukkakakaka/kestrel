@@ -24,10 +24,13 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from kestrel.db.engine import connect
 from kestrel.settings import settings
 
 log = logging.getLogger(__name__)
 
+# 旧常量保留给仍按模块级路径读取的调用方（例如脚本）；实际写入一律走 paths()，
+# 因为 bridge.root 可以在设置里改。
 BRIDGE = settings.home / "bridge"
 PENDING = BRIDGE / "pending"
 DONE = BRIDGE / "done"
@@ -35,8 +38,37 @@ FAILED = BRIDGE / "failed"
 ARCHIVE = BRIDGE / "archive"
 
 
+def root() -> Path:
+    """桥目录。``bridge.root`` 为空时跟随数据目录。
+
+    浏览器版、打包版和容器版的数据目录完全不同，WorkBuddy 的定时任务
+    跑在应用外面，所以这个目录必须能被用户显式指向一个共享位置——
+    否则容器里的 `/data/bridge` 外面根本看不到。
+    """
+    from kestrel.services import config as config_service
+
+    conn = connect()
+    try:
+        configured = str(config_service.get(conn, "bridge.root", "") or "").strip()
+    finally:
+        conn.close()
+    if not configured:
+        return settings.home / "bridge"
+    return Path(configured).expanduser()
+
+
+def paths() -> dict[str, Path]:
+    base = root()
+    return {
+        "pending": base / "pending",
+        "done": base / "done",
+        "failed": base / "failed",
+        "archive": base / "archive",
+    }
+
+
 def ensure_dirs() -> None:
-    for folder in (PENDING, DONE, FAILED, ARCHIVE):
+    for folder in paths().values():
         folder.mkdir(parents=True, exist_ok=True)
 
 
@@ -48,12 +80,13 @@ def new_id(kind: str = "analyse") -> str:
 def queue(kind: str, prompt: str, payload: dict, meta: dict | None = None) -> str:
     """Write a request the agent can pick up. Returns the request id."""
     ensure_dirs()
+    folders = paths()
     request_id = new_id(kind)
     body = {
         "id": request_id,
         "kind": kind,
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        "reply_to": str(DONE / f"{request_id}.json"),
+        "reply_to": str(folders["done"] / f"{request_id}.json"),
         "instructions": prompt,
         "input": payload,
         "output_contract": (
@@ -63,7 +96,7 @@ def queue(kind: str, prompt: str, payload: dict, meta: dict | None = None) -> st
         ),
         **(meta or {}),
     }
-    (PENDING / f"{request_id}.json").write_text(
+    (folders["pending"] / f"{request_id}.json").write_text(
         json.dumps(body, ensure_ascii=False, indent=2), "utf-8"
     )
     log.info("bridge queued %s", request_id)
@@ -81,23 +114,24 @@ def _read(path: Path) -> dict | None:
 def collect(kind: str | None = None, limit: int = 20) -> list[tuple[str, dict]]:
     """Answers the agent has written since we last looked."""
     ensure_dirs()
+    folders = paths()
     out: list[tuple[str, dict]] = []
-    for path in sorted(DONE.glob("*.json")):
+    for path in sorted(folders["done"].glob("*.json")):
         if kind and not path.stem.startswith(kind):
             continue
         body = _read(path)
         if body is None:
-            path.rename(FAILED / path.name)
+            path.rename(folders["failed"] / path.name)
             continue
         # carry the original request along so the caller still has the brief
-        request = _read(PENDING / path.name) or {}
+        request = _read(folders["pending"] / path.name) or {}
         if request:
             body["_request"] = request
         out.append((path.stem, body))
-        path.rename(ARCHIVE / path.name)
-        pending = PENDING / path.name
+        path.rename(folders["archive"] / path.name)
+        pending = folders["pending"] / path.name
         if pending.exists():
-            pending.rename(ARCHIVE / pending.name)
+            pending.rename(folders["archive"] / pending.name)
         if len(out) >= limit:
             break
     return out
@@ -106,7 +140,7 @@ def collect(kind: str | None = None, limit: int = 20) -> list[tuple[str, dict]]:
 def pending_requests(kind: str | None = None) -> list[dict]:
     ensure_dirs()
     rows = []
-    for path in sorted(PENDING.glob("*.json")):
+    for path in sorted(paths()["pending"].glob("*.json")):
         if kind and not path.stem.startswith(kind):
             continue
         body = _read(path)
@@ -117,13 +151,13 @@ def pending_requests(kind: str | None = None) -> list[dict]:
 
 def pending_count() -> int:
     ensure_dirs()
-    return len(list(PENDING.glob("*.json")))
+    return len(list(paths()["pending"].glob("*.json")))
 
 
 def answer(request_id: str, body: dict) -> bool:
     """Used by the agent side (and by tests) to post a result."""
     ensure_dirs()
-    target = DONE / f"{request_id}.json"
+    target = paths()["done"] / f"{request_id}.json"
     target.write_text(json.dumps(body, ensure_ascii=False, indent=2), "utf-8")
     return True
 
@@ -141,9 +175,10 @@ def task_prompt(request: dict) -> str:
 
 
 def bridge_info() -> dict:
+    folders = paths()
     return {
-        "root": str(BRIDGE),
-        "pending_dir": str(PENDING),
-        "done_dir": str(DONE),
+        "root": str(root()),
+        "pending_dir": str(folders["pending"]),
+        "done_dir": str(folders["done"]),
         "pending": pending_count(),
     }
