@@ -119,10 +119,23 @@ jobs:
           }
           Write-Host "smoke test ok"
 
+      - name: Zip the app
+        shell: pwsh
+        run: Compress-Archive -Path dist/Kestrel -DestinationPath dist/Kestrel-windows.zip -Force
+
       - uses: actions/upload-artifact@v4
         with:
           name: Kestrel-windows
-          path: dist/Kestrel
+          path: |
+            dist/Kestrel
+            dist/Kestrel-windows.zip
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: release-assets-windows
+          path: dist/Kestrel-windows.zip
           if-no-files-found: error
 
   release:
@@ -136,9 +149,16 @@ jobs:
           name: release-assets
           path: dist
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets-windows
+          path: dist
+
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/Kestrel-*.dmg
+          files: |
+            dist/Kestrel-*.dmg
+            dist/Kestrel-windows.zip
           generate_release_notes: true
           body: |
             ### macOS
@@ -151,3 +171,15 @@ jobs:
                ```
 
             Data lives in `~/Library/Application Support/Kestrel`.
+
+            ### Windows
+
+            1. Download `Kestrel-windows.zip` and extract it anywhere.
+            2. Run `Kestrel.exe` from the folder.
+
+            Data lives in `%APPDATA%\Kestrel`.
+
+            ### First run
+
+            The app asks three questions — capital, loss per trade, and which markets you trade.
+            Nothing leaves your machine.
