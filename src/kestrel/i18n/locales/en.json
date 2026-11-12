@@ -767,5 +767,6 @@
   "welcome.risk_c": "safe",
   "welcome.risk_n": "typical",
   "welcome.risk_a": "aggressive",
-  "welcome.risk_va": "very aggressive"
+  "welcome.risk_va": "very aggressive",
+  "journal.held_days": "held {n}d"
 }

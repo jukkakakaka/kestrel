@@ -767,5 +767,6 @@
   "welcome.risk_c": "保守",
   "welcome.risk_n": "常见",
   "welcome.risk_a": "激进",
-  "welcome.risk_va": "很激进"
+  "welcome.risk_va": "很激进",
+  "journal.held_days": "持有 {n} 天"
 }

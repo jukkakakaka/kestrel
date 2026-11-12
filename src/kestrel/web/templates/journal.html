@@ -106,7 +106,7 @@
               <span class="mono">{{ p.code }}</span>
               {% if p.source == 'link' %} · 回执成交{% elif p.source == 'advice' %} · 按建议成交
               {% elif p.source == 'import' %} · 对账单导入{% endif %}
-              {% if p.held_days is not none %} · 持有 {{ p.held_days }} 天{% endif %}
+              {% if p.held_days is not none %} · {{ t('journal.held_days', n=p.held_days) }}{% endif %}
             </div>
           </td>
           <td class="num mono">{{ p.qty }}</td>
