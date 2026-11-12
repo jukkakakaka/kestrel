@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}开始使用 · {{ t('app.name') }}{% endblock %}
+{% block title %}{{ t('welcome.page_title') }} · {{ t('app.name') }}{% endblock %}
 
 {% block content %}
 <div class="welcome-wrap">
   <div class="welcome-head">
-    <img src="/static/favicon/favicon-180.png" width="56" height="56" alt="">
+    {% include "_logo.html" %}
     <h1>{{ t('welcome.title', name=t('app.name')) }}</h1>
     <p>{{ t('welcome.intro') }}</p>
   </div>
@@ -24,11 +24,11 @@
           <label>{{ t('welcome.risk') }}</label>
           <div class="risk-picks" id="w-risk">
             {% for value, label, note in [
-                ('0.5', '0.5%', '很保守'),
-                ('1', '1%', '保守'),
-                ('2', '2%', '常见'),
-                ('5', '5%', '激进'),
-                ('10', '10%', '很激进')] %}
+                ('0.5', '0.5%', t('welcome.risk_vc')),
+                ('1', '1%', t('welcome.risk_c')),
+                ('2', '2%', t('welcome.risk_n')),
+                ('5', '5%', t('welcome.risk_a')),
+                ('10', '10%', t('welcome.risk_va'))] %}
             <label class="risk-pick{% if value == '2' %} picked{% endif %}">
               <input type="radio" name="w-risk" value="{{ value }}"
                      {% if value == '2' %}checked{% endif %}>

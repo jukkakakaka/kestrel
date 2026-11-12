@@ -761,5 +761,11 @@
   "today.n_positions": "{n} position(s)",
   "today.floating": "open",
   "today.n_names": "{n} names",
-  "market.opens_in_minutes": "opens in {n}m"
+  "market.opens_in_minutes": "opens in {n}m",
+  "welcome.page_title": "Get started",
+  "welcome.risk_vc": "very safe",
+  "welcome.risk_c": "safe",
+  "welcome.risk_n": "typical",
+  "welcome.risk_a": "aggressive",
+  "welcome.risk_va": "very aggressive"
 }
