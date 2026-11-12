@@ -13,7 +13,7 @@
       {% endif %}
       {{ engine.label }}{% if engine.model and engine.model != 'workbuddy' %} · {{ engine.model }}{% endif %}
       {% if engine.pending %} · 队列 {{ engine.pending }} 条待处理{% endif %}
-      {% if not auto %} · 自动运行已关闭（每次都要手动点）{% endif %}
+      {% if not auto %} · {{ t('adv.manual_only') }}{% endif %}
     </div>
   </div>
   <div class="page-actions">
@@ -81,7 +81,7 @@
       <details {% if not horizon.pinned %}open{% endif %} style="margin-top:10px;">
         <summary>{{ t('horizon.why') }}</summary>
         <ul style="margin:8px 0 0;padding-left:18px;line-height:1.85;font-size:13px;">
-          {% for r in adv.reasons %}<li>{{ r.zh }}</li>{% endfor %}
+          {% for r in adv.reasons %}<li>{{ r.en if locale.startswith('en') and r.en else r.zh }}</li>{% endfor %}
         </ul>
         <p class="muted" style="font-size:12px;margin-top:8px;">
           {{ t('horizon.score') }}：
@@ -171,7 +171,14 @@
         </span>
       </header>
 
-      <div class="advice-verdict">{{ r.headline }}</div>
+      <div class="advice-verdict">
+        {% if locale.startswith('en') and r.status != 'skipped' %}
+          Buy between {{ r.entry_low | cur(r.currency) }} and {{ r.entry_high | cur(r.currency) }};
+          exit below {{ r.stop | cur(r.currency) }}; first target {{ r.target1 | cur(r.currency) }}.
+        {% else %}
+          {{ r.headline }}
+        {% endif %}
+      </div>
 
       <div class="advice-figs">
         <div><span class="k">{{ t('adv.entry') }}</span><span class="v">{{ r.entry_low | cur(r.currency) }} – {{ r.entry_high | cur(r.currency) }}</span></div>
@@ -182,15 +189,19 @@
         <div><span class="k">{{ t('adv.risk') }}</span><span class="v down">{{ r.risk_amount | cur(r.currency) }}{% if r.currency != 'CNY' %}<small class="muted" style="font-weight:400;"> ≈ {{ r.risk_amount | cny(r.currency) }}</small>{% endif %}</span></div>
       </div>
 
-      {% if ui.learning and r.learn_zh %}
+      {% set learn_text = r.learn_en if locale.startswith('en') and r.learn_en else r.learn_zh %}
+      {% if ui.learning and learn_text %}
       <div class="advice-body">
         <details {% if recs|length <= 3 %}open{% endif %}>
           <summary>{{ t('adv.learn') }}</summary>
           <div class="learn">
-            {% for line in r.learn_zh.split('\n') %}
+            {% for line in learn_text.split('\n') %}
               {% if '：' in line %}
                 <h4>{{ line.split('：')[0] }}</h4>
                 <p>{{ line.split('：', 1)[1] }}</p>
+              {% elif ': ' in line %}
+                <h4>{{ line.split(': ')[0] }}</h4>
+                <p>{{ line.split(': ', 1)[1] }}</p>
               {% elif line.strip() %}
                 <p>{{ line }}</p>
               {% endif %}

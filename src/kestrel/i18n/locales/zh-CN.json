@@ -768,5 +768,6 @@
   "welcome.risk_n": "常见",
   "welcome.risk_a": "激进",
   "welcome.risk_va": "很激进",
-  "journal.held_days": "持有 {n} 天"
+  "journal.held_days": "持有 {n} 天",
+  "adv.manual_only": "自动运行已关闭（每次都要手动点）"
 }

@@ -41,12 +41,22 @@ ACTION_WATCH = "watch"
 ACTION_AVOID = "avoid"
 
 
-def _headline_zh(action: str, plan, ind: dict, name: str) -> str:
+def _headline(action: str, plan, ind: dict, name: str, locale: str = "zh-CN") -> tuple[str, str]:
+    """一句话结论，中英各一份。
+
+    库里的 headline 是单列，谁先写入就是谁 —— 英文用户会看到中文句子。
+    这里同时生成两种，模板按当前语言取，避免再出现「英文界面夹中文」。
+    """
     if plan is None:
-        return "现在不需要动手，等条件变好。"
+        return (
+            "现在不需要动手，等条件变好。",
+            "Nothing to do right now; wait for the setup to improve.",
+        )
     return (
         f"在 {plan.entry_low:.2f}–{plan.entry_high:.2f} 之间买入，"
-        f"跌破 {plan.stop:.2f} 卖出认错，先看 {plan.target1:.2f}。"
+        f"跌破 {plan.stop:.2f} 卖出认错，先看 {plan.target1:.2f}。",
+        f"Buy between {plan.entry_low:.2f} and {plan.entry_high:.2f}; "
+        f"exit below {plan.stop:.2f}; first target {plan.target1:.2f}.",
     )
 
 
@@ -54,6 +64,17 @@ STRATEGY_NAME = {
     "trend_pullback": "趋势回踩",
     "breakout_20": "20 日突破",
     "mean_reversion": "超跌反弹",
+}
+STRATEGY_NAME_EN = {
+    "trend_pullback": "trend pullback",
+    "breakout_20": "20-day breakout",
+    "mean_reversion": "oversold bounce",
+}
+
+HOLD_EN = {
+    "short": "usually held for days to a few weeks",
+    "medium": "usually held for weeks to a couple of months",
+    "long": "usually held for months, managed on monthly bars",
 }
 
 _ROMAN = ("Ⅰ", "Ⅱ", "Ⅲ", "Ⅳ", "Ⅴ")
@@ -74,21 +95,34 @@ HOLD_ZH = {
 }
 
 
-def _learn_zh(plan, ind: dict, signal, risk_share: float, horizon: str = "short") -> str:
+def _learn(plan, ind: dict, signal, risk_share: float, horizon: str = "short") -> tuple[str, str]:
+    """学习模式的解释，中英各一份。"""
     if plan is None:
         return (
             "这是什么：现在不需要动手。\n"
             "为什么不做：价格形态或风险回报不满足进场条件，硬做等于赌。\n"
-            "如果硬做会怎样：止损位不好找，亏的钱会比赚的多。"
+            "如果硬做会怎样：止损位不好找，亏的钱会比赚的多。",
+            "What this is: nothing to do right now.\n"
+            "Why not: the setup or the reward does not clear the entry rules; forcing it is gambling.\n"
+            "If forced: the stop is hard to place, so the loss ends up bigger than the win.",
         )
     risk_pct = float((plan.entry_low - plan.stop) / plan.entry_low * 100)
     name = STRATEGY_NAME.get(signal.code, "当前策略")
-    return (
+    name_en = STRATEGY_NAME_EN.get(signal.code, signal.code)
+    last = float(ind.get("last") or 0)
+    zh = (
         f"这是什么：一笔做多（先买后卖）的计划，{HOLD_ZH.get(horizon, HOLD_ZH['short'])}。\n"
-        f"为什么现在做：「{name}」在 {float(ind.get('last') or 0):.2f} 附近给出信号。\n"
+        f"为什么现在做：「{name}」在 {last:.2f} 附近给出信号。\n"
         f"如果错了会怎样：跌破 {plan.stop:.2f}（约 −{risk_pct:.1f}%）就卖，"
         f"这一笔最多亏 {plan.risk_amount:.2f}，占你总资金约 {risk_share:.1f}%。"
     )
+    en = (
+        f"What this is: a long plan, {HOLD_EN.get(horizon, HOLD_EN['short'])}.\n"
+        f"Why now: “{name_en}” fired near {last:.2f}.\n"
+        f"If wrong: sell below {plan.stop:.2f} (about −{risk_pct:.1f}%). "
+        f"The most this trade loses is {plan.risk_amount:.2f}, about {risk_share:.1f}% of capital."
+    )
+    return zh, en
 
 
 def _used_exposure_cny() -> Decimal:
@@ -432,9 +466,11 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
                     plan.valid_until, json.dumps(plan.invalidation),
                     plan.explain_zh, plan.explain_en,
                     ACTION_BUY,
-                    _headline_zh(ACTION_BUY, plan, ind, sym["name"]),
-                    _learn_zh(plan, ind, best, risk_share, horizon.code),
-                    "",
+                    _headline(ACTION_BUY, plan, ind, sym["name"])[0],
+                    _learn(plan, ind, best, risk_share, horizon.code)[0],
+                    _learn(plan, ind, best, risk_share, horizon.code)[1].replace(
+                        "\n", "\n"
+                    ),
                     horizon.code,
                 ),
             )

@@ -684,7 +684,7 @@ def create_app() -> FastAPI:
         in_force = requested if pinned else (advice or {}).get("horizon") or timeframe.DEFAULT
         from kestrel.services import engine as engine_service
 
-        engine_info = engine_service.status()
+        engine_info = engine_service.status().localised(_locale(request))
 
         next_run = None
         if auto and last and last.get("finished_at"):
@@ -1314,7 +1314,7 @@ def create_app() -> FastAPI:
         report = {
             "ok": True,
             "rules": _translated_rules(request, rule_service.all_rules()),
-            "engine": engine_service.status(),
+            "engine": engine_service.status().localised(_locale(request)),
         }
         report["symbols"] = len({r["code"] for r in report["rules"]})
         validated = [r for r in report["rules"] if r.get("validation")]
@@ -1699,10 +1699,10 @@ def create_app() -> FastAPI:
         return await engine_service.run(markets=(body or {}).get("markets"))
 
     @app.get("/api/engine", response_class=JSONResponse)
-    async def api_engine():
+    async def api_engine(request: Request):
         from kestrel.services import engine as engine_service
 
-        return {"ok": True, "engine": engine_service.status().as_dict()}
+        return {"ok": True, "engine": engine_service.status().localised(_locale(request)).as_dict()}
 
     @app.post("/api/analyst/ingest", response_class=JSONResponse)
     async def api_analyst_ingest():
