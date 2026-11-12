@@ -329,9 +329,20 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
     templates = _templates()
 
+    def _locale(request: Request) -> str:
+        """当前语言。查询参数优先于 cookie——分享链接、截图脚本、以及
+        「临时看另一种语言」都需要一个不用改 cookie 的入口。"""
+        query_locale = request.query_params.get("locale")
+        if query_locale:
+            return query_locale if query_locale in available_locales() else "zh-CN"
+        return request.cookies.get("locale") or "zh-CN"
+
     def _ctx(request: Request, **extra):
-        locale = request.cookies.get("locale") or "zh-CN"
-        theme = request.cookies.get("theme") or "auto"
+        locale = _locale(request)
+        query_theme = request.query_params.get("theme")
+        theme = query_theme or request.cookies.get("theme") or "auto"
+        if query_theme not in ("auto", "light", "dark"):
+            theme = "auto"
         return {
             "t": lambda key, **kw: translate(locale, key, **kw),
             "locale": locale,
@@ -415,7 +426,7 @@ def create_app() -> FastAPI:
             return RedirectResponse("/welcome", status_code=303)
 
         try:
-            brief = today_service.briefing(request.cookies.get("locale") or "zh-CN")
+            brief = today_service.briefing(_locale(request))
         except Exception as exc:  # noqa: BLE001
             log.warning("today briefing failed: %s", exc)
             brief = {"todos": [], "urgent": 0, "headline": "暂时算不出来",
@@ -453,7 +464,7 @@ def create_app() -> FastAPI:
                 brief=brief,
                 items=[dict(r) for r in rows],
                 watch_count=watch_count,
-                markets=calendar_service.all_status(enabled),
+                markets=calendar_service.all_status(enabled, _locale(request)),
                 display_currency=_display_currency(),
             ),
         )
@@ -489,7 +500,7 @@ def create_app() -> FastAPI:
             context=_ctx(
                 request,
                 items=[dict(r) for r in rows],
-                markets=calendar_service.all_status(enabled),
+                markets=calendar_service.all_status(enabled, _locale(request)),
                 enabled_markets=enabled,
                 display_currency=_display_currency(),
             ),
@@ -708,13 +719,13 @@ def create_app() -> FastAPI:
                     "requested": requested,
                     "pinned": pinned,
                     "in_force": in_force,
-                    "label": timeframe.label(in_force, request.cookies.get("locale") or "zh-CN"),
+                    "label": timeframe.label(in_force, _locale(request)),
                     "beta": timeframe.get(in_force).beta,
                     "advice": advice or {},
-                    "options": timeframe.options(request.cookies.get("locale") or "zh-CN"),
+                    "options": timeframe.options(_locale(request)),
                     "labels": {
                         item["code"]: item["label"]
-                        for item in timeframe.options(request.cookies.get("locale") or "zh-CN")
+                        for item in timeframe.options(_locale(request))
                     },
                 },
             ),
@@ -1037,7 +1048,7 @@ def create_app() -> FastAPI:
                 presets=preset_service.PRESETS,
                 channels=channel_service.all_channels(),
                 pool=universe_service.pool_summary(),
-                horizon_options=timeframe.options(request.cookies.get("locale") or "zh-CN"),
+                horizon_options=timeframe.options(_locale(request)),
                 prompts=prompt_service.prompts(),
                 about=updates_service.info(),
                 update=updates_service.cached() or {},
@@ -1138,7 +1149,7 @@ def create_app() -> FastAPI:
                          book=position_service.summary(open_positions),
                          quality=quality,
                          lesson=execution.lesson(
-                             quality, request.cookies.get("locale") or "zh-CN"
+                             quality, _locale(request)
                          ),
                          pnl=journal.pnl),
         )
@@ -1331,7 +1342,7 @@ def create_app() -> FastAPI:
         # 试跑必须能跑任意标的，而且策略下拉要列出**全部**规则——
         # 早先这里写死了三条策略的标签，用户自建或后来新增的规则根本选不到。
         rules = report["rules"]
-        locale = request.cookies.get("locale") or "zh-CN"
+        locale = _locale(request)
 
         def rule_name(item: dict) -> str:
             # 规则名是数据，但同时有 i18n 词条；有词条就按语言显示，
@@ -1520,7 +1531,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/glossary", response_class=JSONResponse)
     async def api_glossary(request: Request):
-        locale = request.cookies.get("locale") or "zh-CN"
+        locale = _locale(request)
         zh = locale.startswith("zh")
         conn = connect()
         try:
@@ -1602,12 +1613,12 @@ def create_app() -> FastAPI:
                 bars=bars[-60:],
                 chart=chart,
                 ind=ind,
-                status=calendar_service.status(market),
+                status=calendar_service.status(market, _locale(request)),
             ),
         )
 
     @app.get("/api/market-status", response_class=JSONResponse)
-    async def api_market_status():
+    async def api_market_status(request: Request):
         from kestrel.services import calendar as calendar_service
         from kestrel.services import config as config_service
 
@@ -1629,7 +1640,7 @@ def create_app() -> FastAPI:
                     "local_time": s.local_time,
                     "seconds_to_open": s.seconds_to_open,
                 }
-                for s in calendar_service.all_status(enabled)
+                for s in calendar_service.all_status(enabled, _locale(request))
             ],
         }
 
@@ -1729,7 +1740,7 @@ def create_app() -> FastAPI:
     # ---------------------------------------------------------------- rules
 
     def _translated_rules(request: Request, rules: list[dict]) -> list[dict]:
-        locale = request.cookies.get("locale") or "zh-CN"
+        locale = _locale(request)
         out = []
         for item in rules:
             row = dict(item)
@@ -1758,10 +1769,10 @@ def create_app() -> FastAPI:
                 ai_prompt=prompt_for_ai(),
                 engine=engine_service.status(),
                 states=rule_service.timeframe_states(),
-                horizon_options=timeframe.options(request.cookies.get("locale") or "zh-CN"),
+                horizon_options=timeframe.options(_locale(request)),
                 horizon_labels={
                     item["code"]: item["label"]
-                    for item in timeframe.options(request.cookies.get("locale") or "zh-CN")
+                    for item in timeframe.options(_locale(request))
                 },
             ),
         )

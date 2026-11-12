@@ -1,0 +1,11 @@
+{# 顶栏标记：内联 SVG，颜色走 CSS 变量。
+
+   用 <img src="logo.svg"> 时，SVG 里的 prefers-color-scheme 只看操作系统，
+   而应用里的深色是由 data-mode 属性控制的——用户手动切深色时图标不会跟着变。
+   内联之后 fill 直接取变量，主题切换、系统切换走的是同一条路。 #}
+<svg class="brand-mark" viewBox="0 0 1024 1024" width="{{ size|default(25) }}" height="{{ size|default(25) }}" role="img" aria-label="Kestrel">
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="var(--logo-tile)"/>
+  <polygon points="779.8,512.0 318.4,315.9 318.4,419.7" fill="var(--logo-f1)"/>
+  <polygon points="779.8,512.0 318.4,460.1 318.4,563.9" fill="var(--logo-f2)"/>
+  <polygon points="779.8,512.0 318.4,604.3 318.4,708.1" fill="var(--logo-f3)"/>
+</svg>

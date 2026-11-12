@@ -108,6 +108,8 @@ if sys.platform == "darwin":
             "CFBundleDisplayName": "Kestrel",
             "CFBundleExecutable": "Kestrel",
             "CFBundleShortVersionString": VERSION,
+            # macOS 13+ 用 Assets.car 里的深浅色 AppIcon；icns 只是回退。
+            "CFBundleIconName": "AppIcon",
             "CFBundleVersion": VERSION,
             "LSMinimumSystemVersion": "11.0",
             "LSApplicationCategoryType": "public.app-category.finance",

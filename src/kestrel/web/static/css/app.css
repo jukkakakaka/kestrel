@@ -29,6 +29,11 @@
   --shadow-1: 0 1px 2px rgba(15, 20, 32, .04);
   --shadow-2: 0 6px 24px rgba(15, 20, 32, .07);
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  /* 品牌标记：与应用图标的浅色版本完全一致 */
+  --logo-tile: #ffffff;
+  --logo-f1: #16305C;
+  --logo-f2: #1E63D8;
+  --logo-f3: #0E9E8E;
 }
 
 [data-mode="dark"] {
@@ -53,6 +58,11 @@
   --warn-line: #3a2d17;
   --shadow-1: 0 1px 2px rgba(0, 0, 0, .4);
   --shadow-2: 0 8px 32px rgba(0, 0, 0, .45);
+  /* 深色主题下用深色底 + 亮色羽毛，与深色应用图标一致 */
+  --logo-tile: #1d2431;
+  --logo-f1: #ffffff;
+  --logo-f2: #9cc2ff;
+  --logo-f3: #4fd9c8;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -101,6 +111,11 @@ a:hover { text-decoration: underline; }
 }
 
 .brand { display: flex; align-items: center; gap: 9px; color: var(--ink); flex: 0 0 auto; }
+.brand-mark { display: block; border-radius: 5px; }
+[data-mode="dark"] .brand-mark rect:first-child {
+  /* 深色顶栏上白底方块太扎眼，用一档更暗的底并在边缘留一点内描边 */
+  stroke: rgba(255,255,255,.14); stroke-width: 8;
+}
 .brand:hover { text-decoration: none; }
 .brand img { display: block; }
 .brand-name { font-size: 15.5px; font-weight: 650; letter-spacing: -.2px; }

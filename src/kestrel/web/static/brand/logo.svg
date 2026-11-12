@@ -1,10 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 300" width="1180" height="300" role="img" aria-label="Kestrel 隼">
   <title>Kestrel 隼</title>
-  <desc>Kestrel wordmark with the three-feather wing mark.</desc>
-  <g transform="translate(20,22)">
-    <path d="M208 128 L48 60 L48 96 Z" fill="#16305C"/>
-    <path d="M208 128 L48 110 L48 146 Z" fill="#1E63D8"/>
-    <path d="M208 128 L48 160 L48 196 Z" fill="#0E9E8E"/>
+  <g transform="translate(20,22) scale(1.0)">
+    <polygon points="779.8,512.0 318.4,315.9 318.4,419.7" fill="#16305C"/>
+    <polygon points="779.8,512.0 318.4,460.1 318.4,563.9" fill="#1E63D8"/>
+    <polygon points="779.8,512.0 318.4,604.3 318.4,708.1" fill="#0E9E8E"/>
   </g>
   <text x="330" y="196" font-family="Helvetica Neue,Helvetica,Arial,sans-serif" font-size="150" font-weight="800" font-style="italic" letter-spacing="-5" fill="#16305C">Kestrel</text>
   <text x="852" y="192" font-family="PingFang SC,Microsoft YaHei,sans-serif" font-size="128" font-weight="700" fill="#16305C">隼</text>

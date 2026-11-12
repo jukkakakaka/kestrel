@@ -35,7 +35,7 @@
     <div class="state">
       {{ m.label }} · {{ t('market.local_time') }} {{ m.local_time }}
       {% if m.state != 'open' and m.seconds_to_open %}
-        · {{ t('market.opens_in_hours', n=(m.seconds_to_open // 3600)) }}
+        · {{ t('market.opens_in_minutes', n=(m.seconds_to_open // 60)) if m.seconds_to_open < 3600 else t('market.opens_in_hours', n=(m.seconds_to_open // 3600)) }}
       {% endif %}
     </div>
   </div>

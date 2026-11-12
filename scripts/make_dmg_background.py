@@ -98,9 +98,12 @@ def main() -> int:
     _feather(img, LOGICAL_W - 58, 170, 1.0, 9)
 
     # ---- 顶部品牌区（y 26–78）----
-    mark = Image.open(ROOT / "assets" / "brand" / "png" / "logo-mark-512.png").convert("RGBA")
-    mark = mark.resize((64, 64), Image.LANCZOS)
-    img.alpha_composite(mark, (int(LOGICAL_W / 2 * SCALE - 32), 26 * SCALE))
+    # 用 macos 应用图标本身，而不是另画的羽毛：安装窗口里看到的标必须和
+    # 用户拖进 Applications 后 Dock 里出现的那个一模一样。
+    mark = Image.open(ROOT / "packaging" / "icon.png").convert("RGBA")
+    # 图标自带 9.8% 的透明边距，缩到 64 时实际图形只剩 50 左右，看着太小。
+    mark = mark.resize((104, 104), Image.LANCZOS)
+    img.alpha_composite(mark, (int(LOGICAL_W / 2 * SCALE - 52), 18 * SCALE))
 
     draw.text(
         _pt(LOGICAL_W / 2, 108),

@@ -126,30 +126,44 @@ _LABELS = {
     "holiday": "休市",
 }
 
+_LABELS_EN = {
+    "open": "Open",
+    "break": "Lunch break",
+    "pre": "Pre-open",
+    "after": "Closed",
+    "closed": "Weekend",
+    "holiday": "Holiday",
+}
 
-def status(market: str) -> MarketStatus:
+_NAMES_EN = {"CN": "A-shares", "HK": "Hong Kong", "US": "US"}
+
+
+def status(market: str, locale: str = "zh-CN") -> MarketStatus:
     market = market.upper()
     tz = ZoneInfo(MARKET_TZ.get(market, "UTC"))
     now = datetime.now(tz)
     state, _next = _session_state(market, now)
     nxt = _next_open(market, now)
+    english = str(locale).lower().startswith("en")
     return MarketStatus(
         market=market,
-        name=MARKET_NAME.get(market, market),
+        name=(_NAMES_EN if english else MARKET_NAME).get(market, market),
         state=state,
-        label=_LABELS.get(state, state),
+        label=(_LABELS_EN if english else _LABELS).get(state, state),
         local_time=now.strftime("%H:%M"),
         next_open=nxt,
         seconds_to_open=max(0, int((nxt - now).total_seconds())),
     )
 
 
-def all_status(markets: list[str] | None = None) -> list[MarketStatus]:
+def all_status(
+    markets: list[str] | None = None, locale: str = "zh-CN"
+) -> list[MarketStatus]:
     """开市状态。只返回请求的市场，没开启的市场不该出现在页面上。"""
     wanted = markets or ["CN", "HK", "US"]
     order = {"CN": 0, "HK": 1, "US": 2}
     codes = sorted({str(m).upper() for m in wanted}, key=lambda m: order.get(m, 9))
-    return [status(m) for m in codes]
+    return [status(m, locale) for m in codes]
 
 
 def next_session_close(market: str) -> str:

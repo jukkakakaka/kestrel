@@ -1,7 +1,31 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Kestrel">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Kestrel">
   <title>Kestrel</title>
-  <desc>Three feathers fanning from one point: a wing, and a forward strike.</desc>
-  <path d="M208 128 L48 60 L48 96 Z" fill="#16305C"/>
-  <path d="M208 128 L48 110 L48 146 Z" fill="#1E63D8"/>
-  <path d="M208 128 L48 160 L48 196 Z" fill="#0E9E8E"/>
+  <defs>
+    <linearGradient id="tileLight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e2ebf8"/>
+    </linearGradient>
+    <linearGradient id="tileDark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#262e3c"/>
+      <stop offset="100%" stop-color="#0d1117"/>
+    </linearGradient>
+  </defs>
+  <style>
+    .light { display: inline; } .dark { display: none; }
+    @media (prefers-color-scheme: dark) {
+      .light { display: none; } .dark { display: inline; }
+    }
+  </style>
+  <g class="light">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tileLight)"/>
+    <polygon points="779.8,512.0 318.4,315.9 318.4,419.7" fill="#16305C"/>
+    <polygon points="779.8,512.0 318.4,460.1 318.4,563.9" fill="#1E63D8"/>
+    <polygon points="779.8,512.0 318.4,604.3 318.4,708.1" fill="#0E9E8E"/>
+  </g>
+  <g class="dark">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tileDark)"/>
+    <polygon points="779.8,512.0 318.4,315.9 318.4,419.7" fill="#FFFFFF"/>
+    <polygon points="779.8,512.0 318.4,460.1 318.4,563.9" fill="#9CC2FF"/>
+    <polygon points="779.8,512.0 318.4,604.3 318.4,708.1" fill="#4FD9C8"/>
+  </g>
 </svg>

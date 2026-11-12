@@ -44,25 +44,12 @@ command -v uv >/dev/null || { echo "uv is required: https://docs.astral.sh/uv/" 
 echo "==> Kestrel ${VERSION}"
 
 # --- icon ------------------------------------------------------------------
-# .icns is a container of fixed-size PNGs; sips resizes, iconutil packs.
-if [[ ! -f packaging/icon.png || packaging/icon.png -ot scripts/make_icon.py ]]; then
-  echo "==> generating app icon"
-  uv run python scripts/make_icon.py
-fi
-if [[ ! -f packaging/icon.icns || packaging/icon.png -nt packaging/icon.icns ]]; then
-  echo "==> generating icon.icns"
-  TMP="$(mktemp -d)"
-  ICONSET="$TMP/Kestrel.iconset"
-  mkdir -p "$ICONSET"
-  for size in 16 32 128 256 512; do
-    sips -z "$size" "$size" packaging/icon.png --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
-    double=$((size * 2))
-    sips -z "$double" "$double" packaging/icon.png --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
-  done
-  iconutil -c icns "$ICONSET" -o packaging/icon.icns
-  rm -rf "$TMP"
+# 所有图标都从 scripts/brand.py 一处定义生成，网页、README、Dock 看到的是同一个标。
+if [[ ! -f packaging/icon.png || packaging/icon.png -ot scripts/brand.py ]]; then
+  echo "==> generating brand assets"
+  uv run python scripts/make_brand_assets.py
 else
-  echo "==> icon.icns up to date"
+  echo "==> brand assets up to date"
 fi
 
 # --- dependencies ----------------------------------------------------------
@@ -81,6 +68,32 @@ echo "==> running PyInstaller (this takes a minute)"
 uv run pyinstaller packaging/pyinstaller/kestrel.spec --noconfirm --log-level WARN
 
 [[ -d "$APP" ]] || { echo "build produced no $APP" >&2; exit 1; }
+
+# --- dark-mode icon --------------------------------------------------------
+# macOS 13+ 才能让 Dock 图标跟随系统深浅色：把 AppIcon.appiconset 编译成
+# Assets.car 放进 Resources，Info.plist 里的 CFBundleIconName 指向它。
+# actool 需要完整的 Xcode；没装时回退到 .icns（只有浅色），而不是构建失败。
+if [[ -d packaging/Assets.xcassets ]]; then
+  echo "==> compiling icon asset catalog"
+  ACTOOL="$(xcrun --find actool 2>/dev/null || true)"
+  if [[ -n "$ACTOOL" ]]; then
+    ASSET_TMP="$(mktemp -d)"
+    if "$ACTOOL" packaging/Assets.xcassets \
+        --compile "$ASSET_TMP" \
+        --platform macosx \
+        --minimum-deployment-target 13.0 \
+        --app-icon AppIcon \
+        --output-partial-info-plist "$ASSET_TMP/partial.plist" >/dev/null 2>&1; then
+      cp "$ASSET_TMP/Assets.car" "$APP/Contents/Resources/Assets.car"
+      echo "    Assets.car installed"
+    else
+      echo "    actool failed; falling back to the static .icns" >&2
+    fi
+    rm -rf "$ASSET_TMP"
+  else
+    echo "    Xcode command line tools without actool; using the static .icns"
+  fi
+fi
 
 # --- sign ------------------------------------------------------------------
 # --deep is deprecated for real distribution but correct for an ad-hoc seal of a
@@ -124,11 +137,6 @@ if [[ "$WANT_DMG" == "1" ]]; then
   if [[ ! -f packaging/dmg-background.png || packaging/dmg-background.png -ot scripts/make_dmg_background.py ]]; then
     echo "==> generating dmg background"
     uv run python scripts/make_dmg_background.py
-  fi
-  # 图标同理：脚本改了就要重新生成，否则发出去的是旧脸
-  if [[ ! -f packaging/icon.png || packaging/icon.png -ot scripts/make_icon.py ]]; then
-    echo "==> generating app icon"
-    uv run python scripts/make_icon.py
   fi
 
   uv run dmgbuild -s packaging/macos/dmg_settings.py \

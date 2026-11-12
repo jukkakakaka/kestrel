@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}今天 · {{ t('app.name') }}{% endblock %}
+{% block title %}{{ t('today.title') }} · {{ t('app.name') }}{% endblock %}
 
 {% block content %}
 <div class="page-head">
@@ -8,9 +8,9 @@
     <div class="sub">
       {{ brief.headline }}
       {% if brief.book.count %}
-        · 持仓 {{ brief.book.count }} 笔
+        · {{ t('today.n_positions', n=brief.book.count) }}
         {% if brief.book.pnl_pct is not none %}
-          · 浮动 <b class="{{ 'up' if brief.book.pnl_pct >= 0 else 'down' }}">{{ '%+.2f'|format(brief.book.pnl_pct) }}%</b>
+          · {{ t('today.floating') }} <b class="{{ 'up' if brief.book.pnl_pct >= 0 else 'down' }}">{{ '%+.2f'|format(brief.book.pnl_pct) }}%</b>
         {% endif %}
       {% endif %}
     </div>
@@ -30,9 +30,9 @@
       <span class="tag tag-{{ m.market|lower }}">{{ m.market }}</span>
     </div>
     <div class="state">
-      {{ m.label }} · 当地 {{ m.local_time }}
+      {{ m.label }} · {{ t('market.local_time') }} {{ m.local_time }}
       {% if m.state != 'open' and m.seconds_to_open %}
-        · {{ (m.seconds_to_open // 3600) }} 小时后开盘
+        · {{ t('market.opens_in_minutes', n=(m.seconds_to_open // 60)) if m.seconds_to_open < 3600 else t('market.opens_in_hours', n=(m.seconds_to_open // 3600)) }}
       {% endif %}
     </div>
   </div>
@@ -114,7 +114,7 @@
   <div>
     <section class="card">
       <div class="card-head"><h2>{{ t('today.watchlist') }}</h2>
-        <span class="meta">{{ watch_count }} 只</span>
+        <span class="meta">{{ t('today.n_names', n=watch_count) }}</span>
       </div>
       {% if items %}
       <div class="card-body tight">

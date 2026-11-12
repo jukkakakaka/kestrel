@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/brand/png/logo-mark-1024.png" width="84" alt="Kestrel">
+<img src="assets/brand/png/logo-mark-1024.png" width="96" alt="Kestrel">
 
 <h1>Kestrel</h1>
 
@@ -35,38 +35,54 @@ the position until it is closed.
 
 Multiple markets and multiple frequencies are the point, not a feature list: A-shares and Hong
 Kong trade in lots and charge stamp duty, the US trades single shares; a swing trader and a
-position trader need different stop widths, plan lifetimes and time limits. Those settings
-change every number the tool produces.
+position trader need different stop widths, plan lifetimes and time limits.
 
-## Three-minute start
+## Never bought a stock before? Start here
 
-**Install** (macOS, Apple Silicon and Intel)
+You do not need the theory first. Do these four steps once and you will have run a complete trade.
 
-Grab `Kestrel-*.dmg` from [releases](https://github.com/jukkakakaka/kestrel/releases) and drag it
-into Applications. The bundle is ad-hoc signed, so clear the quarantine flag once:
+**Step 1 — tell it how much you have** (one minute)
 
-```bash
-xattr -dr com.apple.quarantine /Applications/Kestrel.app
-open /Applications/Kestrel.app
-```
+The first run asks three questions: capital, loss per trade, and which markets you trade.
 
-**The first run asks three questions**: capital, loss per trade, and which markets you trade.
-The last one decides what gets scanned — a market you switch off disappears from every page.
+- **Capital** is only used for sizing. Enter a number you could genuinely afford to lose.
+- **Loss per trade** defaults to 2%. With 50,000 capital that is at most 1,000 per trade.
+  Beginners should stay at 1–2%.
+- **Markets**: anything you switch off disappears from every page.
 
-**Then**:
+> Why ask this first? The share count is not a guess. It is derived:
+> `money you can lose ÷ stop distance per share = shares to buy`. Doing it the other way round
+> — deciding the share count first — is the classic beginner mistake.
 
-1. *Advice* → *Start scan*.
-2. Qualified setups appear as cards: entry band, stop, target, share count, reward-to-risk,
-   worst-case loss in money.
-3. Place the order in your broker app, then press *I bought it* and enter **the real fill price
-   and quantity**.
-4. *Today* keeps telling you which position is near its stop, which advice is about to expire,
-   and when to sell.
+**Step 2 — run a scan** (ten seconds)
 
-> A rejected setup is information too. The page names the reason — *"one lot already exceeds your
-> risk budget"*, *"stop distance of 22% is too wide"* — instead of pretending nothing came up.
+*Advice* → *Start scan*. Qualified setups appear as cards:
 
-<img src="docs/screenshots/advice.en.png" width="900" alt="Advice: entry band, stop, target, size, reward-to-risk, worst-case loss">
+| On the card | What it means |
+| :--- | :--- |
+| Entry band | Any fill inside it counts as following the plan; no need to wait for the low |
+| Stop | The admission price. Below it you sell, you do not wait for a bounce |
+| Target | Where the plan takes profit |
+| Shares | Derived from your capital and risk, not a suggestion to "go big" |
+| Reward-to-risk | How many times the risk the reward is. Below 1.5 the plan is rejected |
+| Worst case | The most this trade can lose |
+
+When nothing qualifies it **says so**, and explains why (score too low / one lot exceeds the budget /
+stop distance too wide). "Do not trade today" is a result.
+
+**Step 3 — place it in your broker app, then record it**
+
+Press *I bought it* and enter the **real fill price and quantity**. Advice said buy 100 at
+400–404, you got 60 filled at 402.5 — record 60 at 402.5. The journal records facts.
+
+**Step 4 — open Today each day**
+
+The home page only lists things to do:
+
+- a position near its stop → **sell**
+- a position at +1R → **move the stop to break-even**
+- advice about to expire → decide now
+- nothing at all → **nothing to do today**
 
 ## Selling is the main event
 
@@ -99,12 +115,12 @@ scan → advice (entry / stop / target / qty / fees / expiry)
      → close (partial closes allowed) → execution quality: follow rate, drift in R
 ```
 
-- Advice said buy 100 at 400–404. You got 60 filled at 402.5 — record 60 at 402.5. The journal
-  marks it partial, and execution quality counts it as *planned 100 / actual 60*.
 - Sells can be partial. Each sell closes the oldest position first (FIFO); the original entry row
   is never rewritten.
 - Paid 0.5R above plan and the quality page says so: *"that ate half your stop distance."*
 - Not following the plan is recorded too. A low follow rate is a signal, not a sin.
+
+<img src="docs/screenshots/advice.en.png" width="900" alt="Advice: entry band, stop, target, size, reward-to-risk, worst-case loss">
 
 ## Markets and frequencies
 
@@ -113,6 +129,9 @@ scan → advice (entry / stop / target / qty / fees / expiry)
 | **A-shares** | 100-share lots, T+1, price limits | commission (0.025%, min ¥5) + 0.05% stamp on sells + transfer fee |
 | **Hong Kong** | lot size varies per stock (100/500/1000), no price limits | commission + platform fee + **0.1% stamp each side** + four levies |
 | **US** | single shares, no stamp duty | per-share platform fee + SEC/TAF on sells |
+
+The market page can show native currencies or convert everything to CNY / HKD / USD — holding
+Tencent and NVIDIA at once means you need both numbers on the same scale.
 
 | Horizon | Bars | Typical hold | Plan lifetime | Stop band |
 | :--- | :--- | :--- | :--- | :--- |
@@ -141,13 +160,14 @@ reason and shown in the UI.
 Model calls have a daily budget. When it runs out the app **says so and stops** — it never quietly
 falls back to rules.
 
+With WorkBuddy, the settings page generates both cron-job prompts (analysis queue, WeChat
+forwarding) from your current data paths, so you never assemble a path by hand.
+
 ## Automatic updates
 
 Settings → About shows the version and a *Check for updates* button. When a release exists it can
 download the installer and open it; **the final drag is yours**, because a running app cannot safely
 replace itself. On Docker it says to pull the image again instead of pretending otherwise.
-
-Same thing from a terminal:
 
 ```bash
 kestrel version          # version, platform, data directory, update state
@@ -170,7 +190,20 @@ parsed number before you save it.
 
 ## Install
 
-**macOS app**
+**macOS app** (macOS 11+, Apple Silicon and Intel)
+
+Grab `Kestrel-*.dmg` from [releases](https://github.com/jukkakakaka/kestrel/releases) and drag it
+into Applications. The bundle is ad-hoc signed, so clear the quarantine flag once:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Kestrel.app
+open /Applications/Kestrel.app
+```
+
+The icon follows the system light/dark appearance on macOS 13+ (this needs a full Xcode install to
+compile both variants; otherwise it falls back to the light icon).
+
+Build it yourself:
 
 ```bash
 make package        # dist/Kestrel.app
@@ -212,28 +245,26 @@ Bootstrap values are environment variables:
 | `KESTREL_PORT` | `8000` | port |
 | `KESTREL_DEBUG` | `false` | verbose logging |
 
-When WorkBuddy is used for analysis or notifications, the queue paths depend on how the app runs
-(browser, bundled app, container). The settings page generates the cron-job prompts from the current
-configuration, so you never have to assemble a path by hand.
+The WorkBuddy queue path depends on how the app runs (browser, bundled app, container); it can be
+set separately in settings and the generated prompts follow it.
 
 ## Learning comes second
 
 Learning is the second layer, not a course. It sits next to the numbers:
 
-- **Learning mode** expands every plan into *what this is / why now / what if it goes wrong*,
-  in plain language.
+- **Learning mode** expands every plan into *what this is / why now / what if it goes wrong*.
 - **60 glossary terms** — stop, reward-to-risk, R multiple, trailing stop, scaling out, time stop,
-  T+1, price limits — hover for a definition, and suppress the ones you already know.
+  T+1, price limits — hover for a definition, suppress the ones you already know.
 - **Execution quality** turns "did you follow the plan" and "how many risk units did you overspend"
   into numbers. Over time those matter more than stock picking.
-- **Rules page** shows every rule's measured record, including the verdicts that read
-  "insufficient sample".
+- **Rules page** shows every rule's measured record, including "insufficient sample".
+
+<img src="docs/screenshots/welcome.en.png" width="900" alt="First-run setup: capital, risk per trade, markets, horizon">
 
 ## Honest limits
 
 - **Daily bars only.** No order book, no fund flows, no earnings expectations. On that information
-  set the selection edge is close to zero, and the rules page says exactly that: expectancy is
-  positive, but almost all of it comes from the 2:1 payoff, not from the entry.
+  set the selection edge is close to zero, and the rules page says exactly that.
 - **The stop and the size do the work.** Against holding the same entry for the same number of days
   with no stop, the excess return of every shipped rule is near zero.
 - **The horizon recommendation is a heuristic**, not a model. It can be wrong; pin a horizon and it
@@ -243,8 +274,7 @@ Learning is the second layer, not a course. It sits next to the numbers:
 - **No broker API, no automatic orders.** Deliberate: placing an order is irreversible. Every fill
   goes through one `BrokerAdapter` interface, so wiring a real broker later means replacing one
   class — the journal, alerts and statistics stay as they are.
-- **"Automatic update" stops at the download.** A running app cannot safely replace itself; the last
-  drag is yours.
+- **"Automatic update" stops at the download.** A running app cannot safely replace itself.
 - **WorkBuddy mode is asynchronous** and its finest schedule is hourly.
 - **No OCR.** Pasting text is more accurate, and less likely to misread a digit.
 
@@ -263,8 +293,8 @@ src/kestrel/
   fees/             exchange levy model, broker plans
   web/              Jinja templates + static assets
   db/               schema and versioned migrations
-packaging/          PyInstaller spec, macOS build script and dmg layout, icons
-scripts/            single source for brand assets, icons and the dmg background
+packaging/          PyInstaller spec, Asset Catalog (light/dark icons), dmg layout
+scripts/            single source for brand assets, icons, dmg background, screenshots
 ```
 
 ## Documentation
@@ -282,18 +312,18 @@ scripts/            single source for brand assets, icons and the dmg background
 ```bash
 uv sync --extra desktop --extra dev
 uv run kestrel init
-uv run pytest            # 169 tests
+uv run pytest            # 180 tests
 uv run ruff check src tests
 uv run uvicorn kestrel.app:app --reload --app-dir src
 ```
 
-The suite must pass against an **empty data directory**: CI has no pre-seeded database, and
-`tests/conftest.py` guarantees a migrated one for every session.
+The suite must pass against an **empty data directory**: CI has no pre-seeded database.
 
-After changing the brand or icons, run `uv run python scripts/make_brand_assets.py`. It regenerates
-the web assets, favicons and app icon from the single definition in `scripts/brand.py`;
-`scripts/make_dmg_background.py` owns the installer window. They must agree — otherwise users see
-four different marks in four places.
+After changing the logo or icons, run `uv run python scripts/make_brand_assets.py`. It is the single
+source for the web assets, favicons, app icon, Asset Catalog and README images;
+`scripts/make_dmg_background.py` owns the installer window;
+`scripts/make_screenshots.py` captures the light-mode screenshots in both languages.
+All four must agree — otherwise users see four different marks in four places.
 
 ## Disclaimer
 

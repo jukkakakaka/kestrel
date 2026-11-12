@@ -611,7 +611,6 @@
   "settings.watchlist_pool_only": "Pool only",
   "settings.watchlist_only": "Watchlist only",
   "settings.save_failed": "Could not save",
-  "settings.saved": "Saved",
   "settings.saved_n": "Saved {n} setting(s).",
   "settings.sources_saved": "Data sources updated — effective immediately.",
   "settings.test_sent": "Test message sent. Check WeChat or your phone.",
@@ -758,5 +757,9 @@
   "cost.fee_exchange": "Exchange / SFC levies",
   "cost.fee_settlement": "Settlement",
   "sim.symbol_ph": "00700 / US/AAPL / Tencent",
-  "sim.failed": "Calculation failed"
+  "sim.failed": "Calculation failed",
+  "today.n_positions": "{n} position(s)",
+  "today.floating": "open",
+  "today.n_names": "{n} names",
+  "market.opens_in_minutes": "opens in {n}m"
 }

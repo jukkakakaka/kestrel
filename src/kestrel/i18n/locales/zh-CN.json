@@ -611,7 +611,6 @@
   "settings.watchlist_pool_only": "只看候选池",
   "settings.watchlist_only": "只看自选",
   "settings.save_failed": "保存失败",
-  "settings.saved": "已保存",
   "settings.saved_n": "已保存，共 {n} 项。",
   "settings.sources_saved": "数据源已更新，立即生效。",
   "settings.test_sent": "测试消息已发出，去微信/手机看看有没有收到。",
@@ -758,5 +757,9 @@
   "cost.fee_exchange": "交易所 / 证监会征费",
   "cost.fee_settlement": "结算费",
   "sim.symbol_ph": "00700 / US/AAPL / 腾讯",
-  "sim.failed": "计算失败"
+  "sim.failed": "计算失败",
+  "today.n_positions": "持仓 {n} 笔",
+  "today.floating": "浮动",
+  "today.n_names": "{n} 只",
+  "market.opens_in_minutes": "{n} 分钟后开盘"
 }
