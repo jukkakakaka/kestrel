@@ -161,23 +161,28 @@ jobs:
             dist/Kestrel-windows.zip
           generate_release_notes: true
           body: |
+            ### 这是什么
+
+            Kestrel 是一个装在自己电脑上的炒股工具：扫描 A 股 / 港股 / 美股，给出可以直接照着下单的计划
+            （入场区间、止损、目标、股数、费用），成交后记下真实价格和数量，并替你把持仓管到卖出为止。
+
             ### macOS
 
-            1. Download `Kestrel-*.dmg` and drag **Kestrel** into Applications.
-            2. The bundle is ad-hoc signed, so clear the quarantine flag once:
+            1. 下载 `Kestrel-*.dmg`，把 **Kestrel** 拖进 Applications。
+            2. 安装包是自签名（ad-hoc），第一次打开前需要去掉隔离标记：
 
                ```bash
                xattr -dr com.apple.quarantine /Applications/Kestrel.app
                ```
 
-            Data lives in `~/Library/Application Support/Kestrel`.
+            数据在 `~/Library/Application Support/Kestrel`，图标跟随系统深浅色（macOS 13+）。
 
             ### Windows
 
-            1. Download `Kestrel-windows.zip` and extract it anywhere.
-            2. Run `Kestrel.exe` from the folder.
+            1. 下载 `Kestrel-windows.zip`，解压到任意目录。
+            2. 运行文件夹里的 `Kestrel.exe`。
 
-            Data lives in `%APPDATA%\Kestrel`.
+            数据在 `%APPDATA%\Kestrel`。
 
             ### First run
 
