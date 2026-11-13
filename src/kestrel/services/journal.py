@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from kestrel.core.clock import iso, utcnow
 from kestrel.core.money import from_micro, to_micro
+from kestrel.core.quantity import db_value
 from kestrel.db.engine import connect
 from kestrel.fees.calculator import quote_fees
 
@@ -43,7 +44,7 @@ def add_trade(**kw) -> int:
             (
                 kw["market"].upper(), kw["code"], kw.get("name") or kw["code"],
                 kw.get("currency") or {"CN": "CNY", "HK": "HKD", "US": "USD"}[kw["market"].upper()],
-                int(kw["qty"]), to_micro(kw["entry_price"]),
+                db_value(kw["qty"]), to_micro(kw["entry_price"]),
                 to_micro(kw["stop_price"]) if kw.get("stop_price") else None,
                 to_micro(kw["target_price"]) if kw.get("target_price") else None,
                 kw.get("strategy"), kw.get("rec_id"), kw.get("opened_at") or iso(utcnow()),
@@ -61,7 +62,7 @@ def close_trade(
     exit_price,
     review: str = "",
     rule_break: bool = False,
-    qty: int | None = None,
+    qty: Decimal | None = None,
 ) -> dict | None:
     """平掉某一条持仓（可部分平仓）。
 
@@ -78,24 +79,25 @@ def close_trade(
         return None
 
     trade = dict(row)
-    sell_qty = int(qty or trade["qty"])
+    held_qty = Decimal(str(trade["qty"]))
+    sell_qty = Decimal(str(qty)) if qty not in (None, "") else held_qty
     if sell_qty <= 0:
         return {"ok": False, "error": "卖出数量必须大于 0"}
-    if sell_qty > int(trade["qty"]):
+    if sell_qty > held_qty:
         return {"ok": False, "error": f"卖出数量超过持仓（{trade['qty']} 股）"}
 
     price = Decimal(str(exit_price))
     amount_out = price * sell_qty
     broker = None
     try:
-        fee_sell = quote_fees(trade["market"], amount_out, Decimal(sell_qty), True, broker).total
+        fee_sell = quote_fees(trade["market"], amount_out, sell_qty, True, broker).total
     except Exception:  # noqa: BLE001
         fee_sell = Decimal("0")
-    fee_share = (fee_sell * Decimal(sell_qty) / Decimal(trade["qty"])).quantize(Decimal("0.01"))
+    fee_share = (fee_sell * sell_qty / held_qty).quantize(Decimal("0.01"))
 
     conn = connect()
     try:
-        if sell_qty == int(trade["qty"]):
+        if sell_qty == held_qty:
             conn.execute(
                 "UPDATE trade SET exit_price=?, closed_at=?, status='closed',"
                 " fees=COALESCE(fees,0)+?, review=COALESCE(?,review), rule_break=? WHERE id=?",
@@ -106,7 +108,11 @@ def close_trade(
             )
             closed_id = trade_id
         else:
-            conn.execute("UPDATE trade SET qty=qty-? WHERE id=?", (sell_qty, trade_id))
+            from kestrel.core.quantity import db_value
+
+            conn.execute(
+                "UPDATE trade SET qty=qty-? WHERE id=?", (db_value(sell_qty), trade_id)
+            )
             cur = conn.execute(
                 """
                 INSERT INTO trade (market, code, name, currency, side, qty, entry_price,
@@ -119,7 +125,7 @@ def close_trade(
                 FROM trade WHERE id=?
                 """,
                 (
-                    sell_qty, to_micro(price), to_micro(fee_share), iso(utcnow()),
+                    db_value(sell_qty), to_micro(price), to_micro(fee_share), iso(utcnow()),
                     review or None, 1 if rule_break else 0, trade_id,
                 ),
             )

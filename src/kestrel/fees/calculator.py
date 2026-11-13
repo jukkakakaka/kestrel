@@ -21,6 +21,11 @@ class BrokerPlan:
     platform_fixed: Decimal = Decimal("0")
     platform_per_share: Decimal = Decimal("0")
     platform_min: Decimal = Decimal("0")
+    # 能买什么，比费率更早决定一条计划能不能执行。
+    # 港股碎股只影响**买入**：卖出碎股任何券商都能做，那是持仓清尾。
+    odd_lot_buy: bool = False
+    fractional_us: bool = False
+    fractional_min: Decimal = Decimal("0")
 
     def commission(self, amount: Decimal) -> Decimal:
         fee = amount * self.commission_rate
@@ -30,10 +35,25 @@ class BrokerPlan:
         fee = self.platform_fixed + shares * self.platform_per_share
         return max(fee, self.platform_min) if fee else Decimal("0")
 
+    def allows_odd_lot(self) -> bool:
+        """港股能不能买入不足一手的碎股。"""
+        return self.market.upper() == "HK" and bool(self.odd_lot_buy)
+
+    def allows_fractional(self) -> bool:
+        """美股能不能买入小数股。"""
+        return self.market.upper() == "US" and bool(self.fractional_us)
+
 
 PLANS: dict[str, BrokerPlan] = {
     # Hong Kong
-    "fosun_hk": BrokerPlan("fosun_hk", "星财富（复星）", "HK", platform_fixed=Decimal("15")),
+    # 碎股能力按各家公开帮助文档核实（2026-11）：
+    #   星财富 / 富途：港股非整手可买入开仓；
+    #   老虎 / 盈立 / IBKR / 星财富 / 富途：美股碎股。
+    # 众安银行只做整手，A 股永远整手（100 股）。
+    "fosun_hk": BrokerPlan(
+        "fosun_hk", "星财富（复星）", "HK",
+        platform_fixed=Decimal("15"), odd_lot_buy=True,
+    ),
     "usmart_hk": BrokerPlan(
         "usmart_hk", "盈立香港", "HK",
         commission_rate=Decimal("0.0003"), platform_fixed=Decimal("12"),
@@ -45,6 +65,7 @@ PLANS: dict[str, BrokerPlan] = {
     "futu_hk": BrokerPlan(
         "futu_hk", "富途", "HK",
         commission_rate=Decimal("0.0003"), platform_fixed=Decimal("15"),
+        odd_lot_buy=True,
     ),
     "tiger_hk": BrokerPlan(
         "tiger_hk", "老虎", "HK",
@@ -54,10 +75,12 @@ PLANS: dict[str, BrokerPlan] = {
     "fosun_us": BrokerPlan(
         "fosun_us", "星财富（复星）", "US",
         platform_per_share=Decimal("0.005"), platform_min=Decimal("1"),
+        fractional_us=True, fractional_min=Decimal("1"),
     ),
     "usmart_us": BrokerPlan(
         "usmart_us", "盈立香港", "US",
         platform_per_share=Decimal("0.009"), platform_min=Decimal("1.88"),
+        fractional_us=True, fractional_min=Decimal("1"),
     ),
     "za_us": BrokerPlan(
         "za_us", "众安银行", "US",
@@ -66,6 +89,7 @@ PLANS: dict[str, BrokerPlan] = {
     "ibkr_us": BrokerPlan(
         "ibkr_us", "IBKR", "US",
         platform_per_share=Decimal("0.005"), platform_min=Decimal("1"),
+        fractional_us=True, fractional_min=Decimal("1"),
     ),
     # Mainland
     "cn_generic": BrokerPlan(

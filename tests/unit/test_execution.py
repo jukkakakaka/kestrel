@@ -54,10 +54,39 @@ def test_buy_creates_an_open_trade(home):
     assert row["target_price"] == 440_000_000
 
 
-def test_a_lot_size_mistake_is_refused_with_the_real_lot(home):
-    result = execution.record(_fill(qty=150))
+def test_a_lot_size_mistake_is_refused_for_a_shares(home):
+    """A 股永远整手；港股碎股是合法的，不在这里拦。"""
+    result = execution.record(
+        _fill(market="CN", code="600519", qty=150, price=Decimal("1450"), name="贵州茅台")
+    )
     assert result["ok"] is False
     assert "每手 100 股" in result["error"]
+
+
+def test_hk_odd_lot_buy_is_accepted(home):
+    """星财富 / 富途可以买港股碎股，台账必须记得下 150 股这种成交。"""
+    result = execution.record(_fill(qty=150))
+    assert result["ok"] is True
+    conn = connect()
+    try:
+        row = conn.execute("SELECT qty FROM trade WHERE id=?", (result["trade_id"],)).fetchone()
+    finally:
+        conn.close()
+    assert row["qty"] == 150
+
+
+def test_fractional_us_shares_are_recorded_as_is(home):
+    """美股碎股 0.5 股不能被 int() 截成 0。"""
+    result = execution.record(
+        _fill(market="US", code="AAPL", qty=Decimal("0.5"), price=Decimal("342.37"), name="苹果")
+    )
+    assert result["ok"] is True, result.get("error")
+    conn = connect()
+    try:
+        row = conn.execute("SELECT qty FROM trade WHERE id=?", (result["trade_id"],)).fetchone()
+    finally:
+        conn.close()
+    assert Decimal(str(row["qty"])) == Decimal("0.5")
 
 
 def test_selling_more_than_held_is_refused(home):

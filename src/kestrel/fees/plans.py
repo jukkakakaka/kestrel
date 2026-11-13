@@ -21,6 +21,7 @@ FIELDS = (
     "platform_fixed",
     "platform_per_share",
     "platform_min",
+    "fractional_min",
 )
 
 
@@ -41,8 +42,8 @@ def seed() -> int:
                 INSERT OR IGNORE INTO broker_plan
                     (key, label, market, currency, commission, commission_min,
                      platform, platform_min, platform_per_share, per_order_min,
-                     builtin, enabled)
-                VALUES (?,?,?,?,?,?,?,?,?,?,1,1)
+                     builtin, enabled, odd_lot_buy, fractional_us, fractional_min)
+                VALUES (?,?,?,?,?,?,?,?,?,?,1,1,?,?,?)
                 """,
                 (
                     key,
@@ -55,6 +56,9 @@ def seed() -> int:
                     float(plan.platform_min),
                     float(plan.platform_per_share),
                     0.0,
+                    int(plan.odd_lot_buy),
+                    int(plan.fractional_us),
+                    float(plan.fractional_min),
                 ),
             )
             added += 1
@@ -102,6 +106,9 @@ def upsert(payload: dict) -> str:
             values.append(max(0.0, float(payload.get(name) or 0)))
         except (TypeError, ValueError):
             raise ValueError(f"{name} 必须是数字") from None
+    # A-share round lots are 100 shares by rule; a broker option cannot change it.
+    odd_lot = bool(payload.get("odd_lot_buy")) and market == "HK"
+    fractional = bool(payload.get("fractional_us")) and market == "US"
 
     conn = connect()
     try:
@@ -110,17 +117,26 @@ def upsert(payload: dict) -> str:
             INSERT INTO broker_plan
                 (key, label, market, currency, commission, commission_min,
                  platform, platform_min, platform_per_share, per_order_min,
-                 builtin, enabled, notes, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,0,1,?,datetime('now'))
+                 builtin, enabled, notes, updated_at,
+                 odd_lot_buy, fractional_us, fractional_min)
+            VALUES (?,?,?,?,?,?,?,?,?,?,0,1,?,datetime('now'),?,?,?)
             ON CONFLICT(key) DO UPDATE SET
                 label=excluded.label, market=excluded.market, currency=excluded.currency,
                 commission=excluded.commission, commission_min=excluded.commission_min,
                 platform=excluded.platform, platform_min=excluded.platform_min,
                 platform_per_share=excluded.platform_per_share,
                 per_order_min=excluded.per_order_min,
+                odd_lot_buy=excluded.odd_lot_buy,
+                fractional_us=excluded.fractional_us,
+                fractional_min=excluded.fractional_min,
                 notes=excluded.notes, updated_at=datetime('now')
             """,
-            (key, label, market, currency, *values, str(payload.get("notes") or "")),
+            (
+                key, label, market, currency, *values,
+                str(payload.get("notes") or ""),
+                int(odd_lot), int(fractional),
+                float(values[-1]),
+            ),
         )
         conn.commit()
     finally:
@@ -167,6 +183,9 @@ def hydrate() -> int:
             platform_fixed=Decimal(str(row["platform"])),
             platform_per_share=Decimal(str(row["platform_per_share"])),
             platform_min=Decimal(str(row["platform_min"])),
+            odd_lot_buy=bool(row.get("odd_lot_buy")),
+            fractional_us=bool(row.get("fractional_us")),
+            fractional_min=Decimal(str(row.get("fractional_min") or 0)),
         )
         count += 1
     return count
@@ -181,6 +200,14 @@ def as_broker_plan(key: str) -> BrokerPlan | None:
         conn.close()
     if row is None:
         return PLANS.get(key)
+    # sqlite3.Row 没有 .get()，缺失的列只能按 KeyError 处理——旧库升级时
+    # 迁移还没跑完也可能走到这里。
+    def _value(name: str, default=0):
+        try:
+            return row[name]
+        except (IndexError, KeyError):
+            return default
+
     return BrokerPlan(
         code=row["key"],
         name=row["label"],
@@ -190,4 +217,7 @@ def as_broker_plan(key: str) -> BrokerPlan | None:
         platform_fixed=Decimal(str(row["platform"])),
         platform_per_share=Decimal(str(row["platform_per_share"])),
         platform_min=Decimal(str(row["platform_min"])),
+        odd_lot_buy=bool(_value("odd_lot_buy")),
+        fractional_us=bool(_value("fractional_us")),
+        fractional_min=Decimal(str(_value("fractional_min") or 0)),
     )

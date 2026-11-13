@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
 from kestrel.core.money import from_micro, to_micro
 from kestrel.db.engine import connect
@@ -99,7 +99,7 @@ def suggest(trade: dict, position: dict, max_hold_days: int | None = None) -> Ex
     current_stop = from_micro(trade["stop_price"]) if trade.get("stop_price") else None
     target = from_micro(trade["target_price"]) if trade.get("target_price") else None
     entry = from_micro(trade["entry_price"])
-    qty = int(trade["qty"])
+    qty = Decimal(str(trade["qty"]))
 
     plan = _plan_from_snapshot(trade)
     currency = trade.get("currency") or "CNY"
@@ -114,7 +114,7 @@ def suggest(trade: dict, position: dict, max_hold_days: int | None = None) -> Ex
             trade_id=trade["id"],
             action="exit_all",
             stop=None,
-            qty=Decimal(qty),
+            qty=qty,
             reason_zh=f"现价 {money(price)} 已跌破止损 {money(current_stop)}，按计划应当离场。",
             reason_en=(
                 f"Price {money(price)} is below the stop at {money(current_stop)}. "
@@ -130,19 +130,27 @@ def suggest(trade: dict, position: dict, max_hold_days: int | None = None) -> Ex
 
     # 2) 到达目标：分批止盈
     if target and price >= target:
-        keep = int(qty // 2) if qty >= 2 else 0
+        # 小数股（美股碎股）不能用 // 取整：0.5 股的一半是 0.25 股，
+        # 而「卖一半」本身是合法的。整股时保持原来的口径，只有 1 股不能拆。
+        from kestrel.core.quantity import display, is_whole
+
+        if is_whole(qty):
+            half = qty if qty <= 1 else (qty / 2).to_integral_value(rounding=ROUND_DOWN)
+        else:
+            half = (qty / 2).quantize(Decimal("0.0001"))
+        half_text = display(half)
         return ExitPlan(
             trade_id=trade["id"],
             action="take_partial",
             stop=current_stop,
-            qty=Decimal(qty - keep),
+            qty=half,
             reason_zh=(
                 f"现价 {money(price)} 已到达目标 {money(target)}。"
-                f"按计划先卖出一半以上（{qty - keep} 股），剩余的用移动止损跟。"
+                f"按计划先卖出一半（{half_text} 股），剩余的用移动止损跟。"
             ),
             reason_en=(
                 f"Price {money(price)} reached the target {money(target)}. "
-                f"Sell at least half ({qty - keep} shares) and trail the rest."
+                f"Sell at least half ({half_text} shares) and trail the rest."
             ),
             urgency="soon",
         )
@@ -192,7 +200,7 @@ def suggest(trade: dict, position: dict, max_hold_days: int | None = None) -> Ex
             trade_id=trade["id"],
             action="exit_all",
             stop=None,
-            qty=Decimal(qty),
+            qty=qty,
             reason_zh=(
                 f"已经持有 {held} 天，超过这个周期通常的持仓上限（{max_hold_days} 天），"
                 f"而且只走到 {r_now:+.1f}R。这笔的前提没有成立，资金应该换到更好的地方。"
@@ -210,7 +218,7 @@ def suggest(trade: dict, position: dict, max_hold_days: int | None = None) -> Ex
             trade_id=trade["id"],
             action="exit_all",
             stop=None,
-            qty=Decimal(qty),
+            qty=qty,
             reason_zh="这条计划的原始有效期已过，价格条件已经变了。要么重新评估，要么离场。",
             reason_en=(
                 "The original plan has expired, so the price context it assumed is gone. "
@@ -247,13 +255,31 @@ def apply_stop(trade_id: int, new_stop: Decimal, reason: str = "") -> dict:
                 ),
             }
         entry = from_micro(trade["entry_price"])
-        # 正好等于入场价是「保本止损」，这是移动止损最常用的第一档，
-        # 不能和「把止损设在入场价之上」混为一谈。
+        # 移动止损抬到入场价之上是**正常的**：+2R 时把它抬到 +1R 本身就是
+        # 这个策略的第二档。早先这里拒绝任何高于入场价的止损，结果建议
+        # 说「抬到 105」、点下去却报错——两处互相打脸。
+        # 真正要拦的是「止损已经高于现价」：那等于立刻卖出，不该记成止损。
         if new_micro > to_micro(entry):
-            return {
-                "ok": False,
-                "error": "止损不能设在入场价之上——那不是止损，是提前卖出。",
-            }
+            conn2 = connect()
+            try:
+                quote = conn2.execute(
+                    """
+                    SELECT q.price FROM quote_latest q JOIN symbol s ON s.id = q.symbol_id
+                    WHERE s.market=? AND s.code=?
+                    """,
+                    (trade["market"], trade["code"]),
+                ).fetchone()
+            finally:
+                conn2.close()
+            if quote and quote["price"] and new_micro >= int(quote["price"]):
+                return {
+                    "ok": False,
+                    "error": (
+                        f"新止损 {new_stop} 已经不低于现价 "
+                        f"{from_micro(quote['price'])}——那会立刻触发卖出。"
+                        "要现在离场，用「卖出」记录这笔成交。"
+                    ),
+                }
 
         if trade.get("initial_stop") is None and old is not None:
             conn.execute("UPDATE trade SET initial_stop=? WHERE id=?", (old, trade_id))

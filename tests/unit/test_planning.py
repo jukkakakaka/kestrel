@@ -39,7 +39,11 @@ def _uptrend_then_breakout() -> list[dict]:
     return _bars(prices, vols)
 
 
-def _plan(risk_pct: float = 2.0):
+def _plan(risk_pct: float = 2.0, broker: str = "za_hk"):
+    """默认用不支持碎股的券商，这样「整手约束」本身能被测试到。
+
+    支持碎股买入的券商（星财富、富途）走另一条路径，见下面的用例。
+    """
     ind = compute(Series.from_bars(_uptrend_then_breakout()))
     assert ind, "indicators should compute"
     signal = Breakout20().evaluate(ind)
@@ -53,7 +57,7 @@ def _plan(risk_pct: float = 2.0):
         capital_cny=10000,
         risk_pct=risk_pct,
         lot_size=LOT,
-        broker="fosun_hk",
+        broker=broker,
     )
 
 
@@ -68,6 +72,16 @@ def test_breakout_fires_and_plan_is_executable():
     assert plan.valid_until.endswith("+00:00")
     assert "错了怎么办" in plan.explain_zh and "if wrong" in plan.explain_en.lower()
     assert "000000" not in plan.explain_zh, "prices must be formatted, not raw Decimals"
+
+
+def test_a_broker_with_odd_lots_can_plan_a_partial_lot():
+    """星财富 / 富途可以买港股碎股：预算不够一手时给 30 股，而不是直接放弃。"""
+    whole_lot = _plan(broker="za_hk")
+    odd_lot = _plan(broker="fosun_hk")
+    assert odd_lot is not None, "a broker that supports odd lots should still produce a plan"
+    assert odd_lot.qty % LOT != 0, "an odd-lot plan is expected to be below one board lot"
+    if whole_lot is not None:
+        assert whole_lot.qty % LOT == 0
 
 
 def test_risk_budget_caps_the_position():
@@ -130,7 +144,7 @@ def test_rejection_reason_is_specific():
         capital_cny=10000,
         risk_pct=0.2,
         lot_size=LOT,
-        broker="fosun_hk",
+        broker="za_hk",   # 不支持碎股，一手就超预算
     )
     assert plan is None
     assert why == "lot_too_big", "the caller needs to tell capital problems from bad setups"

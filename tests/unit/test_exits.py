@@ -130,11 +130,34 @@ def test_lowering_a_stop_is_refused(home):
     assert "只能往有利方向" in result["error"]
 
 
-def test_a_stop_above_entry_is_refused(home):
-    trade = _trade(stop="95")
-    result = exits.apply_stop(trade["id"], Decimal("101"))
-    assert result["ok"] is False
-    assert "入场价" in result["error"]
+def test_a_stop_above_entry_is_allowed_it_is_the_second_ladder_step(home):
+    """+2R 时止损就该抬到 +1R，也就是入场价之上。
+
+    早先这里拒绝任何高于入场价的止损，于是页面给出「抬到 105」的建议、
+    点下去却报错。没有现价时不做额外限制，只拦「已经高于现价」。
+    """
+    trade = _trade(stop="95", target="200")   # 入场 100，风险 5
+    result = exits.apply_stop(trade["id"], Decimal("105"), "锁定 +1R")
+    assert result["ok"] is True, result.get("error")
+
+    # 有现价时，止损已经不低于现价 → 应该拒绝并提示用「卖出」记录成交。
+    conn = connect()
+    try:
+        symbol_id = conn.execute(
+            "SELECT id FROM symbol WHERE market='US' AND code='AAPL'"
+        ).fetchone()["id"]
+        conn.execute(
+            """INSERT INTO quote_latest (symbol_id, price, source, quoted_at)
+               VALUES (?,?,?,datetime('now'))
+               ON CONFLICT(symbol_id) DO UPDATE SET price=excluded.price""",
+            (symbol_id, to_micro("104"), "test"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    again = exits.apply_stop(trade["id"], Decimal("106"), "再抬")
+    assert again["ok"] is False
+    assert "现价" in again["error"] or "卖出" in again["error"]
 
 
 def test_every_move_is_recorded(home):

@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from kestrel.core.money import to_micro
+from kestrel.core.quantity import db_value
 from kestrel.db.engine import connect
 from kestrel.indicators.engine import Series, compute
 from kestrel.planning import builder
@@ -136,7 +137,7 @@ def _used_exposure_cny() -> Decimal:
     try:
         for position in journal_service.positions():
             total += journal_service.to_cny(
-                Decimal(str(position["entry"])) * int(position["qty"]), position["currency"]
+                Decimal(str(position["entry"])) * Decimal(str(position["qty"])), position["currency"]
             )
     except Exception as exc:  # noqa: BLE001
         log.warning("could not read open positions: %s", exc)
@@ -460,7 +461,7 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
                     to_micro(plan.entry_low), to_micro(plan.entry_high),
                     to_micro(plan.stop), to_micro(plan.target1),
                     to_micro(plan.target2) if plan.target2 else None,
-                    plan.qty, plan.lot_size,
+                    db_value(plan.qty), plan.lot_size,
                     to_micro(plan.risk_amount), to_micro(plan.est_fees),
                     to_micro(plan.breakeven), plan.r_multiple, plan.confidence,
                     plan.valid_until, json.dumps(plan.invalidation),

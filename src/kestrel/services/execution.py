@@ -26,6 +26,7 @@ from decimal import Decimal
 
 from kestrel.core.clock import iso, utcnow
 from kestrel.core.money import from_micro, to_micro
+from kestrel.core.quantity import db_value, display, to_qty
 from kestrel.db.engine import connect
 from kestrel.fees.calculator import quote_fees
 
@@ -43,7 +44,7 @@ class Fill:
     market: str
     code: str
     side: str
-    qty: int
+    qty: Decimal
     price: Decimal
     fees: Decimal = Decimal("0")
     filled_at: str | None = None
@@ -61,7 +62,9 @@ class Fill:
             market=self.market.upper().strip(),
             code=self.code.strip(),
             side=SIDE_BUY if str(self.side).lower().startswith("b") else SIDE_SELL,
-            qty=int(self.qty),
+            # 美股可以做小数股；港股碎股是整数但可能不是整手。一律用 Decimal，
+            # 否则 0.5 股会被 int() 截成 0 股，用户会以为记账失败了。
+            qty=to_qty(self.qty),
             price=Decimal(str(self.price)),
             fees=Decimal(str(self.fees or 0)),
             filled_at=self.filled_at or iso(utcnow()),
@@ -124,6 +127,10 @@ def deviation(price: Decimal, rec: dict | None) -> tuple[float | None, float | N
     return float(pct), r
 
 
+def _is_whole(value: Decimal) -> bool:
+    return Decimal(value) == Decimal(value).to_integral_value()
+
+
 def _ensure_symbol(conn, fill: Fill) -> dict:
     """没有这只标的时补一行，避免成交因为「没加自选」而丢失。"""
     found = _symbol(conn, fill.market, fill.code)
@@ -183,8 +190,11 @@ def record(fill: Fill) -> dict:
 
 def _buy(conn, fill: Fill, symbol: dict, snapshot: dict | None) -> dict:
     lots = max(1, int(symbol["lot_size"] or 1))
-    if fill.market in ("CN", "HK") and fill.qty % lots:
-        # 港股每手股数各不相同。不是整手的成交多数是填错了。
+    if fill.market == "CN" and not _is_whole(fill.qty):
+        return {"ok": False, "error": f"A 股只能按整股成交，你填了 {fill.qty} 股"}
+    # 港股碎股是合法的（不足一手的持仓可以卖出，部分券商也能买入）；
+    # 只有 A 股强制整手，所以这里不再拦 150 股这种填写。
+    if fill.market == "CN" and fill.qty % lots:
         return {
             "ok": False,
             "error": f"{symbol['name']} 每手 {lots} 股，成交数量必须是 {lots} 的整数倍（你填了 {fill.qty}）",
@@ -202,7 +212,7 @@ def _buy(conn, fill: Fill, symbol: dict, snapshot: dict | None) -> dict:
             fill.code,
             symbol["name"],
             symbol["currency"],
-            fill.qty,
+            db_value(fill.qty),
             to_micro(fill.price),
             to_micro(fill.fees),
             fill.filled_at,
@@ -234,7 +244,7 @@ def _buy(conn, fill: Fill, symbol: dict, snapshot: dict | None) -> dict:
             ),
         )
     return {"ok": True, "trade_id": trade_id, "side": SIDE_BUY, "qty": fill.qty,
-            "message": f"已记录买入 {symbol['name']} {fill.qty} 股 @ {fill.price}"}
+            "message": f"已记录买入 {symbol['name']} {display(fill.qty)} 股 @ {fill.price}"}
 
 
 def _sell(conn, fill: Fill, symbol: dict) -> dict:
@@ -246,7 +256,7 @@ def _sell(conn, fill: Fill, symbol: dict) -> dict:
     if not rows:
         return {"ok": False, "error": f"没有 {symbol['name']} 的持仓可卖，先记一笔买入"}
 
-    available = sum(int(r["qty"]) for r in rows)
+    available = sum((Decimal(str(r["qty"])) for r in rows), Decimal("0"))
     if fill.qty > available:
         return {
             "ok": False,
@@ -260,19 +270,22 @@ def _sell(conn, fill: Fill, symbol: dict) -> dict:
     for row in rows:
         if remaining <= 0:
             break
-        take = min(remaining, int(row["qty"]))
+        row_qty = Decimal(str(row["qty"]))
+        take = min(remaining, row_qty)
         entry = from_micro(row["entry_price"])
         # 卖出费用按数量分摊到被平的这几笔，避免第一笔承担全部费用。
-        fee_share = (fill.fees * Decimal(take) / Decimal(fill.qty)).quantize(Decimal("0.01"))
+        fee_share = (fill.fees * take / fill.qty).quantize(Decimal("0.01"))
         cost += entry * take
         proceeds += fill.price * take
 
-        if take == int(row["qty"]):
-            _close_row(conn, row["id"], fill, fee_share, int(row["qty"]))
+        if take == row_qty:
+            _close_row(conn, row["id"], fill, fee_share, row_qty)
             closed.append(row["id"])
         else:
             # 部分平仓：原行数量减少，另插一条已平记录，历史不会被改写成假的。
-            conn.execute("UPDATE trade SET qty=qty-? WHERE id=?", (take, row["id"]))
+            conn.execute(
+                "UPDATE trade SET qty=qty-? WHERE id=?", (db_value(take), row["id"])
+            )
             cur = conn.execute(
                 """
                 INSERT INTO trade (market, code, name, currency, side, qty, entry_price,
@@ -284,7 +297,8 @@ def _sell(conn, fill: Fill, symbol: dict) -> dict:
                        plan_snapshot, stop_price, target_price
                 FROM trade WHERE id=?
                 """,
-                (take, to_micro(fill.price), to_micro(fee_share), fill.filled_at, row["id"]),
+                (db_value(take), to_micro(fill.price), to_micro(fee_share),
+                 fill.filled_at, row["id"]),
             )
             closed.append(cur.lastrowid)
         remaining -= take
@@ -296,12 +310,12 @@ def _sell(conn, fill: Fill, symbol: dict) -> dict:
         "qty": fill.qty,
         "closed_trades": closed,
         "gross": float(gross),
-        "message": f"已记录卖出 {symbol['name']} {fill.qty} 股 @ {fill.price}，"
+        "message": f"已记录卖出 {symbol['name']} {display(fill.qty)} 股 @ {fill.price}，"
                    f"平掉 {len(closed)} 笔持仓",
     }
 
 
-def _close_row(conn, trade_id: int, fill: Fill, fee_share: Decimal, qty: int) -> None:
+def _close_row(conn, trade_id: int, fill: Fill, fee_share: Decimal, qty: Decimal) -> None:
     conn.execute(
         """
         UPDATE trade SET exit_price=?, closed_at=?, status='closed',
@@ -324,21 +338,21 @@ def _mark_recommendation(conn, fill: Fill, result: dict) -> None:
         (
             to_micro(fill.price),
             iso(utcnow()),
-            f"实际成交 {fill.qty} 股 @ {fill.price}",
+            f"实际成交 {display(fill.qty)} 股 @ {fill.price}",
             fill.rec_id,
         ),
     )
 
 
-def suggest_fees(market: str, amount: Decimal, qty: int, broker: str | None) -> Decimal:
+def suggest_fees(market: str, amount: Decimal, qty, broker: str | None) -> Decimal:
     """卖出时帮用户估算费用，允许他覆盖。"""
     try:
-        return quote_fees(market.upper(), amount, Decimal(qty), True, broker).total
+        return quote_fees(market.upper(), amount, Decimal(str(qty)), True, broker).total
     except Exception:  # noqa: BLE001
         return Decimal("0")
 
 
-def held_qty(market: str, code: str) -> int:
+def held_qty(market: str, code: str) -> Decimal:
     conn = connect()
     try:
         row = conn.execute(
@@ -346,7 +360,7 @@ def held_qty(market: str, code: str) -> int:
             " WHERE market=? AND code=? AND status='open'",
             (market.upper(), code),
         ).fetchone()
-        return int(row["q"] or 0)
+        return Decimal(str(row["q"] or 0))
     finally:
         conn.close()
 

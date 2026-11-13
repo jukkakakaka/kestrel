@@ -104,14 +104,16 @@ def build_ex(
     entry_low = _round(last * Decimal("0.997"))
     entry_high = _round(last * Decimal("1.003"))
 
-    # Stop: ATR based, tightened by the strategy hint when it is closer.
+    # 止损：以 2 倍 ATR 为基准，策略给的更近的止损位优先采用。
+    # 早先这里写成了「hint 比 ATR 更远也用它」，于是 trend_pullback 的 low20
+    # 会把 4% 的 ATR 止损拉成 10% 的宽止损——和注释、和「取更近的」都相反。
     atr_stop = last - atr * Decimal("2")
+    stop = atr_stop if atr > 0 else last * Decimal("0.97")
     hint = signal.stop_hint
-    stop = atr_stop
     if hint:
         hint_d = Decimal(str(hint))
         if Decimal("0") < hint_d < last:
-            stop = max(stop, hint_d) if hint_d > atr_stop else hint_d
+            stop = max(stop, hint_d)
     stop = min(stop, entry_low * Decimal("0.99"))
 
     risk_per_share = entry_low - stop
@@ -131,12 +133,18 @@ def build_ex(
     risk_budget = capital_local * Decimal(str(risk_pct)) / Decimal("100")
     raw_qty = risk_budget / risk_per_share
     lot = max(1, int(lot_size))
-    qty = int(raw_qty // lot) * lot
+    # 能买碎股的券商不必凑整手：一手就超预算才是真正的问题，而不是「市场规则」。
+    # A 股永远是 100 股一手；港股看券商（星财富 / 富途可买碎股）；美股支持
+    # 小数股的套餐按 0.0001 股步进。
+    from kestrel.core.quantity import floor_step, tradable_step
+
+    step = tradable_step(market, lot, broker)
+    qty = floor_step(raw_qty, step)
     if qty <= 0:
         return None, "lot_too_big"
 
     # Never let one position exceed 35% of capital.
-    cap_qty = int((capital_local * Decimal("0.35")) / entry_low // lot) * lot
+    cap_qty = floor_step((capital_local * Decimal("0.35")) / entry_low, step)
     if cap_qty <= 0:
         return None, "lot_too_big"
     qty = min(qty, cap_qty)
@@ -211,12 +219,19 @@ def _fmt(value: Decimal, places: int = 3) -> str:
     return f"{value:,.{places}f}"
 
 
+def _fmt_shares(qty: Decimal) -> str:
+    """股数按人读的方式写：100，不是 100.000；0.5 就写 0.5。"""
+    from kestrel.core.quantity import display
+
+    return display(qty)
+
+
 def _explain_zh(market, name, signal, entry, stop, target, qty, risk_pct) -> str:
     reasons = "；".join(REASON_ZH.get(r, r) for r in signal.reasons)
     risk = (entry - stop) / entry * 100
     return (
         f"为什么是它：{reasons}。\n"
-        f"怎么买：在 {_fmt(entry)} 附近买入 {qty} 股。\n"
+        f"怎么买：在 {_fmt(entry)} 附近买入 {_fmt_shares(qty)} 股。\n"
         f"错了怎么办：跌破 {_fmt(stop)} 就走，这一笔亏损控制在 {risk:.1f}% 左右，"
         f"约占总资金的 {risk_pct:.1f}%。\n"
         f"目标：先看 {_fmt(target)}，到了至少卖一半。"
@@ -228,7 +243,7 @@ def _explain_en(market, name, signal, entry, stop, target, qty, risk_pct) -> str
     risk = (entry - stop) / entry * 100
     return (
         f"Why: {reasons}.\n"
-        f"How: buy {qty} shares near {_fmt(entry)}.\n"
+        f"How: buy {_fmt_shares(qty)} shares near {_fmt(entry)}.\n"
         f"If wrong: exit below {_fmt(stop)}, risking about {risk:.1f}% of the position "
         f"({risk_pct:.1f}% of capital).\n"
         f"Target: {_fmt(target)}; take at least half there."

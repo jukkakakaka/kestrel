@@ -74,7 +74,7 @@ def _parse_moment(text: str | None) -> datetime | None:
 def assess(trade: dict, quote: dict | None) -> dict:
     """一笔持仓的现状。纯函数，方便单测和复用。"""
     entry = from_micro(trade["entry_price"])
-    qty = int(trade["qty"])
+    qty = Decimal(str(trade["qty"]))
     cost = entry * qty
     fees = from_micro(trade.get("fees") or 0)
     stop = from_micro(trade["stop_price"]) if trade.get("stop_price") else None

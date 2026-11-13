@@ -265,7 +265,7 @@ def evaluate(force: bool = False) -> dict:
         open_value = sum(
             (
                 journal_service.to_cny(
-                    Decimal(str(p["entry"])) * int(p["qty"]), p["currency"]
+                    Decimal(str(p["entry"])) * Decimal(str(p["qty"])), p["currency"]
                 )
                 for p in journal_service.positions()
             ),

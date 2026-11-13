@@ -22,6 +22,7 @@ import logging
 import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -211,6 +212,11 @@ def build_brief(markets: list[str], limit: int = 40, history: int | None = None)
             "capital_cny": settings.get("account.capital"),
             "risk_per_trade_pct": settings.get("risk.per_trade_pct"),
             "max_per_sector": settings.get("risk.max_per_sector"),
+            # 模型不该猜「能不能买碎股」：这是账户层面的硬约束。
+            "brokers": {
+                market: settings.get(f"broker.{market}")
+                for market in ("CN", "HK", "US")
+            },
         },
         "open_positions": positions,
         "_lots": lots,
@@ -386,8 +392,16 @@ def validate_pick(raw: dict, brief: dict) -> tuple[Pick | None, str]:
     )
 
 
-def size_position(pick: Pick, brief: dict, lot_size: int) -> tuple[int, float, float]:
-    """Position size from the risk budget — the model never touches this."""
+def size_position(
+    pick: Pick, brief: dict, lot_size: int, broker: str | None = None
+) -> tuple[Decimal, float, float]:
+    """Position size from the risk budget — the model never touches this.
+
+    和规则引擎共用 ``core.quantity.tradable_step``：券商能买碎股时，预算不够
+    一手也照样给出可执行的股数，而不是直接判「买不起」。
+    """
+    from kestrel.core.quantity import floor_step, tradable_step
+
     capital = float(brief["account"]["capital_cny"])
     risk_pct = float(brief["account"]["risk_per_trade_pct"])
     fx = {"CNY": 1.0, "HKD": 0.92}.get(_currency(pick.market), 7.1)
@@ -396,19 +410,21 @@ def size_position(pick: Pick, brief: dict, lot_size: int) -> tuple[int, float, f
     risk_budget = capital_local * risk_pct / 100
     risk_per_share = pick.entry_low - pick.stop
     if risk_per_share <= 0:
-        return 0, 0.0, 0.0
+        return Decimal("0"), 0.0, 0.0
 
     lot = max(1, lot_size)
-    qty = int((risk_budget / risk_per_share) // lot) * lot
-    cap_qty = int((capital_local * 0.35) / pick.entry_low // lot) * lot
+    step = tradable_step(pick.market, lot, broker)
+    qty = floor_step(Decimal(str(risk_budget)) / Decimal(str(risk_per_share)), step)
+    cap_qty = floor_step(
+        Decimal(str(capital_local * 0.35 / pick.entry_low)), step
+    )
     qty = min(qty, cap_qty)
     if qty <= 0:
-        return 0, 0.0, 0.0
+        return Decimal("0"), 0.0, 0.0
 
-    cost = pick.entry_low * qty
-    broker = None
+    cost = Decimal(str(pick.entry_low)) * qty
     fees = round_trip(pick.market, _dec(cost), _dec(qty), broker)
-    return qty, float(fees), float(risk_per_share * qty)
+    return qty, float(fees), float(Decimal(str(risk_per_share)) * qty)
 
 
 def _currency(market: str) -> str:
@@ -528,14 +544,16 @@ def _finish(brief: dict, raw_reply: dict, provider: str, model: str, started) ->
         if sector and seen_sector.get(sector, 0) >= max_sector:
             rejected.append({"code": pick.code, "reason": f"行业集中度：{sector} 已满"})
             continue
-        # Can this account even afford one lot? Saying "no" beats dropping it.
+        # Can this account even afford a tradable size? Saying "no" beats dropping it.
         lots = brief.get("_lots") or {}
+        brokers = (brief.get("account") or {}).get("brokers") or {}
         qty, _fees, _risk = size_position(
-            pick, brief, lots.get(f"{pick.market}:{pick.code}", 1)
+            pick, brief, lots.get(f"{pick.market}:{pick.code}", 1),
+            brokers.get(pick.market),
         )
         if qty <= 0:
             rejected.append(
-                {"code": pick.code, "reason": "本金不够买一手（或超出单票 35% 上限）"}
+                {"code": pick.code, "reason": "本金不够买最小可成交单位（或超出单票 35% 上限）"}
             )
             continue
         if sector:
@@ -617,11 +635,16 @@ def _store(accepted: list[dict], brief: dict, label: str, raw_reply: dict) -> in
         }
         for item in accepted:
             pick: Pick = item["pick"]
+            brokers = (brief.get("account") or {}).get("brokers") or {}
             qty, fees, risk_amount = size_position(
-                pick, brief, lots.get(f"{pick.market}:{pick.code}", 1)
+                pick, brief, lots.get(f"{pick.market}:{pick.code}", 1),
+                brokers.get(pick.market),
             )
             if qty <= 0:
                 continue
+            from kestrel.core.quantity import db_value
+
+            qty_db = db_value(qty)
             symbol_id = conn.execute(
                 "SELECT id FROM symbol WHERE market=? AND code=?", (pick.market, pick.code)
             ).fetchone()["id"]
@@ -651,7 +674,7 @@ def _store(accepted: list[dict], brief: dict, label: str, raw_reply: dict) -> in
                     to_micro(pick.entry_low), to_micro(pick.entry_high),
                     to_micro(pick.stop), to_micro(pick.target),
                     to_micro(pick.entry_low + (pick.target - pick.entry_low) * 1.5),
-                    qty, lots.get(f"{pick.market}:{pick.code}", 1),
+                    qty_db, lots.get(f"{pick.market}:{pick.code}", 1),
                     to_micro(risk_amount), to_micro(fees),
                     to_micro(pick.entry_low + fees / max(1, qty)),
                     round(r_multiple, 2), pick.conviction / 100.0,
