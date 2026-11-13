@@ -9,7 +9,6 @@
   </div>
   <div class="page-actions">
     <button class="btn" id="fill-btn">{{ t('journal.add_fill') }}</button>
-    <a class="btn ghost" href="/journal?tab=import">{{ t('journal.tab_import') }}</a>
   </div>
 </div>
 
@@ -139,9 +138,9 @@
                 {% elif p.exit.action in ('take_partial', 'exit_all') %}
                   <form method="post" action="/journal/{{ p.trade_id }}/close" class="inline-form">
                     <input type="hidden" name="exit_price" value="{{ '%.3f'|format(p.price) }}">
-                    <input type="hidden" name="qty" value="{{ p.exit.qty | int }}">
+                    <input type="hidden" name="qty" value="{{ p.exit.qty }}">
                     <button class="btn sm {{ 'danger' if p.exit.urgency == 'urgent' else '' }}">
-                      {{ t('journal.sell_n', n=p.exit.qty | int) }}
+                      {{ t('journal.sell_n', n=p.exit.qty) }}
                     </button>
                   </form>
                 {% endif %}
@@ -154,7 +153,7 @@
             <form method="post" action="/journal/{{ p.trade_id }}/close" class="close-form">
               <input name="exit_price" type="number" step="0.001" required
                      placeholder="{{ t('j.exit') }}">
-              <input name="qty" type="number" step="1" min="1" max="{{ p.qty }}" placeholder="{{ t('journal.close_form_qty') }}">
+              <input name="qty" type="number" step="any" min="0.0001" max="{{ p.qty }}" placeholder="{{ t('journal.close_form_qty') }}">
               <button class="btn sm">{{ t('j.close') }}</button>
             </form>
           </td>
@@ -293,12 +292,13 @@
     <div class="card-head"><h2>{{ t('journal.tab_import') }}</h2></div>
     <div class="card-body">
       <p class="hint" style="margin-bottom:12px;">{{ t('journal.import_intro') }}</p>
-      <textarea id="stmt-text" rows="7" class="textarea"></textarea>
+      <textarea id="stmt-text" rows="7" class="textarea" placeholder="{{ t('journal.import_placeholder') }}"></textarea>
       <div class="row-actions">
         <button class="btn ghost" id="parse-btn">{{ t('journal.parse') }}</button>
         <button class="btn" id="import-btn" disabled>{{ t('journal.import') }}</button>
         <span class="tiny" id="parse-msg"></span>
       </div>
+      <p class="tiny muted" style="margin-top:10px;">{{ t('journal.import_help') }}</p>
 
       <div id="parse-result" class="hidden" style="margin-top:18px;">
         <table class="grid" id="parse-table">
@@ -306,115 +306,48 @@
           <tbody></tbody>
         </table>
       </div>
-
-      <p class="tiny muted" style="margin-top:16px;">{{ t('journal.ocr_missing') }}</p>
     </div>
   </section>
 </div>
 
-<dialog id="fill-dialog" class="modal">
-  <form method="dialog" class="modal-head">
-    <h2>{{ t('journal.add_fill') }}</h2>
-    <button class="btn ghost sm" value="cancel">{{ t('journal.close') }}</button>
-  </form>
-  <div class="modal-body">
-    <p class="hint" style="margin-bottom:14px;">
-      {{ t('journal.fill_intro') }}
-    </p>
-    <div class="grid g2">
-      <div class="field"><label>{{ t('journal.import_col_market') }}</label>
-        <select id="fd-market"><option value="HK">{{ t('journal.market_hk') }}</option><option value="US">{{ t('journal.market_us') }}</option><option value="CN">{{ t('journal.market_cn') }}</option></select>
-      </div>
-      <div class="field"><label>{{ t('journal.import_col_code') }}</label><input id="fd-code" placeholder="00700"></div>
-      <div class="field"><label>{{ t('journal.name_optional') }}</label><input id="fd-name" placeholder="{{ t('journal.fd_name_ph') }}"></div>
-      <div class="field"><label>{{ t('journal.import_col_side') }}</label>
-        <select id="fd-side"><option value="buy">{{ t('journal.side_buy') }}</option><option value="sell">{{ t('journal.side_sell') }}</option></select>
-      </div>
-      <div class="field"><label>{{ t('journal.qty_shares') }}</label><input id="fd-qty" type="number" step="1" min="1" placeholder="100"></div>
-      <div class="field"><label>{{ t('journal.fill_price') }}</label><input id="fd-price" type="number" step="0.001" placeholder="402.5"></div>
-      <div class="field"><label>{{ t('journal.fees_optional') }}</label><input id="fd-fees" type="number" step="0.01" placeholder="0"></div>
-      <div class="field"><label>{{ t('journal.fill_date') }}</label><input id="fd-date" type="date"></div>
-      <div class="field"><label>{{ t('journal.stop_on_buy') }}</label><input id="fd-stop" type="number" step="0.001" placeholder="380"></div>
-      <div class="field"><label>{{ t('journal.target_on_buy') }}</label><input id="fd-target" type="number" step="0.001" placeholder="440"></div>
-    </div>
-    <p class="tiny muted" style="margin-top:8px;">
-      {{ t('journal.stop_required') }}
-    </p>
-    <div class="field" style="margin-top:12px;"><label>{{ t('journal.note') }}</label><input id="fd-note" placeholder="{{ t('journal.fd_note_ph') }}"></div>
-    <p class="tiny" id="fd-msg" style="min-height:18px;margin-top:8px;"></p>
-  </div>
-  <div class="modal-foot">
-    <button class="btn ghost" id="fd-cancel">{{ t('journal.cancel') }}</button>
-    <button class="btn" id="fd-save">{{ t('journal.save_fill') }}</button>
-  </div>
-</dialog>
+{% include "_fill_modal.html" %}
 {% endblock %}
 
 {% block scripts %}
+{# I18N 必须先于 fill.js 定义：fill.js 在加载时就读取它。 #}
+<script>
+window.I18N = Object.assign(window.I18N || {}, {
+  requireFill: {{ t('journal.require_fill') | tojson }},
+  movingStop: {{ t('journal.moving_stop') | tojson }},
+  confirmStop: {{ t('journal.confirm_stop') | tojson }},
+  stopReason: {{ t('journal.stop_reason') | tojson }},
+  stopFailed: {{ t('journal.stop_failed') | tojson }},
+  pasteFirst: {{ t('journal.paste_first') | tojson }},
+  parseEmpty: {{ t('journal.parse_empty') | tojson }},
+  buy: {{ t('journal.side_buy') | tojson }},
+  sell: {{ t('journal.side_sell') | tojson }},
+  normal: {{ t('journal.normal') | tojson }},
+  parsedOk: {{ t('journal.parsed_ok') | tojson }},
+  saved: {{ t('journal.saved') | tojson }},
+  savedWithFailures: {{ t('journal.saved_with_failures') | tojson }},
+  saveFailed: {{ t('journal.save_failed') | tojson }},
+  saveFailedPlain: {{ t('journal.save_failed_plain') | tojson }},
+  saving: {{ t('journal.saving') | tojson }},
+  codeHelp: {{ t('journal.code_help') | tojson }},
+  notCached: {{ t('journal.not_cached') | tojson }},
+  feesByBroker: {{ t('journal.fees_by_broker') | tojson }},
+  levelsNote: {{ t('journal.levels_note') | tojson }},
+  levelsOptional: {{ t('journal.levels_optional') | tojson }},
+  levelsUnavailable: {{ t('journal.levels_unavailable') | tojson }},
+  unknownSymbol: {{ t('journal.unknown_symbol') | tojson }}
+});
+</script>
+<script src="/static/js/fill.js"></script>
 <script>
 (function () {
-  var dialog = document.getElementById('fill-dialog');
-  var msg = document.getElementById('fd-msg');
-  window.I18N = Object.assign(window.I18N || {}, {
-    requireFill: {{ t('journal.require_fill') | tojson }},
-    movingStop: {{ t('journal.moving_stop') | tojson }},
-    confirmStop: {{ t('journal.confirm_stop') | tojson }},
-    stopReason: {{ t('journal.stop_reason') | tojson }},
-    stopFailed: {{ t('journal.stop_failed') | tojson }},
-    pasteFirst: {{ t('journal.paste_first') | tojson }},
-    parseEmpty: {{ t('journal.parse_empty') | tojson }},
-    buy: {{ t('journal.side_buy') | tojson }},
-    sell: {{ t('journal.side_sell') | tojson }},
-    normal: {{ t('journal.normal') | tojson }},
-    parsedOk: {{ t('journal.parsed_ok') | tojson }},
-    saved: {{ t('journal.saved') | tojson }},
-    savedWithFailures: {{ t('journal.saved_with_failures') | tojson }},
-    saveFailed: {{ t('journal.save_failed') | tojson }},
-    saveFailedPlain: {{ t('journal.save_failed_plain') | tojson }},
-    saving: {{ t('journal.saving') | tojson }}
-  });
   var fillBtn = document.getElementById('fill-btn');
-  if (fillBtn && dialog) {
-    fillBtn.addEventListener('click', function () {
-      document.getElementById('fd-date').value = new Date().toISOString().slice(0, 10);
-      msg.textContent = '';
-      if (typeof dialog.showModal === 'function') dialog.showModal();
-      else dialog.setAttribute('open', '');
-    });
-    document.getElementById('fd-cancel').addEventListener('click', function () {
-      if (typeof dialog.close === 'function') dialog.close();
-      else dialog.removeAttribute('open');
-    });
-    document.getElementById('fd-save').addEventListener('click', function () {
-      var payload = {
-        market: document.getElementById('fd-market').value,
-        code: document.getElementById('fd-code').value.trim(),
-        name: document.getElementById('fd-name').value.trim(),
-        side: document.getElementById('fd-side').value,
-        qty: document.getElementById('fd-qty').value,
-        price: document.getElementById('fd-price').value,
-        fees: document.getElementById('fd-fees').value || 0,
-        filled_at: document.getElementById('fd-date').value || null,
-        stop: document.getElementById('fd-stop').value || null,
-        target: document.getElementById('fd-target').value || null,
-        note: document.getElementById('fd-note').value
-      };
-      if (!payload.code || !payload.qty || !payload.price) {
-        msg.textContent = window.I18N.requireFill;
-        return;
-      }
-      msg.textContent = window.I18N.saving;
-      fetch('/api/journal/fill', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }).then(function (r) { return r.json(); })
-        .then(function (res) {
-          if (!res.ok) { msg.textContent = res.error || window.I18N.saveFailedPlain; return; }
-          location.reload();
-        })
-        .catch(function (e) { msg.textContent = String(e); });
-    });
+  if (fillBtn && window.openFillDialog) {
+    fillBtn.addEventListener('click', function () { window.openFillDialog(null); });
   }
 
   /* ---------------- 移动止损 ---------------- */
@@ -422,18 +355,27 @@
     btn.addEventListener('click', function () {
       var id = btn.getAttribute('data-move-stop');
       var stop = btn.getAttribute('data-stop');
-      if (!confirm(window.I18N.confirmStop.replace('{stop}', stop))) return;
-      btn.disabled = true;
-      fetch('/api/journal/' + id + '/stop', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stop: stop, reason: window.I18N.stopReason })
-      }).then(function (r) { return r.json(); })
-        .then(function (res) {
-          if (!res.ok) { alert(res.error || window.I18N.stopFailed); btn.disabled = false; return; }
-          location.reload();
-        })
-        .catch(function (e) { alert(String(e)); btn.disabled = false; });
+      (window.askConfirm
+        ? window.askConfirm(window.I18N.confirmStop.replace('{stop}', stop))
+        : Promise.resolve(confirm(window.I18N.confirmStop.replace('{stop}', stop)))
+      ).then(function (yes) {
+        if (!yes) return;
+        btn.disabled = true;
+        return fetch('/api/journal/' + id + '/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stop: stop, reason: window.I18N.stopReason })
+        }).then(function (r) { return r.json(); })
+          .then(function (res) {
+            if (!res.ok) {
+              showAlert(res.error || window.I18N.stopFailed);
+              btn.disabled = false;
+              return;
+            }
+            location.reload();
+          })
+          .catch(function (e) { showAlert(String(e)); btn.disabled = false; });
+      });
     });
   });
 
@@ -479,7 +421,8 @@
         });
         box.classList.remove('hidden');
         importBtn.disabled = false;
-        pmsg.textContent = window.I18N.parsedOk.replace('{n}', parsed.length);
+        pmsg.textContent = window.I18N.parsedOk.replace('{n}', parsed.length) +
+          (res.note ? ' ' + res.note : '');
       });
   });
 

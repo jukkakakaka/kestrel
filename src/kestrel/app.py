@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from kestrel import __version__
 from kestrel.core.clock import iso
 from kestrel.core.money import to_micro
+from kestrel.core.quantity import db_value, to_qty
 from kestrel.datasources.base import guess_market
 from kestrel.datasources.chain import QuoteChain, default_chain
 from kestrel.db.engine import connect
@@ -337,11 +338,31 @@ def create_app() -> FastAPI:
             return query_locale if query_locale in available_locales() else "zh-CN"
         return request.cookies.get("locale") or "zh-CN"
 
+    def _known_symbols(limit: int = 300) -> list[dict]:
+        """记账弹窗的代码联想：自选优先，其次候选池。"""
+        conn = connect()
+        try:
+            return [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT s.market, s.code, s.name FROM symbol s"
+                    " LEFT JOIN watchlist w ON w.symbol_id = s.id"
+                    " WHERE w.id IS NOT NULL OR s.is_pool=1"
+                    " ORDER BY (w.id IS NULL), s.market, s.code LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            ]
+        finally:
+            conn.close()
+
     def _ctx(request: Request, **extra):
         locale = _locale(request)
         query_theme = request.query_params.get("theme")
         theme = query_theme or request.cookies.get("theme") or "auto"
-        if query_theme not in ("auto", "light", "dark"):
+        # 校验的是**最终**取值，不是查询参数。早先这里校验 query_theme，
+        # 而它平时是 None，于是 cookie 里的深色每次都被改回 auto——下拉框
+        # 写着「深色」，页面仍是浅色。
+        if theme not in ("auto", "light", "dark"):
             theme = "auto"
         return {
             "t": lambda key, **kw: translate(locale, key, **kw),
@@ -715,6 +736,7 @@ def create_app() -> FastAPI:
                 scans=scan_service.recent_scans(6),
                 analyst_runs=analyst_service.recent_runs(3),
                 engine=engine_info,
+                symbols_known=_known_symbols(),
                 horizon={
                     "requested": requested,
                     "pinned": pinned,
@@ -803,10 +825,9 @@ def create_app() -> FastAPI:
             if rec is None:
                 return {"ok": False, "error": "这条建议不存在"}
             qty_raw = (body or {}).get("qty")
-            try:
-                qty = int(float(qty_raw)) if qty_raw not in (None, "") else int(rec["qty"])
-            except (TypeError, ValueError):
-                qty = int(rec["qty"])
+            qty = to_qty(qty_raw) if qty_raw not in (None, "") else to_qty(rec["qty"])
+            if qty <= 0:
+                qty = to_qty(rec["qty"])
             price = fill_price or rec["entry_low"] / 1_000_000
             result = execution.record(
                 execution.Fill(
@@ -950,10 +971,9 @@ def create_app() -> FastAPI:
                 )
             except Exception:  # noqa: BLE001
                 fill_price = None
-            try:
-                qty = int(float(qty_raw)) if qty_raw else int(rec["qty"])
-            except (TypeError, ValueError):
-                qty = int(rec["qty"])
+            qty = to_qty(qty_raw) if qty_raw else to_qty(rec["qty"])
+            if qty <= 0:
+                qty = to_qty(rec["qty"])
             if fill_price is None or fill_price <= 0:
                 return templates.TemplateResponse(
                     request=request, name="receipt.html",
@@ -996,7 +1016,7 @@ def create_app() -> FastAPI:
                 (
                     rec["id"], code, action,
                     to_micro(fill_price) if action in ("executed", "partial") and fill_raw else None,
-                    int(float(qty_raw)) if qty_raw else rec["qty"],
+                    db_value(qty) if qty_raw else rec["qty"],
                     datetime.now(UTC).isoformat(timespec="seconds"),
                     pct, r_dev, note or None,
                 ),
@@ -1141,11 +1161,13 @@ def create_app() -> FastAPI:
 
         open_positions = position_service.open_positions()
         quality = execution.quality_report()
+        known = _known_symbols()
         return templates.TemplateResponse(
             request=request, name="journal.html",
             context=_ctx(request, open_trades=journal.list_trades("open"),
                          closed=journal.list_trades("closed"), stats=journal.stats(),
                          positions=open_positions,
+                         symbols_known=known,
                          book=position_service.summary(open_positions),
                          quality=quality,
                          lesson=execution.lesson(
@@ -1167,7 +1189,7 @@ def create_app() -> FastAPI:
             market=market,
             code=code,
             side=str(form.get("side") or "buy"),
-            qty=int(float(form.get("qty") or 0)),
+            qty=to_qty(form.get("qty") or 0),
             price=str(form.get("entry_price") or 0),
             fees=str(form.get("fees") or 0),
             filled_at=str(form.get("filled_at") or "") or None,
@@ -1200,7 +1222,7 @@ def create_app() -> FastAPI:
             str(form.get("exit_price") or 0),
             str(form.get("review") or ""),
             bool(form.get("rule_break")),
-            qty=int(float(qty_raw)) if qty_raw else None,
+            qty=to_qty(qty_raw) if qty_raw else None,
         )
         if isinstance(result, dict) and result.get("ok") is False:
             return RedirectResponse(
@@ -1481,8 +1503,11 @@ def create_app() -> FastAPI:
                 else:
                     note = "原有缓存不足，已自动补取更长历史后再试跑。"
             if error is None:
+                # 用完整规则表回测：策略下拉列出的是全部规则（含用户自建的），
+                # 只用内置三条会让 pullback_quiet 等规则报 "unknown strategy"。
                 result = backtest.run(
-                    bars, strategy, max_hold=cfg.max_hold, stop_band=cfg.stop_band
+                    bars, strategy, max_hold=cfg.max_hold, stop_band=cfg.stop_band,
+                    registry_override=rule_service.registry(enabled_only=False),
                 )
                 result["timeframe"] = cfg.code
                 result["bar"] = cfg.bar
@@ -1903,23 +1928,39 @@ def create_app() -> FastAPI:
         allowed = {"symbol", "watchlist", "trade", "ipo_ledger", "config_kv", "recommendation"}
         conn = connect()
         added = 0
+        skipped = 0
         try:
             conn.execute("BEGIN")
             for table, rows in tables.items():
                 if table not in allowed or not isinstance(rows, list):
                     continue
+                # 列名来自用户上传的文件，不能直接拼进 SQL。先按真实表结构过滤，
+                # 否则一个带引号的键就能改写整条语句。
+                known = {
+                    r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()
+                }
                 for row in rows:
                     if not isinstance(row, dict) or not row:
+                        skipped += 1
                         continue
-                    cols = ",".join(row.keys())
-                    marks = ",".join("?" * len(row))
+                    cols = [c for c in row if c in known]
+                    if not cols:
+                        skipped += 1
+                        continue
+                    marks = ",".join("?" * len(cols))
                     try:
-                        conn.execute(
-                            f"INSERT OR IGNORE INTO {table} ({cols}) VALUES ({marks})",
-                            tuple(row.values()),
+                        cur = conn.execute(
+                            f"INSERT OR IGNORE INTO {table} ({','.join(cols)}) VALUES ({marks})",
+                            tuple(row[c] for c in cols),
                         )
-                        added += 1
+                        # INSERT OR IGNORE 跳过重复行时 rowcount 是 0；只数真正写入的，
+                        # 否则「导入 40 行」里可能一行都没进去。
+                        if cur.rowcount:
+                            added += cur.rowcount
+                        else:
+                            skipped += 1
                     except Exception:  # noqa: BLE001, PERF203
+                        skipped += 1
                         continue
             conn.execute("COMMIT")
         except Exception as exc:  # noqa: BLE001
@@ -1927,7 +1968,7 @@ def create_app() -> FastAPI:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
         finally:
             conn.close()
-        return {"ok": True, "rows": added}
+        return {"ok": True, "rows": added, "skipped": skipped}
 
     # ---------------------------------------------------------------- broker plans
 
@@ -1987,8 +2028,63 @@ def create_app() -> FastAPI:
 
         body = await request.json()
         text = str((body or {}).get("text", ""))
-        parsed = statement.parse(text)
-        return {"ok": True, "rows": parsed}
+        result = statement.parse_table(text)
+        # note 告诉用户「认出了哪些列、跳过了几行」，这比一个行数有用得多。
+        result["ok"] = True
+        return result
+
+    @app.get("/api/journal/fill/suggest", response_class=JSONResponse)
+    async def api_fill_suggest(
+        code: str = "", market: str = "", price: str = "", qty: str = "",
+        side: str = "buy", name: str = "", horizon: str = "",
+    ):
+        """记账弹窗用：把用户没填的（市场、名称、手续费、止损目标）算出来。
+
+        一次请求返回所有能自动填的东西，页面就不必让用户先知道市场再去查
+        名称、再自己算手续费。算不出来的字段返回 ``null`` 和原因，而不是 0。
+        """
+        from kestrel.services import config as config_service
+        from kestrel.services import fills as fill_service
+
+        target = fill_service.resolve_target(code, market or None, name=name)
+
+        conn = connect()
+        try:
+            broker = config_service.get(conn, f"broker.{target.market}")
+        finally:
+            conn.close()
+
+        fees = None
+        try:
+            if price and qty:
+                fees = float(fill_service.estimate_fees(
+                    target.market, price, qty, broker, side
+                ))
+        except Exception:  # noqa: BLE001
+            fees = None
+
+        levels = {"ok": False, "reason": "先填代码和成交价"}
+        if target.code and price:
+            try:
+                levels = fill_service.suggest_levels(
+                    target.market, target.code, price, horizon or None
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning("level suggestion failed: %s", exc)
+                levels = {"ok": False, "reason": "行情数据不可用，先自己填一个止损"}
+
+        return {
+            "ok": True,
+            "market": target.market,
+            "code": target.code,
+            "name": target.name,
+            "currency": target.currency,
+            "lot_size": target.lot_size,
+            "known": target.known,
+            "broker": broker,
+            "fees": fees,
+            "levels": levels,
+        }
 
     @app.post("/api/journal/import", response_class=JSONResponse)
     async def api_journal_import(request: Request):
@@ -2001,25 +2097,76 @@ def create_app() -> FastAPI:
 
     @app.post("/api/journal/fill", response_class=JSONResponse)
     async def api_journal_fill(request: Request):
-        """登记一笔真实成交。价格与数量允许和建议不同。"""
+        """登记一笔真实成交。价格与数量允许和建议不同。
+
+        市场、名称、手续费都可以不填：这里是最后一个能补上它们的地方，
+        否则用户会被迫先去行情页查一遍再回来记账。
+        """
+        from kestrel.services import config as config_service
         from kestrel.services import execution
+        from kestrel.services import fills as fill_service
 
         try:
             body = await request.json()
         except Exception:
             return JSONResponse({"ok": False, "error": "请求格式不对"}, status_code=400)
+
+        raw_code = str(body.get("code") or "").strip()
+        if not raw_code:
+            return JSONResponse({"ok": False, "error": "填一个代码或名称"}, status_code=400)
+
+        target = fill_service.resolve_target(
+            raw_code, str(body.get("market") or "").strip().upper() or None,
+            name=str(body.get("name") or ""),
+        )
+        if not target.code and raw_code:
+            # 库里没有（还没加自选）：去解析一次。记账不该要求用户先去加自选，
+            # 但解析失败时也不要瞎猜市场——那会把港股写成美股。
+            from kestrel.datasources import resolve as resolver
+
+            found = await resolver.resolve(raw_code)
+            if found is not None:
+                target = fill_service.ResolvedFillTarget(
+                    market=found.market, code=found.code, name=found.name,
+                    currency=found.currency, lot_size=found.lot_size, known=False,
+                )
+        if not target.code:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": (
+                        f"找不到「{raw_code}」。先在行情页加自选，"
+                        "或者直接填代码（例如 00700、AAPL）。"
+                    ),
+                },
+                status_code=400,
+            )
+
+        price = body.get("price") or 0
+        qty = to_qty(body.get("qty") or 0)
+        fees = body.get("fees")
+        if fees in (None, ""):
+            conn = connect()
+            try:
+                broker = config_service.get(conn, f"broker.{target.market}")
+            finally:
+                conn.close()
+            fees = fill_service.estimate_fees(
+                target.market, price, qty, broker, str(body.get("side") or "buy")
+            )
+
         try:
             fill = execution.Fill(
-                market=str(body.get("market") or "").upper(),
-                code=str(body.get("code") or "").strip(),
+                market=target.market,
+                code=target.code,
                 side=str(body.get("side") or "buy"),
-                qty=int(float(body.get("qty") or 0)),
-                price=str(body.get("price") or 0),
-                fees=str(body.get("fees") or 0),
+                qty=qty,
+                price=str(price),
+                fees=str(fees or 0),
                 filled_at=str(body.get("filled_at") or "") or None,
                 rec_id=int(body["rec_id"]) if body.get("rec_id") else None,
                 note=str(body.get("note") or ""),
-                name=str(body.get("name") or ""),
+                name=target.name,
                 source="manual",
                 stop=body.get("stop"),
                 target=body.get("target"),

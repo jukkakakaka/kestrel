@@ -521,11 +521,20 @@ table.grid th.num, table.grid td.num { text-align: right; }
 .advice-body .learn h4 { margin-top: 2px; }
 
 /* ---------- modal (native <dialog>) ---------- */
+/* 上面的 `* { margin: 0 }` 会把浏览器给 dialog 的 `margin: auto` 一起清掉，
+   弹窗于是贴在左上角。这里显式还原居中，并固定为视口中央。 */
 .modal {
+  position: fixed; inset: 0; margin: auto;
   border: 1px solid var(--line); border-radius: var(--radius);
   background: var(--surface); color: var(--ink);
   padding: 0; width: min(720px, 92vw); max-height: 88vh;
   box-shadow: var(--shadow-2);
+}
+.modal[open] { display: flex; flex-direction: column; }
+.modal[open] { animation: modal-in .16s ease-out; }
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(6px) scale(.99); }
+  to   { opacity: 1; transform: none; }
 }
 .modal::backdrop { background: rgba(6, 9, 15, .62); backdrop-filter: blur(2px); }
 .modal-head {
@@ -533,7 +542,7 @@ table.grid th.num, table.grid td.num { text-align: right; }
   padding: 14px 18px; border-bottom: 1px solid var(--line-soft);
 }
 .modal-head h2 { font-size: 15px; font-weight: 620; }
-.modal-body { padding: 18px; overflow: auto; max-height: 62vh; }
+.modal-body { padding: 18px; overflow: auto; flex: 1 1 auto; min-height: 0; }
 .modal-foot {
   display: flex; justify-content: flex-end; gap: 8px;
   padding: 13px 18px; border-top: 1px solid var(--line-soft);

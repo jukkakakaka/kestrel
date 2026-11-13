@@ -141,7 +141,10 @@
 <div data-pane="today">
   {% if recs %}
     {% for r in recs %}
-    <article class="advice" data-rec="{{ r.id }}" id="rec-{{ r.id }}">
+    {# 弹窗预填用的原始数字。格式化在 JS 里做，模板只负责给数值。 #}
+    {% set plan_data = {'code': r.code, 'qty': r.qty, 'currency': r.currency,
+                        'entry': r.entry_low, 'stop': r.stop, 'target': r.target1} %}
+    <article class="advice" data-rec="{{ r.id }}" data-plan='{{ plan_data | tojson }}' id="rec-{{ r.id }}">
       <header class="advice-head">
         <span class="tag tag-{{ r.market|lower }}">{{ r.market }}</span>
         <span class="sym"><a href="/stock/{{ r.market }}/{{ r.code }}">{{ r.name }}</a></span>
@@ -334,9 +337,26 @@
   <div class="card"><div class="empty"><strong>{{ t('adv.no_scan_title') }}</strong>{{ t('adv.no_scan_body') }}</div></div>
   {% endif %}
 </div>
+{% include "_fill_modal.html" %}
 {% endblock %}
 
 {% block scripts %}
+{# fill.js 在加载时读取 I18N，所以词典必须先定义。 #}
+<script>
+window.I18N = Object.assign(window.I18N || {}, {
+  requireFill: {{ t('journal.require_fill') | tojson }},
+  saveFailedPlain: {{ t('journal.save_failed_plain') | tojson }},
+  saving: {{ t('journal.saving') | tojson }},
+  codeHelp: {{ t('journal.code_help') | tojson }},
+  notCached: {{ t('journal.not_cached') | tojson }},
+  feesByBroker: {{ t('journal.fees_by_broker') | tojson }},
+  levelsNote: {{ t('journal.levels_note') | tojson }},
+  levelsOptional: {{ t('journal.levels_optional') | tojson }},
+  levelsUnavailable: {{ t('journal.levels_unavailable') | tojson }},
+  unknownSymbol: {{ t('journal.unknown_symbol') | tojson }}
+});
+</script>
+<script src="/static/js/fill.js"></script>
 <script>
 (function () {
   var runBtn = document.getElementById('run-btn');
@@ -438,15 +458,30 @@
     el.addEventListener('click', function () {
       var id = el.getAttribute('data-rec');
       var decision = el.getAttribute('data-decide');
-      var body = { decision: decision };
-      if (decision === 'executed') {
-        var fill = prompt('实际成交价是多少？（直接回车表示按建议价成交）');
-        if (fill === null) return;
-        if (fill.trim()) body.fill_price = parseFloat(fill);
-        var qty = prompt('实际成交了多少股？（直接回车表示按建议股数）');
-        if (qty === null) return;
-        if (qty.trim()) body.qty = parseInt(qty, 10);
+
+      // 「我已经买了」不再用两次 prompt()：那是浏览器原生弹窗，不受主题
+      // 控制、也不能改价格以外的字段。直接打开和台账页同一个记账弹窗，
+      // 预填建议的价格、数量、止损和目标，用户只改实际成交的部分。
+      if (decision === 'executed' && window.openFillDialog) {
+        var card = el.closest('.advice');
+        var data = card ? card.getAttribute('data-plan') : null;
+        var plan = data ? JSON.parse(data) : {};
+        // 库里存的是微单位整数，模板不格式化；这里换算成可编辑的价格。
+        var toPrice = function (micro) { return micro ? (micro / 1e6).toFixed(3) : ''; };
+        window.openFillDialog({
+          recId: id,
+          code: plan.code,
+          side: 'buy',
+          qty: plan.qty,
+          price: toPrice(plan.entry),
+          stop: toPrice(plan.stop),
+          target: toPrice(plan.target),
+          note: {{ t('adv.fill_note') | tojson }},
+          onSaved: function () { location.reload(); }
+        });
+        return;
       }
+      var body = { decision: decision };
       el.disabled = true;
       fetch('/advice/' + id + '/decide', {
         method: 'POST',
@@ -455,7 +490,7 @@
       }).then(function (r) { return r.json(); })
         .then(function (res) {
           if (!res.ok) {
-            alert('没有记录成功：' + (res.error || '未知错误'));
+            showAlert('没有记录成功：' + (res.error || '未知错误'));
             el.disabled = false;
             return;
           }
