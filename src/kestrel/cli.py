@@ -136,7 +136,13 @@ def cmd_desktop(args: argparse.Namespace) -> int:
 
 
 def cmd_version(_args: argparse.Namespace) -> int:
+    from kestrel.db.migrate import init_db
     from kestrel.services import updates
+
+    # 在空数据目录上直接跑 `kestrel version` 也要能给出答案：读更新缓存需要
+    # config_kv 表存在，否则打包版会打印半截信息再抛「no such table」。
+    settings.ensure_dirs()
+    init_db()
 
     info = updates.info()
     print(f"Kestrel {info['current']}")

@@ -6,7 +6,7 @@
     dmgbuild -s packaging/macos/dmg_settings.py \
              -D app=dist/Kestrel.app \
              -D background=packaging/dmg-background.png \
-             Kestrel dist/Kestrel-0.2.0.dmg
+             Kestrel dist/Kestrel-0.3.0.dmg
 
 坐标是 Finder 的「逻辑点」，窗口 660×400；背景图按 2x 输出（1320×800），
 两者必须对得上，否则图标会落在文字上。
