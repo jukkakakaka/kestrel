@@ -116,6 +116,7 @@
             <th class="num">{{ t('cost.plan_platform') }}</th>
             <th class="num">{{ t('cost.plan_per_share') }}</th>
             <th class="num">{{ t('cost.plan_platform_min') }}</th>
+            <th>{{ t('cost.plan_capabilities') }}</th>
             <th></th>
           </tr>
         </thead>
@@ -129,6 +130,11 @@
             <td class="num mono">{{ p.platform }}</td>
             <td class="num mono">{{ p.platform_per_share }}</td>
             <td class="num mono">{{ p.platform_min }}</td>
+            <td class="tiny">
+              {% if p.odd_lot_buy %}<span class="badge wait">{{ t('cost.cap_odd_lot') }}</span>{% endif %}
+              {% if p.fractional_us %}<span class="badge wait">{{ t('cost.cap_fractional') }}</span>{% endif %}
+              {% if not p.odd_lot_buy and not p.fractional_us %}<span class="muted">—</span>{% endif %}
+            </td>
             <td>
               <button class="btn sm ghost" data-edit>{{ t('cost.edit') }}</button>
               <button class="btn danger sm" data-del="{{ p.key }}">{{ t('cost.delete') }}</button>
@@ -153,6 +159,23 @@
         <div class="field"><label>{{ t('cost.platform_fixed') }}</label><input id="pl-platform" inputmode="decimal" placeholder="15"></div>
         <div class="field"><label>{{ t('cost.platform_per_share') }}</label><input id="pl-per-share" inputmode="decimal" placeholder="0.005"></div>
         <div class="field"><label>{{ t('cost.platform_min') }}</label><input id="pl-platform-min" inputmode="decimal" placeholder="1"></div>
+      </div>
+      <div class="grid g2" style="margin-top:6px;">
+        <div class="field">
+          <label>{{ t('cost.odd_lot') }}</label>
+          <label class="switch"><input type="checkbox" id="pl-odd-lot"><span></span></label>
+          <span class="help">{{ t('cost.odd_lot_hint') }}</span>
+        </div>
+        <div class="field">
+          <label>{{ t('cost.fractional') }}</label>
+          <label class="switch"><input type="checkbox" id="pl-fractional"><span></span></label>
+          <span class="help">{{ t('cost.fractional_hint') }}</span>
+        </div>
+        <div class="field">
+          <label>{{ t('cost.fractional_min') }}</label>
+          <input id="pl-fractional-min" inputmode="decimal" placeholder="1">
+          <span class="help">{{ t('cost.fractional_min_hint') }}</span>
+        </div>
       </div>
       <div class="row-actions">
         <button class="btn" id="plan-save">{{ t('cost.save') }}</button>
@@ -183,6 +206,9 @@
     document.getElementById('pl-platform').value = plan ? plan.platform : '0';
     document.getElementById('pl-per-share').value = plan ? plan.platform_per_share : '0';
     document.getElementById('pl-platform-min').value = plan ? plan.platform_min : '0';
+    document.getElementById('pl-odd-lot').checked = !!(plan && plan.odd_lot_buy);
+    document.getElementById('pl-fractional').checked = !!(plan && plan.fractional_us);
+    document.getElementById('pl-fractional-min').value = plan ? (plan.fractional_min || 0) : '0';
     editor.style.display = '';
     editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
@@ -208,7 +234,10 @@
       commission_min: parseFloat(document.getElementById('pl-commission-min').value || '0'),
       platform: parseFloat(document.getElementById('pl-platform').value || '0'),
       platform_per_share: parseFloat(document.getElementById('pl-per-share').value || '0'),
-      platform_min: parseFloat(document.getElementById('pl-platform-min').value || '0')
+      platform_min: parseFloat(document.getElementById('pl-platform-min').value || '0'),
+      odd_lot_buy: document.getElementById('pl-odd-lot').checked,
+      fractional_us: document.getElementById('pl-fractional').checked,
+      fractional_min: parseFloat(document.getElementById('pl-fractional-min').value || '0')
     };
     if (!payload.label) { msg.textContent = '名称不能为空'; return; }
     fetch('/api/brokers', {
@@ -226,8 +255,11 @@
   document.querySelectorAll('[data-del]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var key = btn.getAttribute('data-del');
-      if (!confirm('删除或停用这个套餐？内置套餐只会被停用，不会真的删除。')) return;
-      fetch('/api/brokers/' + key + '/delete', { method: 'POST' }).then(function () { location.reload(); });
+      askConfirm('删除或停用这个套餐？内置套餐只会被停用，不会真的删除。').then(function (yes) {
+        if (!yes) return;
+        fetch('/api/brokers/' + key + '/delete', { method: 'POST' })
+          .then(function () { location.reload(); });
+      });
     });
   });
 })();

@@ -6,6 +6,7 @@ import json
 import logging
 
 from kestrel.core.money import format_amount
+from kestrel.core.quantity import display
 from kestrel.db.engine import connect
 from kestrel.notify.channels import ChannelError, Message, build_channel
 from kestrel.receipts import tokens
@@ -68,24 +69,17 @@ async def send_test(channel: str | None = None) -> dict:
     return {"ok": any(r["ok"] for r in results), "results": results}
 
 
-def configured_channels(cfg: dict) -> list[tuple[str, dict]]:
-    out = []
-    for code in CHANNEL_KEYS:
-        if not cfg.get(f"notify.{code}.enabled"):
-            continue
-        conf = {
-            key.split(".", 2)[2]: value
-            for key, value in cfg.items()
-            if key.startswith(f"notify.{code}.")
-        }
-        if code == "ntfy" and not conf.get("topic"):
-            continue
-        if code == "webhook" and not conf.get("url"):
-            continue
-        if code == "weclawbot" and not (conf.get("base_url") and conf.get("bot_id")):
-            continue
-        out.append((code, conf))
-    return out
+def configured_channels(cfg: dict | None = None) -> list[tuple[str, dict]]:
+    """当前真正启用的渠道。
+
+    推送渠道配置存在 ``notify_channel`` 表里（设置页写的是这张表），
+    而不是 ``config_kv``（那些 ``notify.*`` 键是早期版本留下的壳，从未被读取）。
+    这里统一走 ``services.channels``，否则会出现「设置页显示已启用、实际一条
+    也发不出去」——这是最坏的一种失败：用户以为提醒在跑。
+    """
+    from kestrel.services import channels as channel_service
+
+    return channel_service.enabled_channels()
 
 
 def render(rec: dict, locale: str, base_url: str) -> Message:
@@ -95,18 +89,19 @@ def render(rec: dict, locale: str, base_url: str) -> Message:
     entry = format_amount(rec["entry_low"], 3)
     stop = format_amount(rec["stop"], 3)
     target = format_amount(rec["target1"], 3)
+    qty = display(rec["qty"])
 
     if locale == "en":
         title = f"[{badge}] {rec['code']} {rec['name']}"
         body = (
-            f"Entry {entry} | Stop {stop} | Target {target} | Qty {rec['qty']}\n"
+            f"Entry {entry} | Stop {stop} | Target {target} | Qty {qty}\n"
             f"R:R {rec['r_multiple']}:1 · confidence {rec['confidence']:.0%}\n"
             f"Valid until {str(rec['valid_until'])[:16]}Z\n{rec.get('explain_en') or ''}"
         )
     else:
         title = f"【{badge}】{rec['code']} {rec['name']}"
         body = (
-            f"入场 {entry}｜止损 {stop}｜目标 {target}｜{rec['qty']} 股\n"
+            f"入场 {entry}｜止损 {stop}｜目标 {target}｜{qty} 股\n"
             f"盈亏比 {rec['r_multiple']}:1 · 信心 {rec['confidence']:.0%}\n"
             f"有效期至 {str(rec['valid_until'])[:16]}Z\n{rec.get('explain_zh') or ''}"
         )

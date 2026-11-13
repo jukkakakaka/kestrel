@@ -63,25 +63,9 @@ SECTIONS: list[Section] = [
         Field("broker.CN", "A 股券商", "CN broker", "select", options=[
             ("cn_generic", "通用 A 股（万 2.5）")]),
     ]),
-    Section("notify", "推送", "Notifications", [
-        Field("notify.ntfy.enabled", "启用 ntfy", "ntfy", "switch"),
-        Field("notify.ntfy.topic", "ntfy 主题", "ntfy topic", "text",
-              help_zh="装 ntfy App，订阅同名主题即可收到，支持一键回执按钮",
-              help_en="Subscribe to this topic in the ntfy app for one-tap receipts"),
-        Field("notify.ntfy.server", "ntfy 服务器", "ntfy server", "text"),
-        Field("notify.webhook.enabled", "启用 Webhook", "Webhook", "switch"),
-        Field("notify.webhook.url", "Webhook 地址", "Webhook URL", "text",
-              help_zh="企业微信群机器人地址可直接粘进来", help_en="WeCom bot URL works as-is"),
-        Field("notify.weclawbot.enabled", "启用微信 clawbot", "WeChat clawbot", "switch",
-              help_zh="走 WeClawBot-API 网关，只能在已登录的机器上推送",
-              help_en="Requires a running WeClawBot-API gateway"),
-        Field("notify.weclawbot.base_url", "网关地址", "Gateway URL", "text"),
-        Field("notify.weclawbot.bot_id", "bot_id", "bot_id", "text"),
-        Field("notify.weclawbot.api_token", "api_token", "api_token", "password"),
-        Field("receipt.public_base", "回执链接前缀", "Receipt base URL", "text",
-              help_zh="填手机能访问到的地址，局域网 IP 或 Tunnel 域名",
-              help_en="A URL your phone can reach"),
-    ]),
+    # 推送渠道不在这里：它们的字段在 services/channels.py 的 SCHEMA 里，
+    # 存在 notify_channel 表，由设置页直接读写。这里的 notify.* 键曾经是
+    # 第二套配置，存进去没人读——正是文档里说的「页面看起来能配其实无效」。
     Section("agents", "分析引擎", "Analysis engines", [
         # 键名必须和 engine.py / analyst.py 实际读的一致。历史上这里有第二套
         # agent.mode / agent.llm.* 键，存进去没人读，页面看起来能配其实无效。
@@ -108,15 +92,6 @@ EXTRA_DEFAULTS: dict[str, Any] = {
     "ui.learning_mode": True,
     "ui.glossary": True,
     "scan.min_score": 0.55,
-    "notify.ntfy.enabled": False,
-    "notify.ntfy.topic": "",
-    "notify.ntfy.server": "https://ntfy.sh",
-    "notify.webhook.enabled": False,
-    "notify.webhook.url": "",
-    "notify.weclawbot.enabled": False,
-    "notify.weclawbot.base_url": "",
-    "notify.weclawbot.bot_id": "",
-    "notify.weclawbot.api_token": "",
 }
 
 # 旧版本写过这些键，但它们不代表任何真实行为。清理掉，免得用户以为设过什么。
@@ -127,6 +102,17 @@ LEGACY_KEYS = (
     "agent.llm.model",
     "agent.llm.enabled",
     "agent.budget_per_day",
+    # 推送渠道曾经有两套配置：这里的 notify.* 和 notify_channel 表。
+    # 只有后者被真正读取，前面这些存进去不代表任何行为。
+    "notify.ntfy.enabled",
+    "notify.ntfy.topic",
+    "notify.ntfy.server",
+    "notify.webhook.enabled",
+    "notify.webhook.url",
+    "notify.weclawbot.enabled",
+    "notify.weclawbot.base_url",
+    "notify.weclawbot.bot_id",
+    "notify.weclawbot.api_token",
 )
 
 

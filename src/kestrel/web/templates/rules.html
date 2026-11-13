@@ -191,6 +191,20 @@
 
 {% block scripts %}
 <script>
+window.I18N = Object.assign(window.I18N || {}, {
+  jsonInvalid: {{ t('rules.js_json_invalid') | tojson }},
+  saving: {{ t('journal.saving') | tojson }},
+  savedValidating: {{ t('rules.js_saved_validating') | tojson }},
+  ruleEnabled: {{ t('rules.js_enabled') | tojson }},
+  ruleDisabled: {{ t('rules.js_disabled') | tojson }},
+  validating: {{ t('rules.js_validating') | tojson }},
+  validatingAll: {{ t('rules.js_validating_all') | tojson }},
+  copied: {{ t('rules.js_copied') | tojson }},
+  newRuleName: {{ t('rules.js_new_name') | tojson }},
+  copySuffix: {{ t('rules.js_copy_suffix') | tojson }}
+});
+</script>
+<script>
 (function () {
   var RULES = {{ rules | map(attribute='spec') | list | tojson }};
   var META = {};
@@ -213,7 +227,7 @@
     document.getElementById('ed-name').value = meta && meta.name ? meta.name : '';
     document.getElementById('ed-note').value = meta && meta.note ? meta.note : '';
     var spec = meta && meta.spec ? meta.spec : {
-      code: 'my_rule', name: '我的规则',
+      code: 'my_rule', name: window.I18N.newRuleName,
       conditions: [{ left: 'ma_stack', op: 'is_true' }],
       score: { base: 0.45, bonus: [] },
       stop: { field: 'low20' }, target: { field: 'high20' }
@@ -239,7 +253,7 @@
     b.addEventListener('click', function () {
       var meta = JSON.parse(JSON.stringify(META[b.getAttribute('data-copy')]));
       meta.spec.code = meta.code + '_copy';
-      meta.spec.name = meta.name + ' 副本';
+      meta.spec.name = meta.name + window.I18N.copySuffix;
       meta.name = meta.spec.name;
       openEditor(meta);
     });
@@ -249,8 +263,8 @@
     var raw = ta.value;
     var parsed;
     try { parsed = JSON.parse(raw); }
-    catch (e) { msg.textContent = 'JSON 语法错误：' + e.message; return; }
-    msg.textContent = '保存中…';
+    catch (e) { msg.textContent = window.I18N.jsonInvalid + e.message; return; }
+    msg.textContent = window.I18N.saving;
     fetch('/api/rules/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -258,7 +272,7 @@
     }).then(function (r) { return r.json(); })
       .then(function (res) {
         if (!res.ok) { msg.textContent = res.error; return; }
-        msg.textContent = '已保存，正在验证…';
+        msg.textContent = window.I18N.savedValidating;
         return fetch('/api/rules/validate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -273,7 +287,9 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: el.checked })
-      }).then(function () { say(el.checked ? '已启用，下次扫描会用这条规则。' : '已停用，建议里不会再出现它。', 'ok'); });
+      }).then(function () {
+        say(el.checked ? window.I18N.ruleEnabled : window.I18N.ruleDisabled, 'ok');
+      });
     });
   });
 
@@ -281,7 +297,7 @@
     b.addEventListener('click', function () {
       var code = b.getAttribute('data-validate');
       b.disabled = true;
-      b.textContent = '验证中…';
+      b.textContent = window.I18N.validating;
       fetch('/api/rules/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -302,7 +318,7 @@
   if (all) {
     all.addEventListener('click', function () {
       all.disabled = true;
-      all.textContent = '验证全部…';
+      all.textContent = window.I18N.validatingAll;
       fetch('/api/rules/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -323,7 +339,7 @@
   if (copyBtn) {
     copyBtn.addEventListener('click', function () {
       var text = document.getElementById('ai-prompt').textContent;
-      var done = function () { document.getElementById('copy-msg').textContent = '已复制'; };
+      var done = function () { document.getElementById('copy-msg').textContent = window.I18N.copied; };
       if (navigator.clipboard) {
         navigator.clipboard.writeText(text).then(done);
       } else {
@@ -340,9 +356,11 @@
 
   document.querySelectorAll('[data-del]').forEach(function (b) {
     b.addEventListener('click', function () {
-      if (!confirm('删除这条规则？内置规则不能删，只能停用。')) return;
-      fetch('/api/rules/' + b.getAttribute('data-del') + '/delete', { method: 'POST' })
-        .then(function () { location.reload(); });
+      askConfirm('删除这条规则？内置规则不能删，只能停用。').then(function (yes) {
+        if (!yes) return;
+        fetch('/api/rules/' + b.getAttribute('data-del') + '/delete', { method: 'POST' })
+          .then(function () { location.reload(); });
+      });
     });
   });
 })();

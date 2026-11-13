@@ -364,16 +364,13 @@
           <pre class="prompt-body">{{ prompts.analyse }}</pre>
         </div>
 
-        <div class="prompt-card">
-          <div class="prompt-head">
-            <div>
-              <b>{{ t('settings.wb_job2') }}</b>
-              <div class="tiny muted">{{ t('settings.wb_job2_hint') }}</div>
-            </div>
-            <button class="btn sm ghost" data-copy-prompt="notify">{{ t('settings.copy_prompt') }}</button>
-          </div>
-          <pre class="prompt-body">{{ prompts.notify }}</pre>
-        </div>
+        {# 转发消息的提示词只放在「推送 → WorkBuddy」一处。
+           同一段文案在两个页面各留一份，改了一处忘了另一处，用户就会照着
+           过期的路径去建定时任务。这里只给一句指路。 #}
+        <p class="tiny muted" style="margin-top:10px;">
+          {{ t('settings.wb_forward_elsewhere') }}
+          <a href="/settings#notify">{{ t('settings.wb_forward_link') }}</a>
+        </p>
       </div>
 
       <div id="engine-rules" class="notice">
@@ -434,6 +431,25 @@
     </div>
   </section>
   {% endfor %}
+
+  {# 回执链接前缀以前只存在于代码里，设置页没有任何入口——于是手机上的
+     提醒永远点不开。它是推送功能的一部分，放在推送这一页。 #}
+  <section class="card">
+    <div class="card-head"><h2>{{ t('settings.receipt_base') }}</h2></div>
+    <div class="card-body">
+      <div class="setting-row" style="border-bottom:none;">
+        <div class="setting-label">
+          <span>{{ t('settings.receipt_base_label') }}</span>
+          <small>{{ t('settings.receipt_base_hint') }}</small>
+        </div>
+        <div class="setting-input">
+          <input data-key="receipt.public_base" value="{{ values.get('receipt.public_base','') }}"
+                 placeholder="http://192.168.1.20:8000">
+        </div>
+      </div>
+      <div class="row-actions"><button class="btn" data-save>{{ t('action.save') }}</button></div>
+    </div>
+  </section>
 </div>
 
 <div data-pane="data" class="hidden">
@@ -554,6 +570,12 @@
 
 {% block scripts %}
 <script>
+window.I18N = Object.assign(window.I18N || {}, {
+  sending: {{ t('settings.sending') | tojson }},
+  csNeedCode: {{ t('settings.cs_need_code') | tojson }}
+});
+</script>
+<script>
 (function () {
   var flash = document.getElementById('save-flash');
   function say(msg, kind) {
@@ -653,7 +675,7 @@
       var key = btn.getAttribute('data-ch-test');
       btn.disabled = true;
       var original = btn.textContent;
-      btn.textContent = '发送中…';
+      btn.textContent = (window.I18N && window.I18N.sending) || '…';
       fetch('/api/notify/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -748,7 +770,7 @@
       document.getElementById('cs-change').value = preset.change_path || '';
       document.getElementById('cs-name').value = preset.name_path || '';
       document.getElementById('cs-scale').value = preset.scale || 1;
-      note.textContent = (preset.note || '') + (preset.docs ? '  文档：' + preset.docs : '');
+      note.textContent = (preset.note || '') + (preset.docs ? ' ' + preset.docs : '');
     });
   }
 
@@ -758,7 +780,7 @@
       var payload = collectSource();
       payload.code = document.getElementById('cs-test-code').value.trim();
       payload.market = document.getElementById('cs-test-market').value;
-      if (!payload.code) { csMsg.textContent = '先填一个测试代码。'; return; }
+      if (!payload.code) { csMsg.textContent = window.I18N.csNeedCode; return; }
       csMsg.textContent = window.I18N.csRequesting;
       fetch('/api/datasources/test', {
         method: 'POST',
@@ -816,16 +838,19 @@
       }).then(function (r) { return r.json(); })
         .then(function (res) {
           if (res.ok) { location.reload(); }
-          else { csMsg.textContent = res.error || '保存失败'; }
+          else { csMsg.textContent = res.error || window.I18N.saveFailed; }
         });
     });
   }
 
   document.querySelectorAll('[data-src-del]').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      if (!confirm('删除这个自定义数据源？')) return;
-      fetch('/api/datasources/custom/' + btn.getAttribute('data-src-del') + '/delete', { method: 'POST' })
-        .then(function () { location.reload(); });
+      askConfirm('删除这个自定义数据源？').then(function (yes) {
+        if (!yes) return;
+        fetch('/api/datasources/custom/' + btn.getAttribute('data-src-del') + '/delete',
+              { method: 'POST' })
+          .then(function () { location.reload(); });
+      });
     });
   });
 

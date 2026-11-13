@@ -182,7 +182,7 @@
     fetch('/api/edge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        if (!res.ok) { alert(res.error || window.I18N.failed); return; }
+        if (!res.ok) { showAlert(res.error || window.I18N.failed); return; }
         // "Nothing saved" has to be visible: reloading to an unchanged page
         // looks like the button did nothing at all.
         if (res.note) {

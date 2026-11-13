@@ -1,6 +1,62 @@
 (function () {
   'use strict';
 
+  /* 全站对话框。
+   *
+   * 浏览器原生的 alert() / confirm() 不受主题控制、无法本地化排版，也挡不住
+   * 误触。这里提供两个等价的 Promise 版本，所有页面用自己的 CSS 弹窗，
+   * 所以深色模式和英文界面都是一致的。
+   */
+  function ensureDialog() {
+    var dlg = document.getElementById('app-dialog');
+    if (dlg) return dlg;
+    dlg = document.createElement('dialog');
+    dlg.id = 'app-dialog';
+    dlg.className = 'modal app-dialog';
+    dlg.innerHTML =
+      '<form method="dialog" class="modal-head"><h2 data-dialog-title></h2>' +
+      '<button class="btn ghost sm" value="cancel">✕</button></form>' +
+      '<div class="modal-body"><p data-dialog-text></p></div>' +
+      '<div class="modal-foot">' +
+      '<button class="btn ghost" value="cancel" data-dialog-cancel></button>' +
+      '<button class="btn" value="ok" data-dialog-ok></button></div>';
+    document.body.appendChild(dlg);
+    return dlg;
+  }
+
+  function ask(options) {
+    var opt = options || {};
+    var dlg = ensureDialog();
+    var ok = dlg.querySelector('[data-dialog-ok]');
+    var cancel = dlg.querySelector('[data-dialog-cancel]');
+    dlg.querySelector('[data-dialog-title]').textContent = opt.title || '';
+    dlg.querySelector('[data-dialog-text]').textContent = opt.text || '';
+    ok.textContent = opt.okText || '确定';
+    cancel.textContent = opt.cancelText || '取消';
+    cancel.style.display = opt.confirm ? '' : 'none';
+    return new Promise(function (resolve) {
+      function done(value) { dlg.removeEventListener('close', onClose); resolve(value); }
+      function onClose() { done(dlg.returnValue === 'ok'); }
+      dlg.addEventListener('close', onClose);
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
+    });
+  }
+
+  window.askDialog = ask;
+  window.showAlert = function (text, title) {
+    return ask({ title: title || (window.I18N && window.I18N.notice) || '提示', text: text });
+  };
+  window.askConfirm = function (text, title) {
+    return ask({
+      title: title || (window.I18N && window.I18N.confirmTitle) || '确认',
+      text: text,
+      confirm: true,
+      okText: (window.I18N && window.I18N.ok) || '确定',
+      cancelText: (window.I18N && window.I18N.cancel) || '取消'
+    });
+  };
+
   function setCookie(name, value) {
     document.cookie = name + '=' + encodeURIComponent(value) + ';path=/;max-age=31536000;samesite=lax';
   }
@@ -75,8 +131,11 @@
   document.querySelectorAll('[data-remove]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var path = btn.getAttribute('data-remove');
-      if (!confirm(window.I18N.confirmRemove.replace('{code}', path))) return;
-      fetch('/api/watchlist/' + path, { method: 'DELETE' }).then(function () { location.reload(); });
+      askConfirm(window.I18N.confirmRemove.replace('{code}', path)).then(function (yes) {
+        if (!yes) return;
+        fetch('/api/watchlist/' + path, { method: 'DELETE' })
+          .then(function () { location.reload(); });
+      });
     });
   });
 
@@ -203,7 +262,12 @@
       tab.addEventListener('click', function () { activate(tab.getAttribute('data-tab')); });
     });
     var hash = location.hash.replace('#', '');
-    if (hash && document.querySelector('.tabs button[data-tab="' + hash + '"]')) activate(hash);
+    // ?tab= 也是入口：页面右上角的「导入成交单」按钮就是一个普通链接，
+    // 它不能指望浏览器替它跳标签页。反过来 #tab 仍然有效，旧书签不至于失效。
+    var wanted = hash || (new URLSearchParams(location.search).get('tab') || '');
+    if (wanted && document.querySelector('.tabs button[data-tab="' + wanted + '"]')) {
+      activate(wanted);
+    }
   }
 
   /* ---------------- glossary ---------------- */
