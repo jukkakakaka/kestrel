@@ -12,6 +12,9 @@ __pycache__/
 build/
 dist/
 .venv/
+# 打包脚本用的独立构建环境（packaging/macos/build.sh）。
+# 它不该污染开发用的 .venv，也不该进版本库。
+.build-venv/
 venv/
 .pytest_cache/
 .ruff_cache/

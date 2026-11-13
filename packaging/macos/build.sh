@@ -41,6 +41,16 @@ fi
 
 command -v uv >/dev/null || { echo "uv is required: https://docs.astral.sh/uv/" >&2; exit 1; }
 
+# --- build environment -----------------------------------------------------
+# 构建用独立环境，绝不碰开发用的 .venv。
+# 早先这里是 `uv sync --extra desktop`，它会把 .venv 里的 dev 依赖（pytest、
+# ruff）一并移除——打完包就再也跑不了测试，而且没有任何提示。
+# UV_PROJECT_ENVIRONMENT 让下面所有 uv 命令都指向这个目录，.venv 保持原样。
+BUILD_ENV="$ROOT/.build-venv"
+export UV_PROJECT_ENVIRONMENT="$BUILD_ENV"
+BUILD_PY="$BUILD_ENV/bin/python"
+echo "==> build environment: $BUILD_ENV"
+
 echo "==> Kestrel ${VERSION}"
 
 # --- icon ------------------------------------------------------------------
@@ -54,9 +64,9 @@ fi
 
 # --- dependencies ----------------------------------------------------------
 # PyInstaller itself is a build tool, not a runtime dependency.
-echo "==> syncing dependencies"
+echo "==> syncing build dependencies"
 uv sync --extra desktop --quiet
-uv pip install pyinstaller --quiet
+uv pip install --python "$BUILD_PY" pyinstaller --quiet
 
 # --- build -----------------------------------------------------------------
 if [[ "$CLEAN" == "1" ]]; then
@@ -133,7 +143,7 @@ if [[ "$WANT_DMG" == "1" ]]; then
 
   # dmgbuild 才能把图标位置、背景图和窗口尺寸写进 .DS_Store；
   # hdiutil -srcfolder 只能得到一个空白窗口，看起来像个没做完的安装包。
-  uv pip install dmgbuild --quiet
+  uv pip install --python "$BUILD_PY" dmgbuild --quiet
   if [[ ! -f packaging/dmg-background.png || packaging/dmg-background.png -ot scripts/make_dmg_background.py ]]; then
     echo "==> generating dmg background"
     uv run python scripts/make_dmg_background.py
