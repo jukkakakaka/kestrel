@@ -127,8 +127,12 @@ scan → advice (entry / stop / target / qty / fees / expiry)
 | Market | What is different | Fee model |
 | :--- | :--- | :--- |
 | **A-shares** | 100-share lots, T+1, price limits | commission (0.025%, min ¥5) + 0.05% stamp on sells + transfer fee |
-| **Hong Kong** | lot size varies per stock (100/500/1000), no price limits | commission + platform fee + **0.1% stamp each side** + four levies |
-| **US** | single shares, no stamp duty | per-share platform fee + SEC/TAF on sells |
+| **Hong Kong** | lot size varies per stock (100/500/1000), no price limits; some brokers allow odd lots | commission + platform fee + **0.1% stamp each side** + four levies |
+| **US** | single shares, fractional shares (0.0001) at some brokers, no stamp duty | per-share platform fee + SEC/TAF on sells |
+
+What your broker lets you buy changes the plan: with odd-lot or fractional support, a board lot
+that breaks the risk budget is sized down to 17 shares or 0.25 instead of being refused. Both
+switches live under Cost → Broker plans, pre-filled from public broker help pages and editable.
 
 The market page can show native currencies or convert everything to CNY / HKD / USD — holding
 Tencent and NVIDIA at once means you need both numbers on the same scale.
@@ -284,13 +288,15 @@ Learning is the second layer, not a course. It sits next to the numbers:
 src/kestrel/
   app.py            FastAPI app, routes, template filters
   services/         scan / analyst / engine / rules / universe / calendar /
-                    execution (fills) / positions (monitor) / exits (sell rules) /
+                    execution (fills) / fills (auto-fill on entry) / positions /
+                    exits (sell rules) / statement (fill-statement parsing) /
                     today (briefing) / advisor (horizon) / timeframe (bar folding) /
                     updates (version + update) / prompts (WorkBuddy cron prompts)
+  core/             micro-unit money, quantities (odd lots / fractions), clock
   strategies/       rule compiler, built-in rule library, AI-facing JSON Schema
   datasources/      provider chain, Eastmoney/Tencent/Sina, resolver, presets, custom
-  planning/         position sizing, stop/target placement, fee-aware plans
-  fees/             exchange levy model, broker plans
+  planning/         position sizing at the broker's tradable step, fee-aware plans
+  fees/             exchange levy model, broker plans (incl. odd-lot capability)
   web/              Jinja templates + static assets
   db/               schema and versioned migrations
 packaging/          PyInstaller spec, Asset Catalog (light/dark icons), dmg layout
@@ -312,7 +318,7 @@ scripts/            single source for brand assets, icons, dmg background, scree
 ```bash
 uv sync --extra desktop --extra dev
 uv run kestrel init
-uv run pytest            # 180 tests
+uv run pytest            # 209 tests
 uv run ruff check src tests
 uv run uvicorn kestrel.app:app --reload --app-dir src
 ```

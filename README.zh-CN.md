@@ -118,8 +118,12 @@
 | 市场 | 交易规则差异 | 费用模型 |
 | :--- | :--- | :--- |
 | **A 股** | 100 股一手、T+1、涨跌停 | 佣金（万 2.5，最低 5 元）+ 卖出印花税 0.05% + 过户费 |
-| **港股** | 每手股数各不相同（100/500/1000）、无涨跌停 | 佣金 + 平台费 + **买卖双向**印花税 0.1% + 四项征费 |
-| **美股** | 可以只买 1 股、无印花税 | 按股平台费 + 卖出侧 SEC/TAF |
+| **港股** | 每手股数各不相同（100/500/1000）、无涨跌停；部分券商可买不足一手的碎股 | 佣金 + 平台费 + **买卖双向**印花税 0.1% + 四项征费 |
+| **美股** | 可以只买 1 股，部分券商支持 0.0001 股的小数股；无印花税 | 按股平台费 + 卖出侧 SEC/TAF |
+
+券商能买什么会在计划里生效：能买碎股时，一手超预算不会被直接拒绝，而是按 17 股、
+0.25 股这样的可成交数量下单；不能买时按整手算。这两个开关在「成本计算 → 券商套餐」里，
+默认值按各家公开帮助文档填好，可以自己改。
 
 行情页可以选「各市场本币」或统一折成人民币 / 港币 / 美元——
 同时持有腾讯和英伟达时，你需要把两个数字放在同一个尺度上比较。
@@ -270,13 +274,15 @@ WorkBuddy 的队列目录取决于你怎么跑这个应用（浏览器 / 打包 
 src/kestrel/
   app.py            FastAPI 应用、路由、模板过滤器
   services/         scan / analyst / engine / rules / universe / calendar /
-                    execution（成交）/ positions（盯盘）/ exits（退出建议）/
-                    today（待办）/ advisor（周期推荐）/ timeframe（K 线折叠）/
+                    execution（成交）/ fills（记账时自动补齐）/ positions（盯盘）/
+                    exits（退出建议）/ statement（成交单解析）/ today（待办）/
+                    advisor（周期推荐）/ timeframe（K 线折叠）/
                     updates（版本与更新）/ prompts（WorkBuddy 提示词）
+  core/             micro-unit money、数量（含碎股/小数股）、时钟
+  planning/         仓位计算（按券商能力取最小可成交单位）、含费计划
   strategies/       规则编译器、内置规则库、给 AI 的 JSON Schema
   datasources/      数据源链、东财/腾讯/新浪、解析器、自定义源
-  planning/         仓位计算、止盈止损、含费计划
-  fees/             交易所征费模型、券商套餐
+  fees/             交易所征费模型、券商套餐（含碎股能力）
   web/              Jinja 模板与静态资源
   db/               表结构与版本化迁移
 packaging/          PyInstaller spec、Asset Catalog（深浅色图标）、dmg 布局
@@ -298,7 +304,7 @@ scripts/            品牌资产、图标、dmg 背景、截图的唯一生成�
 ```bash
 uv sync --extra desktop --extra dev
 uv run kestrel init
-uv run pytest            # 180 个测试
+uv run pytest            # 209 个测试
 uv run ruff check src tests
 uv run uvicorn kestrel.app:app --reload --app-dir src
 ```

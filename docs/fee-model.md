@@ -74,6 +74,32 @@ Adding a broker is one dataclass line:
                         platform_fixed=Decimal("10")),
 ```
 
+## What the broker lets you buy
+
+Fees decide what a trade costs; **capabilities decide whether the plan can be
+executed at all**. On a 10,000 CNY account, one board lot of a 400 HKD stock
+risks far more than 2 % — a broker that cannot buy an odd lot gets "one lot
+exceeds the risk budget" and nothing else. The same account at a broker that
+allows odd lots gets 17 shares and a plan.
+
+Two switches live on every broker plan (成本计算 → 券商套餐 → 能买什么):
+
+| Field | Meaning | Defaults on |
+|---|---|---|
+| `odd_lot_buy` | HK: buy **below one board lot** (碎股). Selling an odd lot is allowed by every broker and needs no switch. | 星财富（复星）、富途 |
+| `fractional_us` | US: buy **fractional shares** (0.0001 share steps). | 老虎、盈立、IBKR、星财富（复星）、富途 |
+| `fractional_min` | Minimum notional per fractional order; 0 means none. | USD 1 where enabled |
+
+A-shares are always whole lots of 100 — no broker option changes that. When a
+capability is off, plans round down to a whole board lot and a lot that breaks
+the risk budget is refused with `lot_too_big`; when it is on, the scanner and the
+AI path both size down to 1 share (HK) or 0.0001 share (US) instead.
+
+These are defaults checked against public broker help pages in November 2026.
+They are not promises: open your broker's fee/capability page and correct them —
+the numbers you set are what the planner will use.
+
+
 ## Where the fee number shows up
 
 - **Plan cards** — `est_fees` is a full round trip, and the break-even price
