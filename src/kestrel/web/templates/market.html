@@ -1,7 +1,9 @@
 {% extends "base.html" %}
+{% from "_page_icons.html" import icon, empty_art, page_ui %}
 {% block title %}{{ t('nav.market') }} · {{ t('app.name') }}{% endblock %}
 
 {% block content %}
+{{ page_ui() }}
 <div class="page-head">
   <div>
     <h1>{{ t('market.title') }}</h1>
@@ -16,13 +18,67 @@
       <option value="{{ code }}" {% if code == display_currency %}selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>
-    <input id="add-code" class="add-input" placeholder="{{ t('market.add_placeholder') }}" autocomplete="off">
-    <button class="btn" id="add-btn">{{ t('action.add') }}</button>
+    <input id="add-code" class="add-input" style="width:285px;max-width:100%;" placeholder="{{ t('market.add_placeholder') }}" autocomplete="off">
+    <button class="btn" id="add-btn">
+      {{ icon('plus', 15) }}
+      <span>{{ t('action.add') }}</span>
+    </button>
     <button class="btn ghost" id="refresh-btn">
+      {{ icon('refresh', 15) }}
       <span class="label">{{ t('action.refresh') }}</span>
     </button>
   </div>
 </div>
+
+{# 行情与市场脉冲指标条 #}
+{% set ns = namespace(open_mkts=0, up_cnt=0, down_cnt=0) %}
+{% for m in markets %}
+  {% if m.state == 'open' %}{% set ns.open_mkts = ns.open_mkts + 1 %}{% endif %}
+{% endfor %}
+{% for it in items %}
+  {% if it.change_pct is not none %}
+    {% if it.change_pct > 0 %}{% set ns.up_cnt = ns.up_cnt + 1 %}
+    {% elif it.change_pct < 0 %}{% set ns.down_cnt = ns.down_cnt + 1 %}{% endif %}
+  {% endif %}
+{% endfor %}
+
+<section class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('market.stat_total') }}</span>
+      <span class="kp-icon-badge">{{ icon('layers', 16) }}</span>
+    </div>
+    <div class="stat-value">{{ items | length }}</div>
+    <div class="stat-sub"><span>{{ ' / '.join(enabled_markets) if enabled_markets else 'CN / HK / US' }}</span></div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('market.stat_open') }}</span>
+      <span class="kp-icon-badge {{ 'tone-down' if ns.open_mkts > 0 else 'tone-neutral' }}">{{ icon('globe', 16) }}</span>
+    </div>
+    <div class="stat-value">{{ ns.open_mkts }} / {{ markets | length }}</div>
+    <div class="stat-sub"><span id="updated-at">{{ t('market.never') }}</span></div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('market.stat_up') }}</span>
+      <span class="kp-icon-badge tone-up">{{ icon('trend-up', 16) }}</span>
+    </div>
+    <div class="stat-value up">{{ ns.up_cnt }}</div>
+    <div class="stat-sub"><span>{{ t('market.watchlist') }}</span></div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('market.stat_down') }}</span>
+      <span class="kp-icon-badge tone-down">{{ icon('trend-down', 16) }}</span>
+    </div>
+    <div class="stat-value down">{{ ns.down_cnt }}</div>
+    <div class="stat-sub"><span>{{ t('market.watchlist') }}</span></div>
+  </div>
+</section>
 
 <div class="mkt-strip">
   {% for m in markets %}
@@ -46,57 +102,67 @@
 
 <section class="card">
   <div class="card-head">
-    <h2>{{ t('market.watchlist') }}</h2>
-    <span class="meta" id="updated-at">{{ t('market.never') }}</span>
+    <h2 class="kp-title-row">{{ icon('activity', 17) }} <span>{{ t('market.watchlist') }}</span></h2>
+    <span class="meta">{{ items | length }}</span>
   </div>
 
   {% if items %}
   <div class="card-body tight">
-    <table class="grid" id="quote-table">
-      <thead>
-        <tr>
-          <th style="width:64px;">{{ t('market.col_market') }}</th>
-          <th>{{ t('market.col_code') }}</th>
-          <th>{{ t('market.col_name') }}</th>
-          <th class="num">{{ t('market.col_price') }}</th>
-          <th class="num">{{ t('market.col_change') }}</th>
-          <th class="num">{{ t('market.col_pct') }}</th>
-          <th>{{ t('market.col_source') }}</th>
-          <th style="width:90px;"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for it in items %}
-        <tr data-key="{{ it.market }}:{{ it.code }}">
-          <td><span class="tag tag-{{ it.market|lower }}">{{ it.market }}</span></td>
-          <td class="mono"><a href="/stock/{{ it.market }}/{{ it.code }}">{{ it.code }}</a></td>
-          <td><a href="/stock/{{ it.market }}/{{ it.code }}">{{ it.name }}</a></td>
-          <td class="num mono" data-field="price">
-            {% if it.price %}{{ it.price | quote(it.market, display_currency) }}{% else %}—{% endif %}
-          </td>
-          <td class="num mono {% if it.change_pct is not none %}{{ 'up' if it.change_pct >= 0 else 'down' }}{% endif %}" data-field="chg">
-            {% if it.price and it.prev_close %}{{ (it.price - it.prev_close) | quote(it.market, display_currency) }}{% else %}—{% endif %}
-          </td>
-          <td class="num mono {% if it.change_pct is not none %}{{ 'up' if it.change_pct >= 0 else 'down' }}{% endif %}" data-field="pct">
-            {% if it.change_pct is not none %}{{ it.change_pct | pct }}{% else %}—{% endif %}
-          </td>
-          <td>
-            <a class="src" href="{{ it.source | src_url(it.market, it.code) }}" target="_blank" rel="noopener">
-              {% if it.source %}{{ t('market.view_source') }} ↗{% else %}—{% endif %}
-            </a>
-          </td>
-          <td>
-            <button class="btn danger sm" data-remove="{{ it.market }}/{{ it.code }}">{{ t('action.remove') }}</button>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="table-wrapper" tabindex="0" role="region" aria-label="{{ t('market.watchlist') }}">
+      <table class="grid" id="quote-table">
+        <thead>
+          <tr>
+            <th>{{ t('market.col_market') }}</th>
+            <th>{{ t('market.col_code') }}</th>
+            <th>{{ t('market.col_name') }}</th>
+            <th class="num">{{ t('market.col_price') }}</th>
+            <th class="num">{{ t('market.col_change') }}</th>
+            <th class="num">{{ t('market.col_pct') }}</th>
+            <th>{{ t('market.col_source') }}</th>
+            <th class="num"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for it in items %}
+          <tr data-key="{{ it.market }}:{{ it.code }}">
+            <td><span class="tag tag-{{ it.market|lower }}">{{ it.market }}</span></td>
+            <td class="mono"><a href="/stock/{{ it.market }}/{{ it.code }}"><strong>{{ it.code }}</strong></a></td>
+            <td><a href="/stock/{{ it.market }}/{{ it.code }}">{{ it.name }}</a></td>
+            <td class="num mono" data-field="price">
+              {% if it.price %}{{ it.price | quote(it.market, display_currency) }}{% else %}—{% endif %}
+            </td>
+            <td class="num mono {% if it.change_pct is not none %}{{ 'up' if it.change_pct >= 0 else 'down' }}{% endif %}" data-field="chg">
+              {% if it.price and it.prev_close %}{{ (it.price - it.prev_close) | quote(it.market, display_currency) }}{% else %}—{% endif %}
+            </td>
+            <td class="num mono {% if it.change_pct is not none %}{{ 'up' if it.change_pct >= 0 else 'down' }}{% endif %}" data-field="pct">
+              {% if it.change_pct is not none %}{{ it.change_pct | pct }}{% else %}—{% endif %}
+            </td>
+            <td>
+              {% if it.source %}
+              <a class="src tiny" href="{{ it.source | src_url(it.market, it.code) }}" target="_blank" rel="noopener">
+                {{ t('market.view_source') }} {{ icon('external', 12) }}
+              </a>
+              {% else %}
+              <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td class="num">
+              <button class="btn danger sm" data-remove="{{ it.market }}/{{ it.code }}" title="{{ t('action.remove') }}">
+                {{ icon('trash', 13) }}
+                <span>{{ t('action.remove') }}</span>
+              </button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
   {% else %}
   <div class="empty">
+    {{ empty_art('activity') }}
     <strong>{{ t('market.empty_title') }}</strong>
-    {{ t('market.empty') }}
+    <p>{{ t('market.empty') }}</p>
   </div>
   {% endif %}
 </section>

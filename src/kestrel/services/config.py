@@ -7,15 +7,17 @@ import sqlite3
 from typing import Any
 
 DEFAULTS: dict[str, Any] = {
-    "account.capital": 10000.0,
+    "account.capital": 50000.0,
     "account.currency": "CNY",
     "risk.per_trade_pct": 2.0,
     "risk.max_total_exposure_pct": 60.0,
     "risk.max_per_sector": 2,
+    "risk.daily_loss_limit_pct": 5.0,
     "scan.auto_enabled": False,
     "scan.interval_minutes": 60,
     "trade.horizon": "auto",
     "scan.markets": ["CN", "HK", "US"],
+    "ui.markets_configured": False,
     "scan.min_score": 0.55,
     "scan.universe": "both",
     "scan.pool_size": 30,
@@ -32,36 +34,70 @@ DEFAULTS: dict[str, Any] = {
     "agent.model": "",
     "agent.api_key": "",
     "agent.daily_budget": 200,
-    # 更新：默认每天自动检查一次，但不自动安装——安装需要用户确认，
-    # 否则应用会在用户不知情时被替换掉。
     "update.auto_check": True,
     "update.auto_install": False,
-    # 显示货币：local = 各市场用本币；也可以统一折成一种货币。
-    # 同时持有腾讯和英伟达的人，需要把两个数字放在同一个尺度上比较。
     "ui.display_currency": "local",
-    # WorkBuddy 桥目录。空 = 跟随数据目录（<home>/bridge）；
-    # 容器部署时要指向宿主机与容器都能看到的共享目录。
+    "ui.privacy": False,
+    "desktop.close_to_tray": True,
+    "desktop.autostart": False,
     "bridge.root": "",
 }
+
+# 布尔配置项集合，统一在读写时规范化为严格 bool 类型
+_BOOL_KEYS: frozenset[str] = frozenset(
+    {
+        "ui.privacy",
+        "desktop.close_to_tray",
+        "desktop.autostart",
+    }
+)
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    """将任意输入值安全转换为布尔值。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        norm = value.strip().lower()
+        if norm in ("1", "true", "yes", "on"):
+            return True
+        if norm in ("0", "false", "no", "off", ""):
+            return False
+    if value is None:
+        return default
+    return bool(value)
+
+
+def _normalize(key: str, value: Any) -> Any:
+    """对声明了类型约束的配置项进行读写校验与归一化。"""
+    if key in _BOOL_KEYS:
+        return _coerce_bool(value, bool(DEFAULTS.get(key, False)))
+    return value
 
 
 def get(conn: sqlite3.Connection, key: str, default: Any = None) -> Any:
     row = conn.execute("SELECT value FROM config_kv WHERE key=?", (key,)).fetchone()
     if row is None:
-        return DEFAULTS.get(key, default)
+        fallback = DEFAULTS.get(key, default)
+        return _normalize(key, fallback) if key in _BOOL_KEYS else fallback
     try:
-        return json.loads(row["value"])
+        parsed = json.loads(row["value"])
     except json.JSONDecodeError:
-        return DEFAULTS.get(key, default)
+        fallback = DEFAULTS.get(key, default)
+        return _normalize(key, fallback) if key in _BOOL_KEYS else fallback
+    return _normalize(key, parsed)
 
 
 def put(conn: sqlite3.Connection, key: str, value: Any) -> None:
+    norm_val = _normalize(key, value)
     conn.execute(
         """
         INSERT INTO config_kv (key, value, updated_at) VALUES (?, ?, datetime('now'))
         ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
         """,
-        (key, json.dumps(value, ensure_ascii=False)),
+        (key, json.dumps(norm_val, ensure_ascii=False)),
     )
 
 
@@ -69,7 +105,8 @@ def all_values(conn: sqlite3.Connection) -> dict[str, Any]:
     merged = dict(DEFAULTS)
     for row in conn.execute("SELECT key, value FROM config_kv").fetchall():
         try:
-            merged[row["key"]] = json.loads(row["value"])
+            key = row["key"]
+            merged[key] = _normalize(key, json.loads(row["value"]))
         except json.JSONDecodeError:
             continue
     return merged

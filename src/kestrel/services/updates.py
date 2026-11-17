@@ -53,21 +53,33 @@ class Release:
     assets: list[dict]
 
     def asset_for_platform(self) -> dict | None:
-        """挑出当前平台该用的那个文件。
-
-        Releases 里既有 dmg、也有 Windows zip。选错平台会下载一个打不开的文件，
-        所以宁可返回 None——页面会说"去 Releases 手动下载"，而不是给个假按钮。
-        """
-        names = []
+        """挑出当前平台该用的那个安装包（防止跨平台 zip 误匹配）。"""
         if sys.platform == "darwin":
-            names = [".dmg"]
-        elif os.name == "nt":
-            names = [".zip", ".exe"]
-        else:
-            names = [".zip", ".tar.gz"]
-        for suffix in names:
             for asset in self.assets:
-                if str(asset.get("name", "")).lower().endswith(suffix):
+                name = str(asset.get("name", "")).lower()
+                if name.endswith(".dmg"):
+                    return asset
+            for asset in self.assets:
+                name = str(asset.get("name", "")).lower()
+                if name.endswith(".zip") and any(k in name for k in ("mac", "darwin", "osx")):
+                    return asset
+            return None
+
+        if os.name == "nt":
+            for suffix in (".exe", ".msi"):
+                for asset in self.assets:
+                    if str(asset.get("name", "")).lower().endswith(suffix):
+                        return asset
+            for asset in self.assets:
+                name = str(asset.get("name", "")).lower()
+                if name.endswith(".zip") and "win" in name:
+                    return asset
+            return None
+
+        for suffix in (".appimage", ".tar.gz", ".zip"):
+            for asset in self.assets:
+                name = str(asset.get("name", "")).lower()
+                if name.endswith(suffix) and "linux" in name:
                     return asset
         return None
 

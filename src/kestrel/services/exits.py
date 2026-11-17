@@ -24,7 +24,9 @@ import logging
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
 
-from kestrel.core.money import from_micro, to_micro
+from kestrel.core.money import from_micro, round_tick, to_micro
+from kestrel.core.quantity import display, floor_step, is_star_or_bse, is_whole
+from kestrel.datasources.base import default_lot_size
 from kestrel.db.engine import connect
 
 log = logging.getLogger(__name__)
@@ -103,13 +105,32 @@ def suggest(trade: dict, position: dict, max_hold_days: int | None = None) -> Ex
 
     plan = _plan_from_snapshot(trade)
     currency = trade.get("currency") or "CNY"
+    market = str(trade.get("market") or "US").upper()
+    code = str(trade.get("code") or "")
+    can_sell_today = position.get("can_sell_today", True)
 
     def money(value: Decimal) -> str:
         digits = 3 if currency in ("HKD", "USD") else 2
         return f"{value:,.{digits}f}"
 
-    # 1) 已跌破止损：唯一的动作是认错
+    # 1) 已跌破止损：唯一的动作是认错（A 股 T+1 锁定期改发次日开盘预警，绝不教用户违规卖）
     if current_stop and price <= current_stop:
+        if not can_sell_today:
+            return ExitPlan(
+                trade_id=trade["id"],
+                action="t1_hold",
+                stop=None,
+                qty=qty,
+                reason_zh=(
+                    f"现价 {money(price)} 已跌破止损 {money(current_stop)}，但受 A 股 T+1 限制"
+                    "今日买入暂不可卖出。切勿补仓摊低成本，明早开盘优先按计划离场。"
+                ),
+                reason_en=(
+                    f"Price {money(price)} is below stop {money(current_stop)}, but CN T+1 "
+                    "blocks selling today's buy. Do not average down; exit at tomorrow's open."
+                ),
+                urgency="urgent",
+            )
         return ExitPlan(
             trade_id=trade["id"],
             action="exit_all",
@@ -128,16 +149,52 @@ def suggest(trade: dict, position: dict, max_hold_days: int | None = None) -> Ex
     _entry, risk = basis
     r_now = float((price - entry) / risk)
 
-    # 2) 到达目标：分批止盈
+    # 2) 到达目标：按各市场合法整手/最小可卖步进给出分批止盈建议
     if target and price >= target:
-        # 小数股（美股碎股）不能用 // 取整：0.5 股的一半是 0.25 股，
-        # 而「卖一半」本身是合法的。整股时保持原来的口径，只有 1 股不能拆。
-        from kestrel.core.quantity import display, is_whole
+        if not can_sell_today:
+            return ExitPlan(
+                trade_id=trade["id"],
+                action="t1_hold",
+                stop=current_stop,
+                qty=None,
+                reason_zh=(
+                    f"现价 {money(price)} 已到达目标 {money(target)}，因 A 股 T+1 今日买入明日才可卖出。"
+                    "明日可按计划先落袋一部分或继续持有。"
+                ),
+                reason_en=(
+                    f"Price {money(price)} reached target {money(target)}; CN T+1 prevents selling "
+                    "today's entry until the next trading day."
+                ),
+                urgency="normal",
+            )
 
-        if is_whole(qty):
+        if market == "CN":
+            step = Decimal("1") if is_star_or_bse(market, code) else Decimal(str(default_lot_size(market, code)))
+            half = floor_step(qty / 2, step)
+            if half <= 0:
+                return ExitPlan(
+                    trade_id=trade["id"],
+                    action="take_partial",
+                    stop=current_stop,
+                    qty=qty,
+                    reason_zh=(
+                        f"现价 {money(price)} 已到达目标 {money(target)}。当前仅持有 {display(qty)} 股"
+                        "（不足两手无法拆半），建议直接全部止盈，或把止损抬到保本以上跟进。"
+                    ),
+                    reason_en=(
+                        f"Price {money(price)} reached target {money(target)}. Holding {display(qty)} "
+                        "shares cannot split cleanly by CN lot size — take full profit or trail stop."
+                    ),
+                    urgency="soon",
+                )
+        elif market == "HK":
             half = qty if qty <= 1 else (qty / 2).to_integral_value(rounding=ROUND_DOWN)
         else:
-            half = (qty / 2).quantize(Decimal("0.0001"))
+            if is_whole(qty):
+                half = qty if qty <= 1 else (qty / 2).to_integral_value(rounding=ROUND_DOWN)
+            else:
+                half = (qty / 2).quantize(Decimal("0.0001"))
+
         half_text = display(half)
         return ExitPlan(
             trade_id=trade["id"],
@@ -155,14 +212,12 @@ def suggest(trade: dict, position: dict, max_hold_days: int | None = None) -> Ex
             urgency="soon",
         )
 
-    # 3) 移动止损：只往上抬，绝不下移
+    # 3) 移动止损：只往上抬，绝不下移，并对齐市场最小报价单位
     if current_stop is not None:
         for trigger_r, lock_r in STOP_LADDER:
             if r_now < trigger_r:
                 continue
-            proposed = entry + risk * Decimal(str(lock_r))
-            digits = Decimal("0.01") if currency == "CNY" else Decimal("0.001")
-            proposed = proposed.quantize(digits)
+            proposed = round_tick(entry + risk * Decimal(str(lock_r)), market, code)
             if proposed <= current_stop:
                 break
             if lock_r == 0:

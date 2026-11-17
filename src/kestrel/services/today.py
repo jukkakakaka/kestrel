@@ -188,11 +188,15 @@ def briefing(locale: str = "zh-CN") -> dict:
     else:
         headline = t("headline_quiet")
 
+    from kestrel.services import portfolio as portfolio_service
+
+    snap = portfolio_service.snapshot(include_quotes=True, limit_ledger=5)
     return {
         "todos": items,
         "urgent": urgent,
         "headline": headline,
         "quiet": not items,
+        "portfolio": snap,
         "book": {
             "count": summary["count"],
             "pnl_cny": float(summary["pnl_cny"]),

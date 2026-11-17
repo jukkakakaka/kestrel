@@ -128,8 +128,9 @@ def cmd_desktop(args: argparse.Namespace) -> int:
         server.should_exit = True
         return 1
 
+    start_hidden = bool(getattr(args, "minimized", False) or getattr(args, "background", False))
     try:
-        run_desktop(url, server)
+        run_desktop(url, server, start_hidden=start_hidden)
     finally:
         server.should_exit = True
     return 0
@@ -305,6 +306,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_desk.add_argument("--port", type=int, default=None)
     p_desk.add_argument(
         "--browser", action="store_true", help="skip the native window, open the system browser"
+    )
+    p_desk.add_argument(
+        "--minimized",
+        "--background",
+        dest="minimized",
+        action="store_true",
+        help="start hidden in the system tray / menu bar for background market watch",
     )
     p_desk.set_defaults(func=cmd_desktop)
 

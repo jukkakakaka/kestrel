@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from kestrel.datasources.base import default_lot_size
 from kestrel.db.engine import connect
 
 log = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ CLIST = "https://push2.eastmoney.com/api/qt/clist/get"
 BOARDS = {
     "CN": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
     "HK": "m:116+t:3",
-    "US": "m:105,m:106",
+    "US": "m:105,m:106,m:107",
 }
 
 FIELDS = "f12,f14,f2,f3,f6,f20,f21,f100"
@@ -47,7 +48,8 @@ def _code_fits(market: str, code: str) -> bool:
         return code.isdigit() and len(code) == 6
     if market == "HK":
         return code.isdigit() and 1 <= len(code) <= 5
-    return code.isalpha() and 1 <= len(code) <= 6
+    clean = code.replace(".", "", 1)
+    return code.isascii() and clean.isalpha() and 1 <= len(code) <= 7
 
 
 async def fetch_pool(market: str, size: int = 40, timeout: float = 12.0) -> list[Candidate]:
@@ -115,7 +117,7 @@ def store_pool(candidates: list[Candidate]) -> int:
         conn.execute("BEGIN")
         for rank, item in enumerate(candidates, start=1):
             currency = {"CN": "CNY", "HK": "HKD", "US": "USD"}[item.market]
-            lot = 100 if item.market in ("CN", "HK") else 1
+            lot = default_lot_size(item.market, item.code)
             conn.execute(
                 """
                 INSERT INTO symbol (market, code, name, currency, lot_size, is_pool,
@@ -126,6 +128,8 @@ def store_pool(candidates: list[Candidate]) -> int:
                     is_pool = 1,
                     pool_rank = excluded.pool_rank,
                     pool_cap = excluded.pool_cap,
+                    lot_size = CASE WHEN symbol.market='HK' AND symbol.lot_size <> 100
+                                    THEN symbol.lot_size ELSE excluded.lot_size END,
                     sector = COALESCE(NULLIF(excluded.sector, ''), symbol.sector),
                     updated_at = datetime('now')
                 """,

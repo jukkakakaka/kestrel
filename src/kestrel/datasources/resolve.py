@@ -13,6 +13,8 @@ from dataclasses import dataclass
 
 import httpx
 
+from kestrel.datasources.base import default_lot_size
+
 log = logging.getLogger(__name__)
 
 SUGGEST = "https://searchapi.eastmoney.com/api/suggest/get"
@@ -86,7 +88,9 @@ def _valid_code(market: str, code: str) -> bool:
         return code.isdigit() and len(code) == 6
     if market == "HK":
         return code.isdigit() and 1 <= len(code) <= 5
-    return code.isalpha() and 1 <= len(code) <= 6
+    # 美股允许带点号代码（例如 BRK.B、BF.B）
+    clean = code.replace(".", "", 1)
+    return code.isascii() and clean.isalpha() and 1 <= len(code) <= 7
 
 
 def load_from_db() -> int:
@@ -149,7 +153,7 @@ async def resolve(query: str, market: str | None = None, timeout: float = 8.0) -
             secid=secid,
             exchange=_exchange_name(mkt, str(item.get("JYS") or ""), secid),
             currency=_MARKET_CURRENCY[mkt],
-            lot_size=100 if mkt in ("HK", "CN") else 1,
+            lot_size=default_lot_size(mkt, code),
         )
         # Only trust an exact ticker hit or a name that begins with the query.
         # A loose "contains" match happily returns an unrelated fund, and a wrong

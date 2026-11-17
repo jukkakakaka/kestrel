@@ -20,5 +20,7 @@ jobs:
         run: uv sync --extra dev --python ${{ matrix.python }}
       - name: Lint
         run: uv run ruff check src tests
+      - name: Check locales parity
+        run: uv run python scripts/check_locales.py
       - name: Test
         run: uv run pytest -q

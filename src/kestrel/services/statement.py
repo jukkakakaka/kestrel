@@ -342,8 +342,9 @@ def parse_line(line: str) -> ParsedFill | None:
     )
 
 
-def parse_table(text: str) -> dict:
+def parse_table(text: str, locale: str = "zh-CN") -> dict:
     """解析并使用表头映射；返回行、映射和一段给用户看的说明。"""
+    en = str(locale).lower().startswith("en")
     lines = [line for line in str(text or "").splitlines() if line.strip()]
     if not lines:
         return {"rows": [], "mapping": {}, "note": "", "skipped": 0, "mode": "empty"}
@@ -375,17 +376,38 @@ def parse_table(text: str) -> dict:
     mode = "table" if mapping else "line"
     note = ""
     if mapping:
-        labels = {
-            "date": "时间", "code": "代码", "name": "名称", "side": "方向",
-            "qty": "数量", "price": "价格", "amount": "金额", "fee": "费用",
-            "market": "市场", "currency": "币种",
-        }
-        found = "、".join(labels[key] for key in labels if key in mapping)
-        note = f"认出了表头：{found}。列顺序不影响结果。"
+        labels = (
+            {
+                "date": "Date", "code": "Code", "name": "Name", "side": "Side",
+                "qty": "Qty", "price": "Price", "amount": "Amount", "fee": "Fees",
+                "market": "Market", "currency": "Currency",
+            }
+            if en
+            else {
+                "date": "时间", "code": "代码", "name": "名称", "side": "方向",
+                "qty": "数量", "price": "价格", "amount": "金额", "fee": "费用",
+                "market": "市场", "currency": "币种",
+            }
+        )
+        sep = ", " if en else "、"
+        found = sep.join(labels[key] for key in labels if key in mapping)
+        note = (
+            f"Headers matched: {found}. Column order does not matter."
+            if en
+            else f"认出了表头：{found}。列顺序不影响结果。"
+        )
     elif rows:
-        note = "没有表头，按每行里的方向、代码、数量和价格解析。"
+        note = (
+            "No headers detected; parsed by side, ticker, quantity and price per line."
+            if en
+            else "没有表头，按每行里的方向、代码、数量和价格解析。"
+        )
     if skipped:
-        note = (note + " " if note else "") + f"{skipped} 行没认出，已跳过。"
+        note = (note + " " if note else "") + (
+            f"{skipped} line(s) unrecognized and skipped."
+            if en
+            else f"{skipped} 行没认出，已跳过。"
+        )
 
     return {
         "rows": [asdict(row) for row in rows],
@@ -400,16 +422,12 @@ def parse(text: str) -> list[dict]:
     return parse_table(text)["rows"]
 
 
-def save(rows: list[dict]) -> dict:
-    """把解析出来的成交行写进台账。
-
-    卖出会按 FIFO 平掉已有持仓，而不是凭空开一个"做空"——早期版本这么做，
-    导一份月度对账单就能把持仓数翻倍。返回明细而不只是条数，是因为
-    "3 条里 2 条成功"必须说清楚哪条失败、为什么。
-    """
+def save(rows: list[dict], locale: str = "zh-CN") -> dict:
+    """把解析出来的成交行写进台账。"""
     from kestrel.core.quantity import to_qty
     from kestrel.services import execution
 
+    en = str(locale).lower().startswith("en")
     if not rows:
         return {"saved": 0, "failed": 0, "items": []}
 
@@ -424,9 +442,21 @@ def save(rows: list[dict]) -> dict:
             price = Decimal(str(row.get("price") or 0))
             if not code or qty <= 0 or price <= 0:
                 failed += 1
-                items.append({"code": code or "?", "ok": False, "error": "缺少代码、数量或价格"})
+                items.append(
+                    {
+                        "code": code or "?",
+                        "ok": False,
+                        "error": "Missing ticker, quantity or price" if en else "缺少代码、数量或价格",
+                    }
+                )
                 continue
             side = "buy" if str(row.get("side", "buy")).lower().startswith("b") else "sell"
+            trade_date = str(row.get("trade_date") or "").strip()
+            fill_ts = (
+                (trade_date if "T" in trade_date or " " in trade_date else f"{trade_date}T14:55:00+08:00" if side == "sell" else f"{trade_date}T09:35:00+08:00")
+                if trade_date
+                else None
+            )
             result = execution.record(
                 execution.Fill(
                     market=market,
@@ -435,16 +465,15 @@ def save(rows: list[dict]) -> dict:
                     qty=qty,
                     price=price,
                     fees=Decimal(str(row.get("fee") or 0)),
-                    filled_at=None,
+                    filled_at=fill_ts,
                     source="import",
                     note="由成交单导入",
                     name=str(row.get("name") or code),
                 )
             )
-            # 导入行自带的交易日期要覆盖默认的"现在"，否则持仓天数全是错的。
-            trade_date = str(row.get("trade_date") or "").strip()
+            # 买单同步历史开仓日期，卖单仅校正平仓日期，避免把被平仓买单的建仓日改写成卖出日。
             if result.get("ok") and trade_date:
-                _stamp(result, trade_date)
+                _stamp(result, trade_date, side)
             if result.get("ok"):
                 saved += 1
             else:
@@ -457,21 +486,28 @@ def save(rows: list[dict]) -> dict:
     return {"saved": saved, "failed": failed, "items": items}
 
 
-def _stamp(result: dict, trade_date: str) -> None:
-    """把成交日期写回刚建的那笔交易。"""
-    ids = [result.get("trade_id")] if result.get("trade_id") else []
-    ids += list(result.get("closed_trades") or [])
-    if not ids:
-        return
+def _stamp(result: dict, trade_date: str, side: str = "buy") -> None:
+    """把导入的成交日期写回刚记录的买单或卖单，且卖单绝不篡改原始开仓日期。"""
     from kestrel.db.engine import connect
+
+    buy_id = result.get("trade_id")
+    closed_ids = list(result.get("closed_trades") or [])
+    if not buy_id and not closed_ids:
+        return
 
     conn = connect()
     try:
-        for trade_id in ids:
+        if buy_id and side == "buy":
             conn.execute(
                 "UPDATE trade SET filled_at=?, opened_at=? WHERE id=?",
-                (trade_date, trade_date, trade_id),
+                (trade_date, trade_date, buy_id),
             )
+        if side == "sell":
+            for trade_id in closed_ids:
+                conn.execute(
+                    "UPDATE trade SET closed_at=? WHERE id=?",
+                    (trade_date, trade_id),
+                )
         conn.commit()
     finally:
         conn.close()

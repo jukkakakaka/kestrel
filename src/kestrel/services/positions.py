@@ -10,12 +10,20 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
+from kestrel.core.clock import iso, utcnow
 from kestrel.core.money import from_micro
 from kestrel.db.engine import connect
 from kestrel.services import journal
+
+SHANGHAI_TZ = timezone(timedelta(hours=8))
+
+
+def _shanghai_day(ts: str | None) -> str:
+    moment = _parse_moment(ts) or utcnow()
+    return moment.astimezone(SHANGHAI_TZ).strftime("%Y-%m-%d")
 
 log = logging.getLogger(__name__)
 
@@ -89,10 +97,12 @@ def assess(trade: dict, quote: dict | None) -> dict:
     if target is None and plan.get("target"):
         target = from_micro(plan["target"])
 
-    pnl = pnl_pct = None
+    pnl = pnl_pct = gross_pct = None
     if price is not None:
         pnl = (price - entry) * qty - fees
-        pnl_pct = float((price - entry) / entry * 100) if entry else None
+        # 净收益率扣减手续费，与 pnl 金额口径完全一致。
+        pnl_pct = float(pnl / cost * 100) if cost else None
+        gross_pct = float((price - entry) / entry * 100) if entry else None
 
     to_stop_pct = None
     if price is not None and stop:
@@ -115,6 +125,13 @@ def assess(trade: dict, quote: dict | None) -> dict:
     start = _parse_moment(opened)
     if start is not None:
         held_days = (datetime.now(UTC) - start).days
+    can_sell_today = True
+    if (
+        trade.get("market") == "CN"
+        and trade.get("source") != "calibrated"
+        and _shanghai_day(opened) == _shanghai_day(iso(utcnow()))
+    ):
+        can_sell_today = False
 
     overdue = None
     if plan.get("valid_until"):
@@ -150,10 +167,12 @@ def assess(trade: dict, quote: dict | None) -> dict:
         "change_pct": change_pct,
         "pnl": pnl,
         "pnl_pct": pnl_pct,
+        "gross_pct": gross_pct,
         "to_stop_pct": to_stop_pct,
         "to_target_pct": to_target_pct,
         "r_now": r_now,
         "held_days": held_days,
+        "can_sell_today": can_sell_today,
         "overdue": overdue,
         "state": state,
         "rec_id": trade.get("rec_id"),
@@ -272,6 +291,31 @@ def sweep_alerts() -> list[dict]:
     finally:
         conn.close()
     return pending
+
+
+ALERT_TEXT_EN = {
+    "stopped": {
+        "title": "Below stop price",
+        "body": "The plan says exit. Taking a small loss keeps you in the game for the next trade.",
+    },
+    "near_stop": {
+        "title": "Approaching stop",
+        "body": "Price is tight against your stop. Decide to honor it now before emotions kick in.",
+    },
+    "target": {
+        "title": "Target reached",
+        "body": "Target reached. Sell part of the position according to market lot rules and trail the rest.",
+    },
+    "near_target": {
+        "title": "Approaching target",
+        "body": "Close to target1. Prepare a partial take-profit or tighten your stop.",
+    },
+}
+
+
+def alert_text(state: str, locale: str = "zh-CN") -> dict:
+    table = ALERT_TEXT_EN if str(locale).lower().startswith("en") else ALERT_TEXT
+    return table.get(state, {})
 
 
 ALERT_TEXT = {

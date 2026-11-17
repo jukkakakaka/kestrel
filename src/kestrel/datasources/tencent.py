@@ -12,7 +12,7 @@ from decimal import Decimal
 
 import httpx
 
-from kestrel.datasources.base import DataSourceError, Quote
+from kestrel.datasources.base import DataSourceError, Quote, cn_exchange_prefix
 
 BASE = "https://qt.gtimg.cn/q="
 
@@ -22,7 +22,7 @@ PREFIX = {"CN": "", "HK": "hk", "US": "us"}
 def _qcode(market: str, code: str) -> str:
     market = market.upper()
     if market == "CN":
-        return ("sh" if code.startswith(("6", "9", "5")) else "sz") + code
+        return cn_exchange_prefix(code) + code
     if market == "HK":
         return "hk" + code
     return "us" + code

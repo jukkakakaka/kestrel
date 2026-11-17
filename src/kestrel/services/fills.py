@@ -146,7 +146,9 @@ def estimate_fees(
         return Decimal("0")
 
 
-def suggest_levels(market: str, code: str, entry, horizon: str | None = None) -> dict:
+def suggest_levels(
+    market: str, code: str, entry, horizon: str | None = None, locale: str = "zh-CN"
+) -> dict:
     """用缓存里的日线给一个止损/目标建议。
 
     返回字段：
@@ -156,11 +158,12 @@ def suggest_levels(market: str, code: str, entry, horizon: str | None = None) ->
     """
     from kestrel.services import timeframe
 
+    en = str(locale).lower().startswith("en")
     horizon_code = str(horizon or DEFAULT_HORIZON)
     cfg = timeframe.get(horizon_code)
     price = Decimal(str(entry or 0))
     if price <= 0:
-        return {"ok": False, "reason": "没有成交价，先填价格"}
+        return {"ok": False, "reason": "Enter a fill price first." if en else "没有成交价，先填价格"}
 
     conn = connect()
     try:
@@ -169,7 +172,10 @@ def suggest_levels(market: str, code: str, entry, horizon: str | None = None) ->
             (str(market).upper(), normalize_code(str(market).upper(), str(code))),
         ).fetchone()
         if row is None:
-            return {"ok": False, "reason": "这只标的还没缓存 K 线"}
+            return {
+                "ok": False,
+                "reason": "No cached bars for this symbol yet." if en else "这只标的还没缓存 K 线",
+            }
         from kestrel.services import bars as bars_service
 
         daily = bars_service.cached_bars(conn, row["id"], cfg.lookback)
@@ -180,14 +186,21 @@ def suggest_levels(market: str, code: str, entry, horizon: str | None = None) ->
     if len(folded) < cfg.min_bars:
         return {
             "ok": False,
-            "reason": f"缓存里的 K 线不够（{len(folded)} 根），算不出可信的止损",
+            "reason": (
+                f"Not enough cached bars ({len(folded)}) to estimate ATR stops."
+                if en
+                else f"缓存里的 K 线不够（{len(folded)} 根），算不出可信的止损"
+            ),
             "bars": len(folded),
         }
 
     ind = compute(Series.from_bars(folded))
     atr = Decimal(str(ind.get("atr14") or 0))
     if atr <= 0:
-        return {"ok": False, "reason": "波动数据缺失，算不出止损"}
+        return {
+            "ok": False,
+            "reason": "Missing volatility data to compute stop." if en else "波动数据缺失，算不出止损",
+        }
 
     stop = (price - atr * Decimal("2")).quantize(Decimal("0.001"))
     floor, ceiling = cfg.stop_band
@@ -207,7 +220,11 @@ def suggest_levels(market: str, code: str, entry, horizon: str | None = None) ->
         "horizon": cfg.code,
         "bars": len(folded),
         "basis": (
-            f"按{cfg.zh}最近 {len(folded)} 根 K 线的波动（ATR {atr:.2f}）给 2 倍 ATR 止损，"
-            "目标按 2:1 计算。这是建议值，不是你唯一能填的数。"
+            f"2x ATR ({atr:.2f}) from recent {len(folded)} {cfg.en} bars, target at 2:1. Suggested level only."
+            if en
+            else (
+                f"按{cfg.zh}最近 {len(folded)} 根 K 线的波动（ATR {atr:.2f}）给 2 倍 ATR 止损，"
+                "目标按 2:1 计算。这是建议值，不是你唯一能填的数。"
+            )
         ),
     }

@@ -1,323 +1,465 @@
 {% extends "base.html" %}
-{% block title %}{{ t('nav.journal') }} · {{ t('app.name') }}{% endblock %}
+{% from "_page_icons.html" import icon, empty_art, page_ui %}
+{% block title %}{{ t('j.title') }} · {{ t('app.name') }}{% endblock %}
 
 {% block content %}
+{{ page_ui() }}
 <div class="page-head">
   <div>
-    <h1>{{ t('nav.journal') }}</h1>
-    <div class="sub">{{ t('journal.sub') }}</div>
+    <h1>{{ t('j.title') }}</h1>
+    <div class="sub">{{ t('j.sub') }}</div>
   </div>
   <div class="page-actions">
-    <button class="btn" id="fill-btn">{{ t('journal.add_fill') }}</button>
+    <button type="button" class="btn ghost" data-open-calibrate="cash">
+      {{ icon('sliders', 15) }}
+      <span>{{ t('cal.btn_short') }}</span>
+    </button>
+    <a class="btn ghost" href="/ipo">
+      {{ icon('layers', 15) }}
+      <span>{{ t('j.ipo') }}</span>
+    </a>
+    <button type="button" class="btn" id="fill-btn">
+      {{ icon('plus', 15) }}
+      <span>{{ t('journal.add_fill') }}</span>
+    </button>
   </div>
 </div>
 
-{% if request.query_params.get('error') %}
-<div class="notice err">{{ request.query_params.get('error') }}</div>
-{% endif %}
-
-<div class="kpi">
-  <div class="k"><div class="v">{{ book.count }}</div><div class="l">{{ t('j.open') }}</div></div>
-  <div class="k">
-    <div class="v mono {{ 'up' if (book.pnl_pct or 0) >= 0 else 'down' }}">
-      {% if book.pnl_pct is none %}—{% else %}{{ '%+.2f'|format(book.pnl_pct) }}%{% endif %}
+{# 动态账户与组合 KPI #}
+<section class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('cal.total_equity') }}</span>
+      <span class="kp-icon-badge">{{ icon('wallet', 16) }}</span>
     </div>
-    <div class="l">{{ t('journal.open_pnl') }}</div>
+    <div class="stat-value" data-priv="money">¥{{ portfolio_snap.total_equity_cny | num(0) }}</div>
+    <div class="stat-sub">
+      <span>{{ t('cal.avail_cash') }}</span>
+      <span class="mono" data-priv="money">¥{{ portfolio_snap.available_cash_cny | num(0) }}</span>
+    </div>
   </div>
-  <div class="k"><div class="v">{{ '%.0f'|format(stats.win_rate * 100) }}%</div><div class="l">{{ t('j.win_rate') }}</div></div>
-  <div class="k"><div class="v {{ 'up' if stats.net_cny >= 0 else 'down' }}">¥{{ '%.0f'|format(stats.net_cny) }}</div><div class="l">{{ t('j.net') }}</div></div>
-</div>
 
-{% if book.risky %}
-<section class="card attention">
-  <div class="card-head">
-    <h2>{{ t('journal.attention') }}</h2>
-    <span class="meta">{{ t('journal.attention_hint') }}</span>
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('j.open_pnl') }}</span>
+      <span class="kp-icon-badge {{ 'tone-up' if book.pnl_cny >= 0 else 'tone-down' }}">
+        {{ icon('trend-up' if book.pnl_cny >= 0 else 'trend-down', 16) }}
+      </span>
+    </div>
+    <div class="stat-value {{ 'up' if book.pnl_cny >= 0 else 'down' }}" data-priv="money">
+      {{ '%+.0f'|format(book.pnl_cny) }} CNY
+    </div>
+    <div class="stat-sub"><span>{{ t('j.n_positions', n=book.count) }}</span></div>
   </div>
-  <div class="card-body tight">
-    <table class="grid">
-      <thead><tr><th>{{ t('journal.col_symbol') }}</th><th class="num">{{ t('journal.col_price') }}</th><th class="num">{{ t('journal.col_stop') }}</th>
-        <th class="num">{{ t('journal.col_to_stop') }}</th><th class="num">{{ t('journal.col_pnl') }}</th><th></th></tr></thead>
-      <tbody>
-      {% for p in book.risky %}
-      <tr>
-        <td><a href="/stock/{{ p.market }}/{{ p.code }}">{{ p.name }}</a>
-          <span class="mono muted">{{ p.code }}</span></td>
-        <td class="num mono">{{ '%.3f'|format(p.price) if p.price else '—' }}</td>
-        <td class="num mono down">{{ '%.3f'|format(p.stop) if p.stop else '—' }}</td>
-        <td class="num mono {{ 'down' if p.state == 'stopped' else 'up' }}">
-          {{ '%+.2f%%'|format(p.to_stop_pct) if p.to_stop_pct is not none else '—' }}
-        </td>
-        <td class="num mono {{ 'up' if (p.pnl or 0) >= 0 else 'down' }}">
-          {{ '%+.0f'|format(p.pnl) if p.pnl is not none else '—' }}
-        </td>
-        <td>
-          <form method="post" action="/journal/{{ p.trade_id }}/close" class="inline-form">
-            <input name="exit_price" type="number" step="0.001" required
-                   value="{{ '%.3f'|format(p.price) if p.price else '' }}" aria-label="卖出价">
-            <button class="btn sm danger">{{ t('journal.sell') }}</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('j.winrate') }}</span>
+      <span class="kp-icon-badge tone-neutral">{{ icon('target', 16) }}</span>
+    </div>
+    <div class="stat-value">{{ '%.0f'|format(stats.win_rate * 100) }}%</div>
+    <div class="stat-sub"><span>{{ stats.closed }} {{ t('j.closed_unit') }}</span></div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('j.realized_pnl') }}</span>
+      <span class="kp-icon-badge {{ 'tone-up' if stats.net_cny >= 0 else 'tone-down' }}">{{ icon('coins', 16) }}</span>
+    </div>
+    <div class="stat-value {{ 'up' if stats.net_cny >= 0 else 'down' }}" data-priv="money">
+      {{ '%+.0f'|format(stats.net_cny) }} CNY
+    </div>
+    <div class="stat-sub"><span>{{ t('j.rr_label') }} {{ '%.1f'|format(stats.rr) }}:1</span></div>
   </div>
 </section>
-{% endif %}
 
-<div class="tabs">
-  <button class="active" data-tab="positions">{{ t('journal.tab_positions') }} ({{ open_trades|length }})</button>
-  <button data-tab="closed">{{ t('journal.tab_closed') }} ({{ closed|length }})</button>
-  <button data-tab="quality">{{ t('journal.quality') }}</button>
-  <button data-tab="import">{{ t('journal.tab_import') }}</button>
+<div class="tabs" role="tablist">
+  <button class="active" role="tab" aria-selected="true" data-tab="open">
+    {{ icon('briefcase', 14) }} {{ t('j.tab_open') }} ({{ positions|length }})
+  </button>
+  <button role="tab" aria-selected="false" data-tab="closed">
+    {{ icon('check-circle', 14) }} {{ t('j.tab_closed') }} ({{ closed|length }})
+  </button>
+  <button role="tab" aria-selected="false" data-tab="quality">
+    {{ icon('target', 14) }} {{ t('j.tab_quality') }}
+  </button>
+  <button role="tab" aria-selected="false" data-tab="import">
+    {{ icon('upload', 14) }} {{ t('j.tab_import') }}
+  </button>
 </div>
 
-<div data-pane="positions">
+{# 1. 未平仓持仓 #}
+<div data-pane="open">
   <section class="card">
     <div class="card-head">
-      <h2>{{ t('j.open_positions') }}</h2>
-      <span class="meta">
-        {{ t('journal.price_meta') }} ·
-        {% if book.unpriced %}{{ t('journal.n_unpriced', n=book.unpriced) }}{% else %}{{ t('journal.all_priced') }}{% endif %}
-        · <span class="gloss" data-term="trailing_stop">{{ t('gloss.trailing_stop') }}</span>
-        <span class="gloss" data-term="take_profit">{{ t('gloss.take_profit') }}</span>
-        <span class="gloss" data-term="time_stop">{{ t('gloss.time_stop') }}</span>
-      </span>
+      <h2 class="kp-title-row">{{ icon('briefcase', 17) }} <span>{{ t('j.open_positions') }}</span></h2>
+      <div class="page-actions">
+        <span class="meta">{{ t('journal.all_priced') if book.unpriced == 0 else t('journal.n_unpriced', n=book.unpriced) }}</span>
+        <button type="button" class="btn ghost sm" data-open-calibrate="pos">
+          {{ icon('sliders', 13) }}
+          <span>{{ t('cal.sync_pos') }}</span>
+        </button>
+      </div>
     </div>
     {% if positions %}
     <div class="card-body tight">
-      <table class="grid">
-        <thead><tr>
-          <th>{{ t('dash.market') }}</th><th>{{ t('journal.col_symbol') }}</th><th class="num">{{ t('scan.qty') }}</th>
-          <th class="num">{{ t('j.entry') }}</th><th class="num">{{ t('journal.col_price') }}</th>
-          <th class="num">{{ t('journal.col_pnl') }}</th><th class="num">{{ t('scan.stop') }}</th>
-          <th class="num">{{ t('journal.col_to_stop') }}</th><th class="num" title="按最初风险算的倍数">R</th>
-          <th>{{ t('journal.what_now') }}</th><th></th>
-        </tr></thead>
-        <tbody>
-        {% for p in positions %}
-        <tr>
-          <td><span class="tag tag-{{ p.market|lower }}">{{ p.market }}</span></td>
-          <td>
-            <a href="/stock/{{ p.market }}/{{ p.code }}">{{ p.name }}</a>
-            <div class="tiny muted">
-              <span class="mono">{{ p.code }}</span>
-              {% if p.source == 'link' %} · 回执成交{% elif p.source == 'advice' %} · 按建议成交
-              {% elif p.source == 'import' %} · 对账单导入{% endif %}
-              {% if p.held_days is not none %} · {{ t('journal.held_days', n=p.held_days) }}{% endif %}
-            </div>
-          </td>
-          <td class="num mono">{{ p.qty }}</td>
-          <td class="num mono">{{ '%.3f'|format(p.entry) }}</td>
-          <td class="num mono">{{ '%.3f'|format(p.price) if p.price else '—' }}</td>
-          <td class="num mono {{ 'up' if (p.pnl or 0) >= 0 else 'down' }}">
-            {% if p.pnl is none %}—{% else %}
-              {{ '%+.0f'|format(p.pnl) }}
-              <div class="tiny">{{ '%+.2f%%'|format(p.pnl_pct) }}</div>
-            {% endif %}
-          </td>
-          <td class="num mono down">{{ '%.3f'|format(p.stop) if p.stop else '—' }}</td>
-          <td class="num mono">
-            {% if p.to_stop_pct is none %}—{% else %}
-              <span class="badge {{ 'avoid' if p.state in ('near_stop','stopped') else 'wait' }}">
-                {{ '%+.2f%%'|format(p.to_stop_pct) }}
-              </span>
-            {% endif %}
-          </td>
-          <td class="num mono">{{ '%+.2f'|format(p.r_now) if p.r_now is not none else '—' }}</td>
-          <td style="min-width:210px;">
-            {% if p.exit %}
-              <div class="exit-hint {{ 'urgent' if p.exit.urgency == 'urgent' else '' }}">
-                {% if locale.startswith('en') %}{{ p.exit.reason_en }}{% else %}{{ p.exit.reason_zh }}{% endif %}
-              </div>
-              <div class="exit-actions">
-                {% if p.exit.action == 'move_stop' %}
-                  <button class="btn sm" data-move-stop="{{ p.trade_id }}"
-                          data-stop="{{ p.exit.stop }}">{{ t('journal.move_stop_to', stop='%.3f'|format(p.exit.stop)) }}</button>
-                {% elif p.exit.action in ('take_partial', 'exit_all') %}
-                  <form method="post" action="/journal/{{ p.trade_id }}/close" class="inline-form">
-                    <input type="hidden" name="exit_price" value="{{ '%.3f'|format(p.price) }}">
-                    <input type="hidden" name="qty" value="{{ p.exit.qty }}">
-                    <button class="btn sm {{ 'danger' if p.exit.urgency == 'urgent' else '' }}">
-                      {{ t('journal.sell_n', n=p.exit.qty) }}
+      <div class="table-wrapper" tabindex="0" role="region" aria-label="{{ t('j.open_positions') }}">
+        <table class="grid">
+          <thead>
+            <tr>
+              <th>{{ t('market.col_name') }}</th>
+              <th class="num">{{ t('j.qty_short') }}</th>
+              <th class="num">{{ t('j.entry') }}</th>
+              <th class="num">{{ t('market.col_price') }}</th>
+              <th class="num">{{ t('adv.stop') }}</th>
+              <th class="num">{{ t('j.open_pnl') }}</th>
+              <th>{{ t('j.exit_advice') }}</th>
+              <th class="num"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in positions %}
+            <tr>
+              <td>
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                  <span class="tag tag-{{ p.market|lower }}">{{ p.market }}</span>
+                  <a href="/stock/{{ p.market }}/{{ p.code }}"><strong>{{ p.name }}</strong></a>
+                  {% if not p.can_sell_today %}
+                  <span class="badge wait">{{ icon('lock', 11) }} T+1</span>
+                  {% endif %}
+                </div>
+                <div class="tiny muted mono">
+                  {{ p.code }}
+                  {% if p.held_days is not none %} · {{ t('journal.held_days', n=p.held_days) }}{% endif %}
+                </div>
+              </td>
+              <td class="num mono" data-priv="qty">{{ p.qty }}</td>
+              <td class="num mono">{{ '%.3f'|format(p.entry) }}</td>
+              <td class="num mono">{{ '%.3f'|format(p.price) if p.price else '—' }}</td>
+              <td class="num mono down">
+                {{ '%.3f'|format(p.stop) if p.stop else '—' }}
+                {% if p.to_stop_pct is not none %}
+                <div class="tiny muted">{{ '%.1f'|format(p.to_stop_pct) }}%</div>
+                {% endif %}
+              </td>
+              <td class="num mono">
+                {% if p.pnl is not none %}
+                <span class="{{ 'up' if p.pnl >= 0 else 'down' }}" data-priv="money">{{ '%+.0f'|format(p.pnl) }}</span>
+                {% if p.r_now is not none %}
+                <div class="tiny">
+                  {{ '%+.2f'|format(p.r_now) }}R
+                  <span class="r-bar-track"><span class="r-bar-fill {{ 'up' if p.r_now >= 0 else 'down' }}" style="width:{{ [100, [8, (p.r_now|abs * 33)|int]|max]|min }}%"></span></span>
+                </div>
+                {% endif %}
+                {% else %}—{% endif %}
+              </td>
+              <td>
+                {% if p.exit %}
+                <div class="exit-hint {{ 'urgent' if p.exit.urgency == 'urgent' else '' }}">
+                  {{ p.exit.reason_en if locale.startswith('en') else p.exit.reason_zh }}
+                </div>
+                {% if p.exit.action == 'move_stop' and p.exit.stop %}
+                <button type="button" class="btn sm" data-move-stop="{{ p.trade_id }}" data-stop="{{ p.exit.stop }}">
+                  {{ icon('shield', 13) }}
+                  <span>{{ t('j.accept_stop', stop=p.exit.stop) }}</span>
+                </button>
+                {% elif p.exit.action in ('exit_all', 'take_partial') and p.can_sell_today %}
+                <button type="button" class="btn sm"
+                        data-open-fill
+                        data-side="sell"
+                        data-trade-id="{{ p.trade_id }}"
+                        data-market="{{ p.market }}"
+                        data-code="{{ p.code }}"
+                        data-qty="{{ p.exit.qty or p.qty }}"
+                        data-price="{{ '%.3f'|format(p.price) if p.price else p.entry }}"
+                        data-exit-reason="{{ 'stop_loss' if p.exit.action == 'exit_all' else 'take_profit' }}">
+                  {{ t('j.record_sell_n', qty=p.exit.qty or p.qty) }}
+                </button>
+                {% endif %}
+                {% else %}
+                <span class="tiny muted">{{ t('journal.hold_plan') }}</span>
+                {% endif %}
+              </td>
+              <td class="num">
+                <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+                  {% if p.can_sell_today %}
+                  <button type="button" class="btn ghost sm"
+                          data-open-fill
+                          data-side="sell"
+                          data-trade-id="{{ p.trade_id }}"
+                          data-market="{{ p.market }}"
+                          data-code="{{ p.code }}"
+                          data-qty="{{ p.qty }}"
+                          data-price="{{ '%.3f'|format(p.price) if p.price else p.entry }}">{{ t('j.sell_btn') }}</button>
+                  {% endif %}
+                  <button type="button" class="btn ghost sm" data-stop-hist="{{ p.trade_id }}" title="{{ t('j.stop_hist') }}">
+                    {{ icon('clock', 13) }}
+                    <span>{{ t('j.stop_hist') }}</span>
+                  </button>
+                  <form method="post" action="/journal/{{ p.trade_id }}/delete" style="display:inline;">
+                    <button class="btn danger sm" title="{{ t('journal.delete') }}" aria-label="{{ t('journal.delete') }}">
+                      {{ icon('trash', 13) }}
                     </button>
                   </form>
-                {% endif %}
-              </div>
-            {% else %}
-              <span class="muted tiny">{{ t('journal.hold_plan') }}</span>
-            {% endif %}
-          </td>
-          <td>
-            <form method="post" action="/journal/{{ p.trade_id }}/close" class="close-form">
-              <input name="exit_price" type="number" step="0.001" required
-                     placeholder="{{ t('j.exit') }}">
-              <input name="qty" type="number" step="any" min="0.0001" max="{{ p.qty }}" placeholder="{{ t('journal.close_form_qty') }}">
-              <button class="btn sm">{{ t('j.close') }}</button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-        </tbody>
-      </table>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
     {% else %}
     <div class="empty">
-      <strong>{{ t('journal.no_positions_title') }}</strong>
-      {{ t('journal.no_positions_body') }}
+      {{ empty_art('briefcase') }}
+      <strong>{{ t('j.no_open') }}</strong>
+      <p>{{ t('j.no_open_hint') }}</p>
+      <div class="row-actions" style="justify-content:center;margin-top:12px;">
+        <button type="button" class="btn ghost sm" data-open-calibrate="pos">
+          {{ icon('plus', 14) }}
+          <span>{{ t('cal.add_existing') }}</span>
+        </button>
+      </div>
     </div>
     {% endif %}
   </section>
 </div>
 
+{# 2. 已平仓与净值曲线 #}
 <div data-pane="closed" class="hidden">
+  {% if equity_curve|length >= 2 %}
   <section class="card">
-    <div class="card-head"><h2>{{ t('j.closed') }}</h2></div>
-    {% if closed %}
-    <div class="card-body tight">
-      <table class="grid">
-        <thead><tr><th>{{ t('dash.code') }}</th><th class="num">{{ t('j.entry') }} → {{ t('j.exit') }}</th>
-          <th class="num">{{ t('j.pnl') }}</th><th class="num">%</th><th>{{ t('journal.source') }}</th>
-          <th>{{ t('j.review') }}</th><th></th></tr></thead>
-        <tbody>
-        {% for tr in closed %}
-        {% set p = pnl(tr) %}
-        <tr>
-          <td><a href="/stock/{{ tr.market }}/{{ tr.code }}">{{ tr.name or tr.code }}</a>
-              {% if tr.rule_break %}<span class="tag tag-cn">{{ t('j.broke') }}</span>{% endif %}</td>
-          <td class="num mono">{{ tr.entry_price|money(3) }} → {{ tr.exit_price|money(3) }}</td>
-          <td class="num mono {{ 'up' if p.net >= 0 else 'down' }}">{{ '%.2f'|format(p.net) }}</td>
-          <td class="num mono {{ 'up' if p.ret >= 0 else 'down' }}">{{ '%.2f'|format(p.ret * 100) }}%</td>
-          <td class="tiny muted">
-            {% if tr.source == 'link' %}回执{% elif tr.source == 'advice' %}建议{% elif tr.source == 'import' %}导入{% else %}手记{% endif %}
-            {% if tr.rec_id %} · <a href="/advice#rec-{{ tr.rec_id }}">建议 #{{ tr.rec_id }}</a>{% endif %}
-          </td>
-          <td class="tiny">{{ tr.review or '—' }}</td>
-          <td><form method="post" action="/journal/{{ tr.id }}/delete"><button class="btn danger sm">{{ t('journal.delete') }}</button></form></td>
-        </tr>
-        {% endfor %}
-        </tbody>
-      </table>
+    <div class="card-head">
+      <h2 class="kp-title-row">{{ icon('trend-up', 17) }} <span>{{ t('j.equity_curve') }}</span></h2>
+      <span class="meta">{{ equity_curve|length }} {{ t('j.closed_unit') }}</span>
     </div>
-    {% else %}<div class="empty">{{ t('j.no_closed') }}</div>{% endif %}
-  </section>
-
-  {% if stats.broken or stats.clean %}
-  <section class="card">
-    <div class="card-head"><h2>{{ t('j.discipline') }}</h2></div>
     <div class="card-body">
-      <table class="grid">
-        <tbody>
-          <tr><td>{{ t('j.clean') }}</td><td class="num">{{ stats.clean }}</td>
-              <td class="num {{ 'up' if stats.clean_pnl >= 0 else 'down' }}">¥{{ '%.0f'|format(stats.clean_pnl) }}</td></tr>
-          <tr><td>{{ t('j.broken') }}</td><td class="num">{{ stats.broken }}</td>
-              <td class="num {{ 'up' if stats.broken_pnl >= 0 else 'down' }}">¥{{ '%.0f'|format(stats.broken_pnl) }}</td></tr>
-        </tbody>
-      </table>
-      <p class="hint" style="margin-top:10px;">{{ t('j.discipline_hint') }}</p>
+      {% set vals = equity_curve | map(attribute='cum_cny') | list %}
+      {% set min_v = vals | min %}
+      {% set max_v = vals | max %}
+      {% set span_v = (max_v - min_v) or 1.0 %}
+      {% set step_x = 740 / (vals|length - 1) %}
+      <svg viewBox="0 0 760 150" width="100%" height="140" style="display:block;">
+        {% set ns = namespace(pts='') %}
+        {% for pt in equity_curve %}
+          {% set x = 10 + loop.index0 * step_x %}
+          {% set y = 12 + (max_v - pt.cum_cny) / span_v * 124 %}
+          {% set ns.pts = ns.pts + (' ' if ns.pts else '') + ('%.1f,%.1f'|format(x, y)) %}
+        {% endfor %}
+        <polyline points="{{ ns.pts }}" fill="none" stroke="var(--brand-2)" stroke-width="2.2"/>
+      </svg>
     </div>
   </section>
   {% endif %}
+
+  <section class="card">
+    <div class="card-head">
+      <h2 class="kp-title-row">{{ icon('check-circle', 17) }} <span>{{ t('j.closed_history') }}</span></h2>
+      <span class="meta" data-priv="money">{{ t('j.broken_stat', n=stats.broken, pnl='%.0f'|format(stats.broken_pnl)) }}</span>
+    </div>
+    {% if closed %}
+    <div class="card-body tight">
+      <div class="table-wrapper" tabindex="0" role="region" aria-label="{{ t('j.closed_history') }}">
+        <table class="grid">
+          <thead>
+            <tr>
+              <th>{{ t('market.col_name') }}</th>
+              <th class="num">{{ t('j.qty_short') }}</th>
+              <th class="num">{{ t('j.entry') }}</th>
+              <th class="num">{{ t('j.exit') }}</th>
+              <th class="num">{{ t('j.net_pnl') }}</th>
+              <th>{{ t('j.discipline') }}</th>
+              <th class="num"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t_row in closed %}
+            {% set p = pnl(t_row) %}
+            <tr>
+              <td>
+                <span class="tag tag-{{ t_row.market|lower }}">{{ t_row.market }}</span>
+                <a href="/stock/{{ t_row.market }}/{{ t_row.code }}"><strong>{{ t_row.name }}</strong></a>
+                <div class="tiny muted mono">{{ t_row.code }} · {{ (t_row.closed_at or '')[:10] }}</div>
+              </td>
+              <td class="num mono" data-priv="qty">{{ t_row.qty }}</td>
+              <td class="num mono">{{ t_row.entry_price | money(3) }}</td>
+              <td class="num mono">{{ t_row.exit_price | money(3) if t_row.exit_price else '—' }}</td>
+              <td class="num mono {{ 'up' if p.net >= 0 else 'down' }}">
+                <span data-priv="money">{{ '%+.2f'|format(p.net) }} {{ t_row.currency }}</span>
+                <div class="tiny muted">{{ '%+.1f'|format(p.ret * 100) }}%</div>
+              </td>
+              <td>
+                {% if t_row.rule_break %}
+                <span class="badge buy">{{ icon('alert', 12) }} {{ t('j.broken_tag') }}</span>
+                {% else %}
+                <span class="badge ok-badge">{{ icon('shield-check', 12) }} {{ t('j.clean_tag') }}</span>
+                {% endif %}
+                {% if t_row.exit_reason %}<span class="tiny muted" style="margin-left:4px;">{{ t_row.exit_reason }}</span>{% endif %}
+              </td>
+              <td class="num">
+                <form method="post" action="/journal/{{ t_row.id }}/delete" style="display:inline;">
+                  <button class="btn danger sm" title="{{ t('journal.delete') }}" aria-label="{{ t('journal.delete') }}">
+                    {{ icon('trash', 13) }}
+                  </button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% else %}
+    <div class="empty">
+      {{ empty_art('clock') }}
+      <p>{{ t('j.no_closed') }}</p>
+    </div>
+    {% endif %}
+  </section>
 </div>
 
+{# 3. 执行质量与 What-if 盈亏归因 #}
 <div data-pane="quality" class="hidden">
   <section class="card">
     <div class="card-head">
-      <h2>{{ t('journal.quality') }}</h2>
-      <span class="meta">{{ t('journal.quality_meta') }}</span>
+      <h2 class="kp-title-row">{{ icon('target', 17) }} <span>{{ t('j.quality_title') }}</span></h2>
+      <span class="meta">{{ t('j.expired_line', n=quality.advice_total, a=quality.executed, b=quality.skipped, c=quality.expired) }}</span>
     </div>
     <div class="card-body">
-      <p class="quality-lesson">{{ lesson }}</p>
+      <div class="quality-lesson">{{ lesson }}</div>
 
-      <div class="kpi" style="grid-template-columns: repeat(3, minmax(0,1fr));">
-        <div class="k">
-          <div class="v mono">
-            {% if quality.follow_rate is none %}—{% else %}{{ '%.0f'|format(quality.follow_rate * 100) }}%{% endif %}
-          </div>
-          <div class="l">{{ t('journal.follow_rate') }}</div>
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">{{ t('j.follow_rate') }}</div>
+          <div class="stat-value">{{ '%.0f'|format(quality.follow_rate * 100) + '%' if quality.follow_rate is not none else '—' }}</div>
         </div>
-        <div class="k">
-          <div class="v mono {{ 'up' if (quality.avg_deviation_r or 0) > 0 else 'down' }}">
-            {% if quality.avg_deviation_r is none %}—{% else %}{{ '%+.2f'|format(quality.avg_deviation_r) }}R{% endif %}
-          </div>
-          <div class="l">{{ t('journal.avg_dev_r') }}</div>
+        <div class="stat-card">
+          <div class="stat-label">{{ t('j.in_zone_rate') }}</div>
+          <div class="stat-value">{{ '%.0f'|format(quality.in_zone_rate * 100) + '%' if quality.in_zone_rate is not none else '—' }}</div>
         </div>
-        <div class="k">
-          <div class="v mono">
-            {% if quality.avg_deviation_pct is none %}—{% else %}{{ '%+.2f'|format(quality.avg_deviation_pct) }}%{% endif %}
+        <div class="stat-card">
+          <div class="stat-label">{{ t('j.avg_drift_r') }}</div>
+          <div class="stat-value">{{ '%+.2f'|format(quality.avg_deviation_r) + 'R' if quality.avg_deviation_r is not none else '—' }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">{{ t('j.what_if_drag') }}</div>
+          <div class="stat-value {{ 'up' if (quality.execution_drag_cny or 0) >= 0 else 'down' }}" data-priv="money">
+            {{ '%+.0f CNY'|format(quality.execution_drag_cny) if quality.execution_drag_cny is not none else '—' }}
           </div>
-          <div class="l">{{ t('journal.avg_dev_pct') }}</div>
         </div>
       </div>
 
-      <p class="hint" style="margin-top:14px;">
-        {{ t('journal.expired_line', n=quality.advice_total, a=quality.executed,
-             b=quality.skipped, c=quality.expired) }}
-      </p>
-    </div>
-  </section>
+      {% if quality.samples %}
+      <div class="table-wrapper" tabindex="0" role="region" aria-label="{{ t('j.quality_title') }}" style="margin-top:14px;">
+        <table class="grid">
+          <thead>
+            <tr>
+              <th>{{ t('market.col_name') }}</th>
+              <th class="num">{{ t('j.plan_entry') }}</th>
+              <th class="num">{{ t('j.actual_entry') }}</th>
+              <th class="num">{{ t('j.plan_vs_fill_qty') }}</th>
+              <th class="num">{{ t('j.drift') }}</th>
+              <th>{{ t('j.in_zone_col') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in quality.samples %}
+            <tr>
+              <td><span class="tag tag-{{ s.market|lower }}">{{ s.market }}</span> {{ s.name }} <span class="tiny mono muted">{{ s.code }}</span></td>
+              <td class="num mono">{{ '%.3f'|format(s.plan_entry_low) }}–{{ '%.3f'|format(s.plan_entry_high) }}</td>
+              <td class="num mono">{{ '%.3f'|format(s.actual_price) }}</td>
+              <td class="num mono" data-priv="qty">{{ s.filled_qty }} / {{ s.planned_qty }}</td>
+              <td class="num mono {{ 'up' if s.deviation_pct <= 0 else 'down' }}">
+                {{ '%+.2f'|format(s.deviation_pct) }}%
+                {% if s.deviation_r is not none %} ({{ '%+.2f'|format(s.deviation_r) }}R){% endif %}
+              </td>
+              <td>
+                <span class="badge {{ 'ok-badge' if s.in_zone else 'wait' }}">
+                  {{ t('j.in_zone_yes') if s.in_zone else t('j.in_zone_no') }}
+                </span>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
 
-  {% if quality.samples %}
-  <section class="card">
-    <div class="card-head"><h2>{{ t('journal.breakdown') }}</h2></div>
-    <div class="card-body tight">
-      <table class="grid">
-        <thead><tr><th>{{ t('journal.col_symbol') }}</th><th class="num">{{ t('journal.planned_qty') }}</th><th class="num">{{ t('journal.filled_qty') }}</th>
-          <th class="num">{{ t('journal.dev_pct') }}</th><th class="num">{{ t('journal.dev_r') }}</th></tr></thead>
-        <tbody>
-          {% for s in quality.samples %}
-          <tr>
-            <td><a href="/advice#rec-{{ s.rec_id }}">{{ s.name }}</a>
-              <span class="mono muted tiny">{{ s.code }}</span></td>
-            <td class="num mono">{{ s.planned_qty }}</td>
-            <td class="num mono">{{ s.filled_qty }}</td>
-            <td class="num mono {{ 'up' if s.deviation_pct > 0 else 'down' }}">
-              {{ '%+.2f%%'|format(s.deviation_pct) }}
-            </td>
-            <td class="num mono {{ 'up' if (s.deviation_r or 0) > 0 else 'down' }}">
-              {% if s.deviation_r is none %}—{% else %}{{ '%+.2f'|format(s.deviation_r) }}{% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      {% if quality.exit_samples %}
+      <h3 style="font-size:14px;margin:18px 0 8px;">{{ t('j.exit_attribution') }}</h3>
+      <div class="table-wrapper" tabindex="0" role="region" aria-label="{{ t('j.exit_attribution') }}">
+        <table class="grid">
+          <thead>
+            <tr>
+              <th>{{ t('market.col_name') }}</th>
+              <th class="num">{{ t('j.actual_net_cny') }}</th>
+              <th class="num">{{ t('j.planned_net_cny') }}</th>
+              <th class="num">{{ t('j.attr_diff') }}</th>
+              <th>{{ t('j.exit_tag') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for e in quality.exit_samples %}
+            <tr>
+              <td>{{ e.name }} <span class="tiny mono muted">{{ e.code }}</span></td>
+              <td class="num mono {{ 'up' if e.actual_net_cny >= 0 else 'down' }}" data-priv="money">{{ '%+.1f'|format(e.actual_net_cny) }}</td>
+              <td class="num mono" data-priv="money">{{ '%+.1f'|format(e.planned_net_cny) }}</td>
+              <td class="num mono {{ 'up' if e.diff_cny >= 0 else 'down' }}" data-priv="money">{{ '%+.1f'|format(e.diff_cny) }}</td>
+              <td><span class="badge">{{ e.exit_tag }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
     </div>
   </section>
-  {% endif %}
 </div>
 
+{# 4. 粘贴券商对账单导入 #}
 <div data-pane="import" class="hidden">
   <section class="card">
-    <div class="card-head"><h2>{{ t('journal.tab_import') }}</h2></div>
+    <div class="card-head">
+      <h2 class="kp-title-row">{{ icon('upload', 17) }} <span>{{ t('j.import_title') }}</span></h2>
+    </div>
     <div class="card-body">
-      <p class="hint" style="margin-bottom:12px;">{{ t('journal.import_intro') }}</p>
-      <textarea id="stmt-text" rows="7" class="textarea" placeholder="{{ t('journal.import_placeholder') }}"></textarea>
+      <p class="hint" style="margin-bottom:10px;">{{ t('journal.import_help') }}</p>
+      <textarea id="imp-text" class="textarea mono" rows="6" placeholder="2026-11-06  00700  买入  100  419.80  18.50"></textarea>
       <div class="row-actions">
-        <button class="btn ghost" id="parse-btn">{{ t('journal.parse') }}</button>
-        <button class="btn" id="import-btn" disabled>{{ t('journal.import') }}</button>
-        <span class="tiny" id="parse-msg"></span>
+        <button type="button" class="btn ghost" id="imp-parse">
+          {{ icon('search', 14) }}
+          <span>{{ t('j.import_parse') }}</span>
+        </button>
+        <button type="button" class="btn hidden" id="imp-save">
+          {{ icon('check-circle', 14) }}
+          <span>{{ t('j.import_commit') }}</span>
+        </button>
+        <span class="tiny muted" id="imp-note"></span>
       </div>
-      <p class="tiny muted" style="margin-top:10px;">{{ t('journal.import_help') }}</p>
-
-      <div id="parse-result" class="hidden" style="margin-top:18px;">
-        <table class="grid" id="parse-table">
-          <thead><tr><th>{{ t('journal.import_col_market') }}</th><th>{{ t('journal.import_col_code') }}</th><th>{{ t('journal.import_col_side') }}</th><th class="num">{{ t('journal.import_col_qty') }}</th><th class="num">{{ t('journal.import_col_price') }}</th><th>{{ t('journal.import_col_date') }}</th><th>{{ t('journal.import_col_hint') }}</th></tr></thead>
-          <tbody></tbody>
+      <div id="imp-preview" class="table-wrapper hidden" tabindex="0" role="region" aria-label="{{ t('j.import_title') }}" style="margin-top:12px;">
+        <table class="grid">
+          <thead>
+            <tr>
+              <th>{{ t('journal.import_col_market') }}</th>
+              <th>{{ t('journal.import_col_code') }}</th>
+              <th>{{ t('journal.import_col_side') }}</th>
+              <th class="num">{{ t('journal.import_col_qty') }}</th>
+              <th class="num">{{ t('journal.import_col_price') }}</th>
+              <th>{{ t('journal.import_col_date') }}</th>
+              <th>{{ t('journal.import_col_hint') }}</th>
+            </tr>
+          </thead>
+          <tbody id="imp-tbody"></tbody>
         </table>
       </div>
     </div>
   </section>
 </div>
-
-{% include "_fill_modal.html" %}
 {% endblock %}
 
 {% block scripts %}
-{# I18N 必须先于 fill.js 定义：fill.js 在加载时就读取它。 #}
 <script>
 window.I18N = Object.assign(window.I18N || {}, {
-  requireFill: {{ t('journal.require_fill') | tojson }},
   movingStop: {{ t('journal.moving_stop') | tojson }},
   confirmStop: {{ t('journal.confirm_stop') | tojson }},
   stopReason: {{ t('journal.stop_reason') | tojson }},
@@ -328,21 +470,11 @@ window.I18N = Object.assign(window.I18N || {}, {
   sell: {{ t('journal.side_sell') | tojson }},
   normal: {{ t('journal.normal') | tojson }},
   parsedOk: {{ t('journal.parsed_ok') | tojson }},
-  saved: {{ t('journal.saved') | tojson }},
+  savedMsg: {{ t('journal.saved') | tojson }},
   savedWithFailures: {{ t('journal.saved_with_failures') | tojson }},
-  saveFailed: {{ t('journal.save_failed') | tojson }},
-  saveFailedPlain: {{ t('journal.save_failed_plain') | tojson }},
-  saving: {{ t('journal.saving') | tojson }},
-  codeHelp: {{ t('journal.code_help') | tojson }},
-  notCached: {{ t('journal.not_cached') | tojson }},
-  feesByBroker: {{ t('journal.fees_by_broker') | tojson }},
-  levelsNote: {{ t('journal.levels_note') | tojson }},
-  levelsOptional: {{ t('journal.levels_optional') | tojson }},
-  levelsUnavailable: {{ t('journal.levels_unavailable') | tojson }},
-  unknownSymbol: {{ t('journal.unknown_symbol') | tojson }}
+  saveFailed: {{ t('journal.save_failed') | tojson }}
 });
 </script>
-<script src="/static/js/fill.js"></script>
 <script>
 (function () {
   var fillBtn = document.getElementById('fill-btn');
@@ -350,104 +482,123 @@ window.I18N = Object.assign(window.I18N || {}, {
     fillBtn.addEventListener('click', function () { window.openFillDialog(null); });
   }
 
-  /* ---------------- 移动止损 ---------------- */
   document.querySelectorAll('[data-move-stop]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var id = btn.getAttribute('data-move-stop');
       var stop = btn.getAttribute('data-stop');
-      (window.askConfirm
-        ? window.askConfirm(window.I18N.confirmStop.replace('{stop}', stop))
-        : Promise.resolve(confirm(window.I18N.confirmStop.replace('{stop}', stop)))
-      ).then(function (yes) {
-        if (!yes) return;
-        btn.disabled = true;
-        return fetch('/api/journal/' + id + '/stop', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ stop: stop, reason: window.I18N.stopReason })
-        }).then(function (r) { return r.json(); })
-          .then(function (res) {
-            if (!res.ok) {
-              showAlert(res.error || window.I18N.stopFailed);
-              btn.disabled = false;
-              return;
-            }
-            location.reload();
+      window.askConfirm(window.I18N.confirmStop.replace('{stop}', stop), window.I18N.movingStop)
+        .then(function (yes) {
+          if (!yes) return;
+          fetch('/api/journal/' + id + '/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stop: stop, reason: window.I18N.stopReason })
           })
-          .catch(function (e) { showAlert(String(e)); btn.disabled = false; });
-      });
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+              if (!res.ok) window.showAlert(res.error || window.I18N.stopFailed);
+              else location.reload();
+            });
+        });
     });
   });
 
-  /* ---------------- 对账单导入 ---------------- */
-  var parsed = [];
-  var parseBtn = document.getElementById('parse-btn');
-  var importBtn = document.getElementById('import-btn');
-  var text = document.getElementById('stmt-text');
-  var pmsg = document.getElementById('parse-msg');
-  var box = document.getElementById('parse-result');
-  var tbody = box ? box.querySelector('tbody') : null;
-  if (!parseBtn) return;
-
-  parseBtn.addEventListener('click', function () {
-    if (!text.value.trim()) { pmsg.textContent = window.I18N.pasteFirst; return; }
-    fetch('/api/journal/parse', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: text.value })
-    }).then(function (r) { return r.json(); })
-      .then(function (res) {
-        parsed = res.rows || [];
-        tbody.innerHTML = '';
-        if (!parsed.length) {
-          box.classList.add('hidden');
-          importBtn.disabled = true;
-          pmsg.textContent = window.I18N.parseEmpty;
-          return;
-        }
-        parsed.forEach(function (row) {
-          var tr = document.createElement('tr');
-          var side = row.side === 'buy' ? window.I18N.buy : window.I18N.sell;
-          tr.innerHTML =
-            '<td>' + row.market + '</td>' +
-            '<td class="mono">' + row.code + '</td>' +
-            '<td>' + side + '</td>' +
-            '<td class="num mono">' + row.qty + '</td>' +
-            '<td class="num mono">' + row.price + '</td>' +
-            '<td class="mono">' + row.trade_date + '</td>' +
-            '<td class="tiny ' + (row.problems.length ? 'up' : 'muted') + '">' +
-              (row.problems.length ? row.problems.join(', ') : window.I18N.normal) + '</td>';
-          tbody.appendChild(tr);
+  document.querySelectorAll('[data-stop-hist]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var id = btn.getAttribute('data-stop-hist');
+      fetch('/api/journal/' + id + '/stops')
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          var items = res.items || [];
+          var text = items.length
+            ? items.map(function (it) {
+                return (it.at || '').slice(0, 16) + ': ' + (it.old_stop || '—') + ' -> ' + it.new_stop + (it.reason ? ' (' + it.reason + ')' : '');
+              }).join('\n')
+            : '—';
+          window.showAlert(text, window.I18N.movingStop);
         });
-        box.classList.remove('hidden');
-        importBtn.disabled = false;
-        pmsg.textContent = window.I18N.parsedOk.replace('{n}', parsed.length) +
-          (res.note ? ' ' + res.note : '');
-      });
+    });
   });
 
-  importBtn.addEventListener('click', function () {
-    importBtn.disabled = true;
-    fetch('/api/journal/import', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows: parsed })
-    }).then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.ok) {
-          var bad = (res.items || []).filter(function (x) { return !x.ok; });
-          pmsg.textContent = bad.length
-            ? window.I18N.savedWithFailures
-                .replace('{ok}', res.saved).replace('{bad}', bad.length)
-                .replace('{detail}', bad.map(function (x) { return x.code + ' ' + x.error; }).join('; '))
-            : window.I18N.saved.replace('{n}', res.saved);
-          setTimeout(function () { location.href = '/journal'; }, bad.length ? 4000 : 900);
-        } else {
-          pmsg.textContent = window.I18N.saveFailed + res.error;
-          importBtn.disabled = false;
-        }
-      });
-  });
+  var parsedRows = [];
+  var parseBtn = document.getElementById('imp-parse');
+  var saveBtn = document.getElementById('imp-save');
+  var noteEl = document.getElementById('imp-note');
+  var previewBox = document.getElementById('imp-preview');
+  var tbody = document.getElementById('imp-tbody');
+
+  if (parseBtn) {
+    parseBtn.addEventListener('click', function () {
+      var txt = (document.getElementById('imp-text').value || '').trim();
+      if (!txt) { noteEl.textContent = window.I18N.pasteFirst; return; }
+      fetch('/api/journal/parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: txt })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          parsedRows = res.rows || [];
+          tbody.textContent = '';
+          if (!parsedRows.length) {
+            noteEl.textContent = res.note || window.I18N.parseEmpty;
+            previewBox.classList.add('hidden');
+            saveBtn.classList.add('hidden');
+            return;
+          }
+          parsedRows.forEach(function (row) {
+            var tr = document.createElement('tr');
+            function addTd(txt, cls, priv) {
+              var td = document.createElement('td');
+              if (cls) td.className = cls;
+              if (priv) td.setAttribute('data-priv', priv);
+              td.textContent = txt;
+              tr.appendChild(td);
+            }
+            addTd(row.market || '');
+            addTd(row.code || '', 'mono');
+            addTd(row.side === 'sell' ? window.I18N.sell : window.I18N.buy);
+            addTd(String(row.qty || ''), 'num mono', 'qty');
+            addTd(String(row.price || ''), 'num mono');
+            addTd(row.trade_date || '—', 'mono tiny');
+            addTd((row.problems && row.problems.length) ? row.problems.join('; ') : window.I18N.normal, 'tiny muted');
+            tbody.appendChild(tr);
+          });
+          previewBox.classList.remove('hidden');
+          saveBtn.classList.remove('hidden');
+          noteEl.textContent = (res.note ? res.note + ' ' : '') + window.I18N.parsedOk.replace('{n}', parsedRows.length);
+        });
+    });
+  }
+
+  if (saveBtn) {
+    saveBtn.addEventListener('click', function () {
+      if (!parsedRows.length) return;
+      saveBtn.disabled = true;
+      fetch('/api/journal/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: parsedRows })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          saveBtn.disabled = false;
+          if (!res.failed) {
+            noteEl.textContent = window.I18N.savedMsg.replace('{n}', res.saved);
+            setTimeout(function () { location.reload(); }, 900);
+          } else {
+            var errs = (res.items || []).filter(function (i) { return !i.ok; })
+              .map(function (i) { return i.code + ': ' + (i.error || ''); }).join('; ');
+            noteEl.textContent = window.I18N.savedWithFailures
+              .replace('{ok}', res.saved).replace('{bad}', res.failed).replace('{detail}', errs);
+          }
+        })
+        .catch(function (e) {
+          saveBtn.disabled = false;
+          noteEl.textContent = window.I18N.saveFailed + e;
+        });
+    });
+  }
 })();
 </script>
 {% endblock %}

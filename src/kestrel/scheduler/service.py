@@ -1,15 +1,4 @@
-"""Background scheduler: periodic scans, position watches, dispatch.
-
-Three jobs, deliberately separate:
-
-* ``scan_cycle``  — produce advice. Expensive and opt-in (``scan.auto_enabled``).
-* ``watch_cycle`` — look after positions you already hold. Cheap, reads cached
-  quotes only, and always runs: a missed stop alert costs far more than a scan.
-* ``dispatch``    — flush the notification outbox.
-
-They share one scheduler because the app is one process, but they do not share a
-schedule: a scan every hour is fine, a stop check every hour is too slow.
-"""
+"""后台定时调度器：定时生成建议、持仓盯盘刷新与止损通知、版本检查。"""
 
 from __future__ import annotations
 
@@ -18,9 +7,13 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
-from kestrel.db.engine import connect
+from kestrel.core.clock import iso
+from kestrel.core.money import to_micro
+from kestrel.datasources.chain import default_chain
+from kestrel.db.engine import connect, transaction
 from kestrel.notify import dispatcher
 from kestrel.services import config as config_service
+from kestrel.services import engine as engine_service
 from kestrel.services import positions as position_service
 from kestrel.services import scan as scan_service
 
@@ -30,26 +23,67 @@ _scheduler: AsyncIOScheduler | None = None
 WATCH_MINUTES = 15
 
 
-async def _scan_cycle() -> None:
+def _save_watch_quotes(quotes: dict) -> None:
+    """将盯盘拉取到的持仓最新行情写入 ``quote_latest``。"""
+    if not quotes:
+        return
+    conn = connect()
     try:
-        result = await scan_service.run_scan(trigger="schedule")
-        if result.get("plans"):
-            for rec in scan_service.active_recommendations(int(result["plans"])):
-                dispatcher.queue(rec["id"])
-        await dispatcher.dispatch()
+        with transaction(conn):
+            for q in quotes.values():
+                row = conn.execute(
+                    "SELECT id FROM symbol WHERE market=? AND code=?",
+                    (q.market, q.code),
+                ).fetchone()
+                if not row:
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO quote_latest
+                        (symbol_id, price, prev_close, open, high, low, volume, turnover,
+                         change_pct, source, quoted_at, fetched_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+                    ON CONFLICT(symbol_id) DO UPDATE SET
+                        price=excluded.price, prev_close=excluded.prev_close, open=excluded.open,
+                        high=excluded.high, low=excluded.low, volume=excluded.volume,
+                        turnover=excluded.turnover, change_pct=excluded.change_pct,
+                        source=excluded.source, quoted_at=excluded.quoted_at,
+                        fetched_at=excluded.fetched_at
+                    """,
+                    (
+                        row["id"],
+                        to_micro(q.price),
+                        to_micro(q.prev_close) if q.prev_close else None,
+                        to_micro(q.open) if q.open else None,
+                        to_micro(q.high) if q.high else None,
+                        to_micro(q.low) if q.low else None,
+                        q.volume,
+                        to_micro(q.turnover) if q.turnover else None,
+                        q.change_pct,
+                        q.source,
+                        iso(q.quoted_at),
+                    ),
+                )
+    finally:
+        conn.close()
+
+
+async def _scan_cycle() -> None:
+    """按用户当前配置的引擎（规则 / 大模型 / WorkBuddy）执行定时扫描并推送新建议。"""
+    try:
+        result = await engine_service.run(trigger="schedule")
         scan_service.expire_stale()
-        log.info("scheduled scan: %s", {k: result.get(k) for k in ("scanned", "plans")})
+        log.info(
+            "scheduled scan (%s): %s",
+            result.get("engine"),
+            {k: result.get(k) for k in ("scanned", "plans", "accepted")},
+        )
     except Exception as exc:  # noqa: BLE001
         log.warning("scheduled scan failed: %s", exc)
 
 
 async def _update_cycle() -> None:
-    """每天查一次新版本。
-
-    只提醒、不安装：把应用在用户不知情时替换掉，比晚一天更新糟得多。
-    没有发布过任何 release 时 GitHub 返回 404，这被当成「暂时没有更新」，
-    不会打扰用户。
-    """
+    """每天两次检查 GitHub Release 新版本，仅提醒不静默覆盖安装。"""
     try:
         from kestrel.services import updates
 
@@ -71,12 +105,25 @@ async def _update_cycle() -> None:
 
 
 async def _watch_cycle() -> None:
-    """持倉風險檢查：跌破止損、接近止損、到達目標。
-
-    不抓網絡：只讀 ``quote_latest``（行情頁點一次刷新就會更新）。
-    這樣即使用戶沒開自動掃描，只要他看過行情，提醒就是基於真實價格的。
-    """
+    """持仓风控巡检：先尝试刷新持仓股票最新现价，再执行止损/止盈预警判定。"""
     try:
+        conn = connect()
+        try:
+            open_rows = conn.execute(
+                "SELECT DISTINCT market, code FROM trade WHERE status='open'"
+            ).fetchall()
+        finally:
+            conn.close()
+
+        pairs = [(r["market"], r["code"]) for r in open_rows]
+        if pairs:
+            try:
+                quotes = await default_chain().fetch(pairs)
+                if quotes:
+                    _save_watch_quotes(quotes)
+            except Exception as exc:  # noqa: BLE001
+                log.debug("watch quote refresh skipped: %s", exc)
+
         alerts = position_service.sweep_alerts()
         if not alerts:
             return
@@ -100,14 +147,37 @@ async def _watch_cycle() -> None:
 
 def _absolute(path: str) -> str:
     """推送到手机上的链接必须是完整地址，否则点不开。"""
-    from kestrel.services import config as config_service
-
     conn = connect()
     try:
         base = str(config_service.get(conn, "receipt.public_base", "") or "").rstrip("/")
     finally:
         conn.close()
     return f"{base}{path}" if base else path
+
+
+def reschedule() -> None:
+    """在设置页修改自动扫描开关或频率后，无需重启立即热更新调度计划。"""
+    if _scheduler is None:
+        return
+    conn = connect()
+    try:
+        enabled = bool(config_service.get(conn, "scan.auto_enabled", False))
+        minutes = int(config_service.get(conn, "scan.interval_minutes", 60) or 60)
+    finally:
+        conn.close()
+
+    if _scheduler.get_job("scan_cycle") is not None:
+        _scheduler.remove_job("scan_cycle")
+    if enabled:
+        _scheduler.add_job(
+            _scan_cycle,
+            IntervalTrigger(minutes=max(5, minutes)),
+            id="scan_cycle",
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
+    log.info("scheduler rescheduled: scan %s", f"every {minutes} min" if enabled else "disabled")
 
 
 def start() -> AsyncIOScheduler | None:

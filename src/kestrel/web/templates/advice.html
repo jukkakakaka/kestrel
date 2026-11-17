@@ -1,501 +1,399 @@
 {% extends "base.html" %}
-{% block title %}{{ t('nav.advice') }} · {{ t('app.name') }}{% endblock %}
+{% from "_page_icons.html" import icon, empty_art, page_ui %}
+{% block title %}{{ t('adv.title') }} · {{ t('app.name') }}{% endblock %}
 
 {% block content %}
+{{ page_ui() }}
 <div class="page-head">
   <div>
     <h1>{{ t('adv.title') }}</h1>
-    <div class="sub">
-      {% if engine.is_ai %}
-        <span class="badge wait">{{ t('adv.ai_decided') }}</span>
-      {% else %}
-        <span class="badge avoid">{{ t('adv.rules_decided') }}</span>
-      {% endif %}
-      {{ engine.label }}{% if engine.model and engine.model != 'workbuddy' %} · {{ engine.model }}{% endif %}
-      {% if engine.pending %} · 队列 {{ engine.pending }} 条待处理{% endif %}
-      {% if not auto %} · {{ t('adv.manual_only') }}{% endif %}
-    </div>
+    <div class="sub">{{ t('adv.sub') }}</div>
   </div>
   <div class="page-actions">
-    <button class="btn" id="run-btn"
-            {% if not engine.configured %}disabled{% endif %}
-            data-engine="{{ engine.provider }}">
+    <div class="seg-group" role="group" aria-label="{{ t('adv.scope') }}">
+      {% for m_code, m_label in [('ALL', t('adv.filter_all')), ('CN', t('market.cn')), ('HK', t('market.hk')), ('US', t('market.us'))] %}
+      <a class="seg-btn {{ 'active' if market_filter == m_code else '' }}"
+         href="{{ '/advice' if m_code == 'ALL' else '/advice?market=' + m_code }}">{{ m_label }}</a>
+      {% endfor %}
+    </div>
+    <button class="btn ghost" id="refresh-btn">
+      {{ icon('refresh', 15) }}
+      <span class="label">{{ t('action.refresh') }}</span>
+    </button>
+    <button class="btn" id="run-btn" {% if engine.is_ai and not engine.configured %}disabled{% endif %}>
+      {{ icon('radar', 15) }}
       <span class="label">{{ engine.button }}</span>
     </button>
   </div>
 </div>
 
-<div class="engine-banner">
-  {{ engine.banner }}
-  {% if engine.reason %}<br><strong class="up">{{ engine.reason }}</strong>{% endif %}
-  {% if engine.is_ai %}
-    <br><span class="muted">
-      {{ t('adv.ai_note') }}
-      <a href="/sim">{{ t('adv.quick_sim') }}</a>{{ t('adv.edit_rules_hint') }}<a href="/rules">{{ t('adv.rules_link') }}</a>。
-    </span>
-  {% else %}
-    <br><span class="muted">
-      {{ t('adv.switch_ai_hint') }}<a href="/settings#engine">{{ t('adv.engine_settings') }}</a>。
-    </span>
-  {% endif %}
-</div>
-
-<div id="scan-feedback" class="notice hidden"></div>
-
-<section class="card" id="horizon-card">
-  <div class="card-head">
-    <h2>{{ t('horizon.title') }}</h2>
-    <span class="meta">
-      {{ t('horizon.in_force') }} · <strong>{{ horizon.label }}</strong>
-      {% if horizon.beta %}<span class="badge wait" style="font-size:11px;">{{ t('horizon.beta') }}</span>{% endif %}
-      {% if horizon.pinned %}· {{ t('horizon.pinned') }}{% else %}· {{ t('horizon.auto_on') }}{% endif %}
-    </span>
-  </div>
-  <div class="card-body">
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 10px;" id="hz-row">
-      <button class="btn sm {% if not horizon.pinned %}{% else %}ghost{% endif %}" data-hz="auto">
-        {{ t('horizon.auto') }}
-      </button>
-      {% for o in horizon.options %}
-      <button class="btn sm {% if horizon.pinned and horizon.requested == o.code %}{% else %}ghost{% endif %}"
-              data-hz="{{ o.code }}">
-        {{ o.label }}{% if o.beta %} · {{ t('horizon.beta') }}{% endif %}
-      </button>
-      {% endfor %}
-      <span class="spacer" style="flex:1;"></span>
-      <button class="btn sm ghost" id="hz-recompute">{{ t('horizon.recompute') }}</button>
+{# 顶部关键风控与计划概览条 #}
+{% set avg_rr = ((recs | sum(attribute='r_multiple')) / (recs | length)) if recs else 0 %}
+<section class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('adv.stat_active') }}</span>
+      <span class="kp-icon-badge">{{ icon('radar', 16) }}</span>
     </div>
+    <div class="stat-value">{{ recs | length }}</div>
+    <div class="stat-sub">
+      <span>{{ engine.label }}</span>
+      {% if auto %}<span>· {{ t('adv.auto_on', n=interval) }}</span>{% endif %}
+    </div>
+  </div>
 
-    <p class="hint" style="margin:0 0 10px;">{{ t('horizon.hint') }}</p>
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('adv.stat_avg_rr') }}</span>
+      <span class="kp-icon-badge tone-up">{{ icon('target', 16) }}</span>
+    </div>
+    <div class="stat-value">{{ ('%.1f:1' % avg_rr) if recs else '≥1.5:1' }}</div>
+    <div class="stat-sub"><span>{{ t('gloss.rr') }}</span></div>
+  </div>
 
-    {% set adv = horizon.advice %}
-    {% if adv and adv.reasons %}
-      {% set m = adv.metrics or {} %}
-      {% if m.breadth is defined %}
-      <div class="advice-figs" style="grid-template-columns: repeat(3, minmax(0,1fr));">
-        <div><span class="k">{{ t('horizon.breadth') }}</span><span class="v">{{ '%.0f'|format((m.breadth or 0) * 100) }}%</span></div>
-        <div><span class="k">{{ t('horizon.atr') }}</span><span class="v">{{ '%.1f'|format(m.atr_pct or 0) }}%</span></div>
-        <div><span class="k">{{ t('horizon.cost') }}</span><span class="v">{{ '%.1f'|format((m.cost_drag or {}).get('short', 0)) }}%</span></div>
-      </div>
-      {% endif %}
-      <details {% if not horizon.pinned %}open{% endif %} style="margin-top:10px;">
-        <summary>{{ t('horizon.why') }}</summary>
-        <ul style="margin:8px 0 0;padding-left:18px;line-height:1.85;font-size:13px;">
-          {% for r in adv.reasons %}<li>{{ r.en if locale.startswith('en') and r.en else r.zh }}</li>{% endfor %}
-        </ul>
-        <p class="muted" style="font-size:12px;margin-top:8px;">
-          {{ t('horizon.score') }}：
-          {% for code, value in (adv.scores or {}).items() %}
-            {{ horizon.labels.get(code, code) }} <b class="mono">{{ '%+.1f'|format(value) }}</b>{% if not loop.last %} · {% endif %}
-          {% endfor %}
-        </p>
-      </details>
-    {% else %}
-      <p class="muted">{{ t('horizon.insufficient') }}</p>
-    {% endif %}
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('adv.stat_horizon') }}</span>
+      <span class="kp-icon-badge tone-neutral">{{ icon('clock', 16) }}</span>
+    </div>
+    <div class="stat-value" style="font-size:17px;">{{ horizon.label }}</div>
+    <div class="stat-sub">
+      <span>{{ t('horizon.pinned') if horizon.pinned else t('horizon.auto_on') }}</span>
+    </div>
+  </div>
 
-    {% if adv and adv.blocked %}
-      <div class="notice warn" style="margin-top:10px;">
-        <strong>{{ t('horizon.blocked') }}</strong> {{ adv.note }}
-      </div>
-    {% endif %}
-    {% if horizon.beta %}
-      <p class="hint" style="margin-top:10px;">{{ t('horizon.beta_hint') }}</p>
-    {% endif %}
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('cal.avail_cash') }}</span>
+      <span class="kp-icon-badge tone-down">{{ icon('shield', 16) }}</span>
+    </div>
+    <div class="stat-value" data-priv="money">¥{{ portfolio_bar.available_cash_cny | num(0) }}</div>
+    <div class="stat-sub">
+      <span>{{ t('cal.pill_eq') }}</span>
+      <span class="mono" data-priv="money">¥{{ portfolio_bar.total_equity_cny | num(0) }}</span>
+    </div>
   </div>
 </section>
 
-{% if analyst_runs %}
+{# 多市场 & 多周期智能顾问面板 #}
 <section class="card">
   <div class="card-head">
-    <h2>{{ t('adv.last_run') }}</h2>
-    <span class="meta">
-      <span class="badge wait">{{ analyst_runs[0].engine_label }}</span>
-      {% if analyst_runs[0].engine_detail %} · {{ analyst_runs[0].engine_detail }}{% endif %}
-      {% if analyst_runs[0].horizon %}
-        · {{ horizon.labels.get(analyst_runs[0].horizon, analyst_runs[0].horizon) }}
-      {% endif %}
-      · {{ (analyst_runs[0].finished_at or analyst_runs[0].started_at)[:16] }}
-    </span>
+    <h2 class="kp-title-row">{{ icon('sparkles', 17) }} <span>{{ t('adv.advisor_panel_title') }}</span></h2>
+    <div class="filter-bar">
+      <span class="tiny muted">{{ t('adv.horizon_select') }}</span>
+      <select id="horizon-sel" class="inline-select">
+        <option value="auto" {% if not horizon.pinned %}selected{% endif %}>{{ t('horizon.auto') }}</option>
+        {% for opt in horizon.options %}
+        <option value="{{ opt.code }}" {% if horizon.requested == opt.code %}selected{% endif %}>{{ opt.label }}</option>
+        {% endfor %}
+      </select>
+      <button type="button" class="btn ghost sm" id="advisor-recalc">
+        {{ icon('refresh', 14) }}
+        <span>{{ t('adv.recalc') }}</span>
+      </button>
+    </div>
   </div>
   <div class="card-body">
-    {% if analyst_runs[0].error %}
-      <div class="notice err">失败：{{ analyst_runs[0].error }}</div>
-    {% else %}
-      <p class="hint">
-        看了 {{ analyst_runs[0].symbols }} 只候选，AI 给出 {{ analyst_runs[0].picks }} 条，
-        通过风控 {{ analyst_runs[0].accepted }} 条。
-        {% if analyst_runs[0].duration_ms %}耗时 {{ (analyst_runs[0].duration_ms / 1000) | round(1) }} 秒。{% endif %}
-      </p>
-    {% endif %}
+    <div class="grid {{ 'g2' if (not markets_configured or not horizon.pinned) else '' }}">
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <strong>{{ t('adv.current_horizon') }}：</strong>
+          <span class="badge ok-badge">{{ horizon.label }}</span>
+          {% if not horizon.pinned %}
+          <span class="tiny muted">{{ t('adv.auto_managed') }}</span>
+          {% endif %}
+        </div>
+        {% if horizon.advice and (horizon.advice.primary_reason or horizon.advice.reason) %}
+        <p class="tiny muted" style="margin-top:8px;line-height:1.7;">
+          {{ horizon.advice.primary_reason_en if (locale.startswith('en') and horizon.advice.primary_reason_en) else (horizon.advice.primary_reason or horizon.advice.reason) }}
+        </p>
+        {% endif %}
+        {% if horizon.advice and horizon.advice.market_regimes %}
+        <div class="regime-strip">
+          {% for mkt, reg in horizon.advice.market_regimes.items() %}
+          <span class="regime-pill {{ reg.regime }}">
+            <b>{{ mkt }}</b>
+            <span>{{ reg.label_en if locale.startswith('en') else reg.label_zh }}</span>
+            {% if reg.ret_20d is not none %}<span class="mono">({{ '%+.1f'|format(reg.ret_20d) }}%)</span>{% endif %}
+          </span>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+
+      {% if not markets_configured or not horizon.pinned %}
+      <div class="notice" style="margin:0;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+          <strong class="kp-title-row">{{ icon('sparkles', 15) }} <span>{{ t('adv.smart_rec_title') }}</span></strong>
+          {% if not markets_configured %}
+          <button type="button" class="btn sm" id="apply-mkt-rec"
+                  data-markets='{{ market_rec.recommended_markets | tojson }}'>
+            {{ icon('check-circle', 14) }}
+            <span>{{ t('adv.apply_rec_markets', mkts='/'.join(market_rec.recommended_markets)) }}</span>
+          </button>
+          {% endif %}
+        </div>
+        <div class="tiny" style="margin-top:6px;line-height:1.68;">
+          {% for r in (market_rec.reasons_en if locale.startswith('en') else market_rec.reasons_zh) %}
+          <div>• {{ r }}</div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<div id="adv-flash" class="notice hidden"></div>
+
+{# 引擎提示 #}
+<div class="notice {% if engine.is_ai and not engine.configured %}warn{% endif %}">
+  <span class="kp-title-row">
+    {{ icon('cpu' if engine.is_ai else 'shield-check', 15) }}
+    <strong>{{ engine.label }}</strong>
+  </span>
+  <span>{{ engine.banner }}</span>
+  {% if engine.is_ai and not engine.configured %}
+  <a href="/settings#engine" style="margin-left:8px;">{{ t('adv.engine_settings') }} →</a>
+  {% endif %}
+</div>
+
+{% if recs %}
+<div class="grid" style="gap:14px;">
+  {% for r in recs %}
+  {% set cur = r.currency or 'USD' %}
+  <article class="advice" id="rec-{{ r.id }}" style="margin-bottom:0;">
+    <header class="advice-head">
+      <span class="tag tag-{{ r.market|lower }}">{{ r.market }}</span>
+      <span class="sym"><a href="/stock/{{ r.market }}/{{ r.code }}" style="color:inherit;">{{ r.name }}</a></span>
+      <span class="code mono">{{ r.code }}</span>
+      <span class="badge wait">{{ t('rule.' + r.strategy) if t('rule.' + r.strategy) != 'rule.' + r.strategy else r.strategy }}</span>
+      <span class="tiny muted">{{ horizon.labels.get(r.horizon or 'short', r.horizon or 'short') }}</span>
+      <span class="spacer"></span>
+      <span class="badge ok-badge mono">{{ t('adv.score') }} {{ (r.score * 100)|round|int }}%</span>
+      <button type="button" class="btn ghost sm"
+              data-ask-copilot="{{ t('adv.ask_stock_q', name=r.name, code=r.code) }}"
+              data-symbol="{{ r.market }}:{{ r.code }}">
+        {{ icon('sparkles', 14) }}
+        <span>{{ t('copilot.ask_short') }}</span>
+      </button>
+    </header>
+
+    <div class="advice-verdict">
+      {{ r.headline or (r.explain_en if locale.startswith('en') else r.explain_zh) }}
+    </div>
+
+    <div class="card-body" style="padding:14px 18px;">
+      <div class="kp-price-strip">
+        <div>
+          <span class="k">{{ icon('activity', 12) }} {{ t('adv.entry') }}</span>
+          <span class="v mono">{{ r.entry_low | cur(cur) }} – {{ (r.entry_high or r.entry_low) | cur(cur) }}</span>
+        </div>
+        <div>
+          <span class="k">{{ icon('shield', 12) }} {{ t('adv.stop') }}</span>
+          <span class="v mono down">{{ r.stop | cur(cur) }}</span>
+        </div>
+        <div>
+          <span class="k">{{ icon('target', 12) }} {{ t('adv.target') }}</span>
+          <span class="v mono up">{{ r.target1 | cur(cur) }}</span>
+        </div>
+        <div>
+          <span class="k">{{ t('adv.qty') }}</span>
+          <span class="v mono" data-priv="qty">{{ r.qty }}</span>
+        </div>
+        <div>
+          <span class="k">{{ icon('coins', 12) }} {{ t('adv.est_fees') }}</span>
+          <span class="v mono" data-priv="money">{{ r.est_fees | cur(cur) }}</span>
+        </div>
+        <div>
+          <span class="k">{{ t('adv.breakeven') }}</span>
+          <span class="v mono">{{ r.breakeven | cur(cur) }}</span>
+        </div>
+        <div>
+          <span class="k">{{ t('adv.risk') }}</span>
+          <span class="v mono down" data-priv="money">{{ r.risk_amount | cur(cur) }}</span>
+        </div>
+        <div>
+          <span class="k">{{ t('adv.rr') }}</span>
+          <span class="v mono">{{ '%.1f'|format(r.r_multiple) }}:1</span>
+        </div>
+      </div>
+
+      {% if r.headline %}
+        {% if locale.startswith('en') and r.explain_en %}
+        <p class="tiny muted" style="margin-top:10px;line-height:1.7;">{{ r.explain_en }}</p>
+        {% elif r.explain_zh %}
+        <p class="tiny muted" style="margin-top:10px;line-height:1.7;">{{ r.explain_zh }}</p>
+        {% endif %}
+      {% endif %}
+
+      <details class="guide-details learn-only {% if not ui_learning %}hidden{% endif %}">
+        <summary>{{ t('adv.beginner_guide_title') }}</summary>
+        <div class="tiny" style="margin-top:8px;color:var(--ink-2);">
+          <div>1. {{ t('adv.guide_step1', low=(r.entry_low | cur(cur)), high=((r.entry_high or r.entry_low) | cur(cur)), qty=r.qty) }}</div>
+          <div>2. {{ t('adv.guide_step2', high=((r.entry_high or r.entry_low) | cur(cur))) }}</div>
+          <div>3. {{ t('adv.guide_step3', stop=(r.stop | cur(cur)), target=(r.target1 | cur(cur))) }}</div>
+          <div>4. {{ t('adv.guide_step4') }}</div>
+        </div>
+      </details>
+    </div>
+
+    <footer class="advice-foot">
+      <span class="deadline">
+        {{ icon('clock', 13) }}
+        {{ t('adv.valid_until') }}：{{ r.valid_until[:16].replace('T', ' ') }}
+      </span>
+      <button type="button" class="btn ghost sm" data-skip="{{ r.id }}">{{ t('adv.skip') }}</button>
+      <button type="button" class="btn sm"
+              data-open-fill
+              data-side="buy"
+              data-rec-id="{{ r.id }}"
+              data-market="{{ r.market }}"
+              data-code="{{ r.code }}"
+              data-qty="{{ r.qty }}"
+              data-price="{{ '%.3f'|format(r.entry_low / 1000000) }}"
+              data-stop="{{ '%.3f'|format(r.stop / 1000000) }}"
+              data-target="{{ '%.3f'|format(r.target1 / 1000000) }}"
+              data-note="{{ t('adv.fill_note') }}">
+        {{ icon('plus', 14) }}
+        <span>{{ t('adv.enter_fill') }}</span>
+      </button>
+    </footer>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<section class="card">
+  <div class="empty">
+    {{ empty_art('radar') }}
+    <strong>{{ t('adv.empty_title') }}</strong>
+    <p>{{ t('adv.empty_body') }}</p>
   </div>
 </section>
 {% endif %}
 
-<div class="tabs" role="tablist">
-  <button class="active" data-tab="today">{{ t('adv.tab_today') }} ({{ recs|length }})</button>
-  <button data-tab="history">{{ t('adv.tab_history') }} ({{ history|length }})</button>
-  <button data-tab="scans">{{ t('adv.tab_scans') }} ({{ scans|length }})</button>
-</div>
-
-<div data-pane="today">
-  {% if recs %}
-    {% for r in recs %}
-    {# 弹窗预填用的原始数字。格式化在 JS 里做，模板只负责给数值。 #}
-    {% set plan_data = {'code': r.code, 'qty': r.qty, 'currency': r.currency,
-                        'entry': r.entry_low, 'stop': r.stop, 'target': r.target1} %}
-    <article class="advice" data-rec="{{ r.id }}" data-plan='{{ plan_data | tojson }}' id="rec-{{ r.id }}">
-      <header class="advice-head">
-        <span class="tag tag-{{ r.market|lower }}">{{ r.market }}</span>
-        <span class="sym"><a href="/stock/{{ r.market }}/{{ r.code }}">{{ r.name }}</a></span>
-        <span class="code">{{ r.code }}</span>
-        {% if r.source == 'ai' %}
-          <span class="badge wait" title="{{ r.ai_thesis or '' }}">{{ t('adv.ai_badge') }}</span>
-        {% else %}
-          <span class="badge avoid" title="由规则计算">{{ t('strategy.' + r.strategy) }}</span>
-        {% endif %}
-        {% if r.horizon and r.horizon != 'short' %}
-          <span class="badge wait">{{ horizon.labels.get(r.horizon, r.horizon) }}</span>
-        {% endif %}
-        {% if r.status == 'active' %}
-          <span class="badge buy">{{ t('adv.action_buy') }}</span>
-        {% elif r.status == 'executed' %}
-          <span class="badge ok-badge">{{ t('adv.done') }}</span>
-        {% else %}
-          <span class="badge avoid">{{ t('adv.ignored') }}</span>
-        {% endif %}
-        <span class="spacer"></span>
-        {% if r.sector %}<span class="tag">{{ r.sector }}</span>{% endif %}        <span class="muted" style="font-size:12px;">
-          {% if r.source == 'ai' %}
-            {{ r.ai_model or 'AI' }} · 信心 {{ r.ai_confidence or 0 }}
-          {% else %}
-            {{ t('adv.strength') }} {{ (r.confidence * 100) | round | int }}%
-          {% endif %}
-        </span>
-      </header>
-
-      <div class="advice-verdict">
-        {% if locale.startswith('en') and r.status != 'skipped' %}
-          Buy between {{ r.entry_low | cur(r.currency) }} and {{ r.entry_high | cur(r.currency) }};
-          exit below {{ r.stop | cur(r.currency) }}; first target {{ r.target1 | cur(r.currency) }}.
-        {% else %}
-          {{ r.headline }}
-        {% endif %}
-      </div>
-
-      <div class="advice-figs">
-        <div><span class="k">{{ t('adv.entry') }}</span><span class="v">{{ r.entry_low | cur(r.currency) }} – {{ r.entry_high | cur(r.currency) }}</span></div>
-        <div><span class="k">{{ t('adv.stop') }}</span><span class="v down">{{ r.stop | cur(r.currency) }}</span></div>
-        <div><span class="k">{{ t('adv.target') }}</span><span class="v up">{{ r.target1 | cur(r.currency) }}</span></div>
-        <div><span class="k">{{ t('adv.qty') }}</span><span class="v">{{ r.qty }}</span></div>
-        <div><span class="k">{{ t('adv.rr') }}</span><span class="v">{{ '%.1f'|format(r.r_multiple) }} : 1</span></div>
-        <div><span class="k">{{ t('adv.risk') }}</span><span class="v down">{{ r.risk_amount | cur(r.currency) }}{% if r.currency != 'CNY' %}<small class="muted" style="font-weight:400;"> ≈ {{ r.risk_amount | cny(r.currency) }}</small>{% endif %}</span></div>
-      </div>
-
-      {% set learn_text = r.learn_en if locale.startswith('en') and r.learn_en else r.learn_zh %}
-      {% if ui.learning and learn_text %}
-      <div class="advice-body">
-        <details {% if recs|length <= 3 %}open{% endif %}>
-          <summary>{{ t('adv.learn') }}</summary>
-          <div class="learn">
-            {% for line in learn_text.split('\n') %}
-              {% if '：' in line %}
-                <h4>{{ line.split('：')[0] }}</h4>
-                <p>{{ line.split('：', 1)[1] }}</p>
-              {% elif ': ' in line %}
-                <h4>{{ line.split(': ')[0] }}</h4>
-                <p>{{ line.split(': ', 1)[1] }}</p>
-              {% elif line.strip() %}
-                <p>{{ line }}</p>
-              {% endif %}
-            {% endfor %}
-            {% if r.source == 'ai' and r.ai_thesis %}
-            <h4>{{ t('adv.model_words') }}</h4>
-            <p>{{ r.ai_thesis }}</p>
-            {% endif %}
-            <h4>{{ t('adv.learn_terms') }}</h4>
-            <p>
-              <span class="gloss" data-term="entry_zone">{{ t('gloss.entry_zone') }}</span>、
-              <span class="gloss" data-term="stop_loss">{{ t('gloss.stop_loss') }}</span>、
-              <span class="gloss" data-term="target">{{ t('gloss.target') }}</span>、
-              <span class="gloss" data-term="rr">{{ t('gloss.rr') }}</span>、
-              <span class="gloss" data-term="position">{{ t('gloss.position') }}</span>、
-              <span class="gloss" data-term="r_multiple">{{ t('gloss.r_multiple') }}</span>、
-              <span class="gloss" data-term="trailing_stop">{{ t('gloss.trailing_stop') }}</span>
-              {{ t('adv.terms_hint') }}
-            </p>
-          </div>
-        </details>
-      </div>
-      {% endif %}
-
-      <footer class="advice-foot">
-        <span class="deadline">
-          {{ t('adv.deadline') }} {{ r.valid_until | when }} {{ t('adv.beijing') }}
-        </span>
-        {% if r.status == 'active' %}
-          <button class="btn sm" data-decide="executed" data-rec="{{ r.id }}">{{ t('adv.did_buy') }}</button>
-          <button class="btn sm ghost" data-decide="skipped" data-rec="{{ r.id }}">{{ t('adv.skip') }}</button>
-        {% elif r.status == 'executed' %}
-          <span class="badge ok-badge">{{ t('adv.done') }}{% if r.fill_price %} @ {{ r.fill_price | cur(r.currency) }}{% endif %}</span>
-          <a class="btn sm ghost" href="/journal">{{ t('adv.sell_link') }}</a>
-        {% endif %}
-      </footer>
-    </article>
-    {% endfor %}
-  {% else %}
-  <div class="card">
-    <div class="empty">
-      <strong>{{ t('adv.empty_title') }}</strong>
-      {{ t('adv.empty') }}
-    </div>
+{% if history %}
+<section class="card" style="margin-top:18px;">
+  <div class="card-head">
+    <h2 class="kp-title-row">{{ icon('clock', 17) }} <span>{{ t('adv.history') }}</span></h2>
+    <span class="meta">{{ history|length }}</span>
   </div>
-  {% endif %}
-</div>
-
-<div data-pane="history" class="hidden">
-  {% if history %}
-  <section class="card">
-    <div class="card-body tight">
+  <div class="card-body tight">
+    <div class="table-wrapper" tabindex="0" role="region" aria-label="{{ t('adv.history') }}">
       <table class="grid">
         <thead>
           <tr>
-            <th>{{ t('adv.col_time') }}</th>
-            <th>{{ t('adv.col_symbol') }}</th>
-            <th>{{ t('adv.col_action') }}</th>
+            <th>{{ t('market.col_code') }}</th>
+            <th>{{ t('sim.strategy') }}</th>
             <th class="num">{{ t('adv.entry') }}</th>
             <th class="num">{{ t('adv.stop') }}</th>
-            <th class="num">{{ t('adv.target') }}</th>
-            <th>{{ t('adv.col_result') }}</th>
+            <th>{{ t('adv.status') }}</th>
+            <th>{{ t('adv.decided_note') }}</th>
           </tr>
         </thead>
         <tbody>
           {% for h in history %}
           <tr>
-            <td class="mono muted">{{ h.created_at[:16] }}</td>
-            <td><a href="/stock/{{ h.market }}/{{ h.code }}">{{ h.name }}</a> <span class="mono muted">{{ h.code }}</span></td>
             <td>
-              <span class="badge {{ 'buy' if h.action == 'buy' else 'wait' }}">{{ t('adv.action_' + h.action) }}</span>
-              {% if h.source == 'ai' %}<span class="tiny muted">{{ t('adv.ai_badge') }}</span>{% else %}<span class="tiny muted">{{ t('adv.rules_badge') }}</span>{% endif %}
+              <span class="tag tag-{{ h.market|lower }}">{{ h.market }}</span>
+              <a href="/stock/{{ h.market }}/{{ h.code }}"><strong>{{ h.name }}</strong></a>
+              <span class="tiny mono muted">{{ h.code }}</span>
             </td>
+            <td class="tiny">{{ t('rule.' + h.strategy) if t('rule.' + h.strategy) != 'rule.' + h.strategy else h.strategy }}</td>
             <td class="num mono">{{ h.entry_low | cur(h.currency) }}</td>
             <td class="num mono down">{{ h.stop | cur(h.currency) }}</td>
-            <td class="num mono up">{{ h.target1 | cur(h.currency) }}</td>
-            <td>
-              {% if h.status == 'executed' %}<span class="badge ok-badge">{{ t('adv.done') }}</span>
-              {% elif h.status == 'skipped' %}<span class="badge avoid">{{ t('adv.ignored') }}</span>
-              {% else %}<span class="muted">{{ t('adv.status_' + h.status) }}</span>{% endif %}
-            </td>
+            <td><span class="badge {{ 'ok-badge' if h.status == 'executed' else 'avoid' }}">{{ h.status }}</span></td>
+            <td class="tiny muted">{{ h.decided_note or '—' }}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
-  </section>
-  {% else %}
-  <div class="card"><div class="empty"><strong>{{ t('adv.no_history_title') }}</strong>{{ t('adv.no_history_body') }}</div></div>
-  {% endif %}
-</div>
-
-<div data-pane="scans" class="hidden">
-  {% if scans %}
-  <section class="card">
-    <div class="card-body tight">
-      <table class="grid">
-        <thead>
-          <tr>
-            <th>{{ t('adv.col_time') }}</th>
-            <th>{{ t('adv.col_trigger') }}</th>
-            <th class="num">{{ t('adv.col_scanned') }}</th>
-            <th class="num">{{ t('adv.col_signals') }}</th>
-            <th class="num">{{ t('adv.col_plans') }}</th>
-            <th class="num">{{ t('adv.col_took') }}</th>
-            <th>{{ t('adv.col_notes') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for s in scans %}
-          <tr>
-            <td class="mono muted">{{ (s.finished_at or s.started_at)[:16] }}</td>
-            <td>{{ s.trigger }}</td>
-            <td class="num mono">{{ s.scanned or 0 }}</td>
-            <td class="num mono">{{ s.signals or 0 }}</td>
-            <td class="num mono">{{ s.plans or 0 }}</td>
-            <td class="num mono muted">{{ s.duration_ms or 0 }} ms</td>
-            <td class="tiny muted">
-              {% if s.skipped %}{{ t('adv.n_skipped', n=s.skipped|length) }}{% endif %}
-              {% if s.rejected %}{{ t('adv.n_rejected', n=s.rejected|length) }}{% endif %}
-              {% if s.status != 'ok' %}<span class="up">{{ s.status }}</span>{% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
-  {% else %}
-  <div class="card"><div class="empty"><strong>{{ t('adv.no_scan_title') }}</strong>{{ t('adv.no_scan_body') }}</div></div>
-  {% endif %}
-</div>
-{% include "_fill_modal.html" %}
+  </div>
+</section>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
-{# fill.js 在加载时读取 I18N，所以词典必须先定义。 #}
-<script>
-window.I18N = Object.assign(window.I18N || {}, {
-  requireFill: {{ t('journal.require_fill') | tojson }},
-  saveFailedPlain: {{ t('journal.save_failed_plain') | tojson }},
-  saving: {{ t('journal.saving') | tojson }},
-  codeHelp: {{ t('journal.code_help') | tojson }},
-  notCached: {{ t('journal.not_cached') | tojson }},
-  feesByBroker: {{ t('journal.fees_by_broker') | tojson }},
-  levelsNote: {{ t('journal.levels_note') | tojson }},
-  levelsOptional: {{ t('journal.levels_optional') | tojson }},
-  levelsUnavailable: {{ t('journal.levels_unavailable') | tojson }},
-  unknownSymbol: {{ t('journal.unknown_symbol') | tojson }}
-});
-</script>
-<script src="/static/js/fill.js"></script>
 <script>
 (function () {
   var runBtn = document.getElementById('run-btn');
-  var box = document.getElementById('scan-feedback');
+  var flash = document.getElementById('adv-flash');
+  var horizonSel = document.getElementById('horizon-sel');
+  var recalcBtn = document.getElementById('advisor-recalc');
+  var applyMktBtn = document.getElementById('apply-mkt-rec');
 
-  function flash(msg, kind, sticky) {
-    if (!box) return;
-    box.className = 'notice ' + (kind || '');
-    box.textContent = msg;
-    box.classList.remove('hidden');
-    if (!sticky) { setTimeout(function () { box.classList.add('hidden'); }, 9000); }
-  }
-
-  function setHorizon(payload, done) {
-    fetch('/api/horizon', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (!res.ok) { flash((res.error || 'horizon failed'), 'err', true); return; }
-        if (done) { done(res); return; }
-        location.reload();
-      })
-      .catch(function (e) { flash(String(e), 'err', true); });
-  }
-
-  document.querySelectorAll('[data-hz]').forEach(function (el) {
-    el.addEventListener('click', function () {
-      el.disabled = true;
-      setHorizon({ horizon: el.getAttribute('data-hz') });
-    });
-  });
-
-  var recompute = document.getElementById('hz-recompute');
-  if (recompute) {
-    recompute.addEventListener('click', function () {
-      recompute.disabled = true;
-      flash('正在重新判断…', '', true);
-      setHorizon({ force: true }, function () { location.reload(); });
-    });
+  function say(msg, kind) {
+    if (!flash) return;
+    flash.className = 'notice ' + (kind || '');
+    flash.textContent = msg;
+    flash.classList.remove('hidden');
   }
 
   if (runBtn) {
     runBtn.addEventListener('click', function () {
-      var engine = runBtn.getAttribute('data-engine');
-      var isAi = engine !== 'rules';
       runBtn.disabled = true;
-      runBtn.innerHTML = '<span class="spin"></span><span class="label">'
-        + (isAi ? '分析中' : '扫描中') + '</span>';
-      flash(isAi
-        ? '正在把候选股、指标和账户信息交给分析引擎…'
-        : '正在按规则扫描候选池…', '', true);
-
-      fetch('/api/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{}'
-      })
+      runBtn.classList.add('busy');
+      fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
         .then(function (r) { return r.json(); })
         .then(function (res) {
           if (!res.ok) {
-            flash('失败：' + (res.error || '未知错误'), 'err', true);
-            return;
-          }
-          if (res.pending) {
-            flash(res.message + ' 处理完刷新这一页就能看到。', 'warn', true);
-            return;
-          }
-          if (res.engine && res.engine !== 'rules') {
-            flash((res.market_view || '分析完成') + ' · 通过风控 ' + (res.accepted || 0)
-              + ' 条' + (res.rejected && res.rejected.length
-                ? '，被拒 ' + res.rejected.length + ' 条' : ''), 'ok', true);
-            setTimeout(function () { location.reload(); }, 1600);
-            return;
-          }
-          var msg = '看了 ' + (res.total || res.candidates || 0) + ' 只，'
-            + (res.plans !== undefined ? res.plans + ' 条建议' : res.accepted + ' 条通过风控');
-          if (res.rejected && res.rejected.length) {
-            msg += '，' + res.rejected.length + ' 条被拒（' + res.rejected.map(function (x) {
-              return (x.code || '?') + '：' + x.reason;
-            }).join('；') + '）';
-          }
-          if (res.market_view) { msg += ' 判断：' + res.market_view; }
-          flash(msg, (res.plans || res.accepted) ? 'ok' : 'warn', true);
-          if (res.plans || res.accepted) { setTimeout(function () { location.reload(); }, 1600); }
-        })
-        .catch(function (e) { flash('失败：' + e, 'err', true); })
-        .finally(function () {
-          runBtn.disabled = false;
-          runBtn.innerHTML = '<span class="label">' + runBtn.getAttribute('data-label') + '</span>';
-        });
-    });
-    runBtn.setAttribute('data-label', runBtn.querySelector('.label').textContent);
-  }
-
-  document.querySelectorAll('[data-decide]').forEach(function (el) {
-    el.addEventListener('click', function () {
-      var id = el.getAttribute('data-rec');
-      var decision = el.getAttribute('data-decide');
-
-      // 「我已经买了」不再用两次 prompt()：那是浏览器原生弹窗，不受主题
-      // 控制、也不能改价格以外的字段。直接打开和台账页同一个记账弹窗，
-      // 预填建议的价格、数量、止损和目标，用户只改实际成交的部分。
-      if (decision === 'executed' && window.openFillDialog) {
-        var card = el.closest('.advice');
-        var data = card ? card.getAttribute('data-plan') : null;
-        var plan = data ? JSON.parse(data) : {};
-        // 库里存的是微单位整数，模板不格式化；这里换算成可编辑的价格。
-        var toPrice = function (micro) { return micro ? (micro / 1e6).toFixed(3) : ''; };
-        window.openFillDialog({
-          recId: id,
-          code: plan.code,
-          side: 'buy',
-          qty: plan.qty,
-          price: toPrice(plan.entry),
-          stop: toPrice(plan.stop),
-          target: toPrice(plan.target),
-          note: {{ t('adv.fill_note') | tojson }},
-          onSaved: function () { location.reload(); }
-        });
-        return;
-      }
-      var body = { decision: decision };
-      el.disabled = true;
-      fetch('/advice/' + id + '/decide', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      }).then(function (r) { return r.json(); })
-        .then(function (res) {
-          if (!res.ok) {
-            showAlert('没有记录成功：' + (res.error || '未知错误'));
-            el.disabled = false;
+            say(res.error || 'Run failed', 'err');
+            runBtn.disabled = false;
+            runBtn.classList.remove('busy');
             return;
           }
           location.reload();
+        })
+        .catch(function (e) {
+          say(String(e), 'err');
+          runBtn.disabled = false;
+          runBtn.classList.remove('busy');
         });
+    });
+  }
+
+  if (horizonSel) {
+    horizonSel.addEventListener('change', function () {
+      fetch('/api/horizon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ horizon: horizonSel.value })
+      }).then(function () { location.reload(); });
+    });
+  }
+
+  if (recalcBtn) {
+    recalcBtn.addEventListener('click', function () {
+      fetch('/api/horizon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: true })
+      }).then(function () { location.reload(); });
+    });
+  }
+
+  if (applyMktBtn) {
+    applyMktBtn.addEventListener('click', function () {
+      var mkts = JSON.parse(applyMktBtn.getAttribute('data-markets') || '["CN","US"]');
+      fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: { 'scan.markets': mkts } })
+      }).then(function (r) { return r.json(); }).then(function (res) {
+        if (res.ok) location.reload();
+      });
+    });
+  }
+
+  document.querySelectorAll('[data-skip]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var id = btn.getAttribute('data-skip');
+      fetch('/advice/' + id + '/decide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: 'skipped' })
+      }).then(function () { location.reload(); });
     });
   });
 })();

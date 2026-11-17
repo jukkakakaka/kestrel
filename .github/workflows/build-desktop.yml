@@ -30,7 +30,6 @@ jobs:
         with:
           name: Kestrel-macos
           path: |
-            dist/Kestrel.app
             dist/Kestrel-*.dmg
             dist/Kestrel-macos.zip
           if-no-files-found: error
@@ -163,8 +162,9 @@ jobs:
           body: |
             ### 这是什么
 
-            Kestrel 是一个装在自己电脑上的炒股工具：扫描 A 股 / 港股 / 美股，给出可以直接照着下单的计划
-            （入场区间、止损、目标、股数、费用），成交后记下真实价格和数量，并替你把持仓管到卖出为止。
+            Kestrel（v0.4.0）是一个本地优先的多市场智能炒股与交易风控终端：支持 A 股 / 港股 / 美股
+            扫描筛选、多周期智能建议、实时动态资金账本与手动校准、全局悬停术语学习、可开关右侧炒股
+            Agent 助手，以及实际成交对比复盘与 What-if 归因。
 
             ### macOS
 
@@ -186,5 +186,5 @@ jobs:
 
             ### First run
 
-            The app asks three questions — capital, loss per trade, and which markets you trade.
-            Nothing leaves your machine.
+            The 4-step wizard sets your initial capital, markets, trading horizon, and optional AI Copilot API.
+            Nothing leaves your machine unless you connect your own model endpoint.

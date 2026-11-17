@@ -24,7 +24,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from kestrel.db.engine import connect  # noqa: E402
 from kestrel.services import backtest  # noqa: E402
 from kestrel.services import bars as bars_service  # noqa: E402
-from kestrel.strategies import base as base_module  # noqa: E402
 from kestrel.strategies import library  # noqa: E402
 from kestrel.strategies.spec import compile_rule  # noqa: E402
 
@@ -108,8 +107,6 @@ def main() -> int:
     for item in library.RULES:
         rule = compile_rule(item["spec"])
         compiled[rule.code] = rule
-        if rule.code not in {r.code for r in base_module.BUILTIN}:
-            base_module.BUILTIN.append(rule)
 
     print(f"标的 {len(universe)} 只，{args.folds} 折滚动，每折都有独立的买入持有基准\n")
 
@@ -128,7 +125,7 @@ def main() -> int:
                 chunk = bars[slice_start:hi]
                 offset = lo - slice_start
                 try:
-                    res = backtest.run(chunk, code)
+                    res = backtest.run(chunk, code, registry_override=compiled)
                 except Exception:  # noqa: BLE001
                     continue
                 for t in res["trades"]:

@@ -1,0 +1,142 @@
+{# 动态资金总量校准 & 手头股票持仓校准/补录弹窗（遵循原生 dialog closedby="any" 规范） #}
+<dialog id="calibrate-dialog" class="modal" closedby="any" aria-labelledby="cal-dialog-title">
+  <form method="dialog" class="modal-head">
+    <div class="modal-title-group">
+      <span class="modal-head-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 7H5a2 2 0 0 1 0-4h13"/>
+          <rect x="3" y="5" width="18" height="15" rx="2.2"/>
+          <circle cx="16.5" cy="12.5" r="1.2" fill="currentColor"/>
+        </svg>
+      </span>
+      <h2 id="cal-dialog-title">{{ t('cal.title') }}</h2>
+    </div>
+    <button class="wb-icon-btn sm" value="cancel" aria-label="{{ t('journal.close') }}" title="{{ t('journal.close') }}">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M18 6 6 18M6 6l12 12"/>
+      </svg>
+    </button>
+  </form>
+
+  <div class="modal-body">
+    <div class="cal-metrics-strip">
+      <div class="pm-item">
+        <div class="pm-label">{{ t('cal.initial_cap') }}</div>
+        <div class="pm-val mono" id="cal-v-init" data-priv="money">¥{{ portfolio_bar.initial_capital_cny | num(0) }}</div>
+      </div>
+      <div class="pm-item">
+        <div class="pm-label">{{ t('cal.avail_cash') }}</div>
+        <div class="pm-val mono" id="cal-v-cash" data-priv="money">¥{{ portfolio_bar.available_cash_cny | num(0) }}</div>
+      </div>
+      <div class="pm-item">
+        <div class="pm-label">{{ t('cal.market_val') }}</div>
+        <div class="pm-val mono" id="cal-v-mv" data-priv="money">¥{{ portfolio_bar.market_value_cny | num(0) }}</div>
+      </div>
+      <div class="pm-item">
+        <div class="pm-label">{{ t('cal.total_equity') }}</div>
+        <div class="pm-val mono" id="cal-v-eq" data-priv="money">¥{{ portfolio_bar.total_equity_cny | num(0) }}</div>
+      </div>
+    </div>
+
+    <div role="tablist" class="tablist-row" aria-label="{{ t('cal.title') }}">
+      <button type="button" role="tab" aria-selected="true" data-cal-tab="cash">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h3.8a1.8 1.8 0 0 1 0 3.5h-2.6a1.8 1.8 0 0 0 0 3.5H14.5"/>
+        </svg>
+        <span>{{ t('cal.tab_cash') }}</span>
+      </button>
+      <button type="button" role="tab" aria-selected="false" data-cal-tab="pos">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>
+        </svg>
+        <span>{{ t('cal.tab_positions') }}</span>
+      </button>
+    </div>
+
+    <div id="cal-pane-cash">
+      <p class="tiny muted" style="margin-bottom:12px;">{{ t('cal.cash_hint') }}</p>
+      <div class="grid g2">
+        <div class="field">
+          <label for="cal-cash-mode">{{ t('cal.cash_mode') }}</label>
+          <select id="cal-cash-mode">
+            <option value="target_available">{{ t('cal.mode_avail') }}</option>
+            <option value="target_equity">{{ t('cal.mode_equity') }}</option>
+            <option value="deposit">{{ t('cal.mode_deposit') }}</option>
+            <option value="withdraw">{{ t('cal.mode_withdraw') }}</option>
+            <option value="initial_capital">{{ t('cal.mode_initial') }}</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="cal-cash-amount">{{ t('cal.amount_cny') }}</label>
+          <input id="cal-cash-amount" type="number" step="0.01" placeholder="50000" data-priv-input="1">
+        </div>
+        <div class="field" style="grid-column:1 / -1;">
+          <label for="cal-cash-note">{{ t('journal.note') }}</label>
+          <input id="cal-cash-note" placeholder="{{ t('cal.cash_note_ph') }}">
+        </div>
+      </div>
+      <p class="tiny" id="cal-cash-msg" style="min-height:18px;margin-top:8px;"></p>
+      <div class="modal-inline-actions">
+        <button type="button" class="btn" id="cal-cash-submit">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20 6 9 17l-5-5"/>
+          </svg>
+          <span>{{ t('cal.apply_cash') }}</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="cal-pane-pos" class="hidden">
+      <p class="tiny muted" style="margin-bottom:12px;">{{ t('cal.pos_hint') }}</p>
+      <div id="cal-pos-list" class="cal-pos-list"></div>
+
+      <div class="cal-add-box">
+        <strong class="cal-add-title">{{ t('cal.add_existing') }}</strong>
+        <div class="grid g2">
+          <div class="field">
+            <label for="cal-p-code">{{ t('journal.import_col_code') }}</label>
+            <input id="cal-p-code" placeholder="600519 / 00700 / AAPL" list="fd-code-known">
+          </div>
+          <div class="field">
+            <label for="cal-p-market">{{ t('journal.import_col_market') }}</label>
+            <select id="cal-p-market">
+              <option value="">{{ t('cal.auto_market') }}</option>
+              <option value="CN">{{ t('market.cn') }}</option>
+              <option value="HK">{{ t('market.hk') }}</option>
+              <option value="US">{{ t('market.us') }}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="cal-p-qty">{{ t('journal.qty_shares') }}</label>
+            <input id="cal-p-qty" type="text" inputmode="decimal" placeholder="100" data-priv-input="1">
+          </div>
+          <div class="field">
+            <label for="cal-p-entry">{{ t('cal.avg_cost') }}</label>
+            <input id="cal-p-entry" type="number" step="0.001" placeholder="100">
+          </div>
+          <div class="field">
+            <label for="cal-p-stop">{{ t('journal.stop_on_buy') }}</label>
+            <input id="cal-p-stop" type="number" step="0.001" placeholder="">
+          </div>
+          <div class="field">
+            <label for="cal-p-target">{{ t('journal.target_on_buy') }}</label>
+            <input id="cal-p-target" type="number" step="0.001" placeholder="">
+          </div>
+        </div>
+        <label class="modal-check-row">
+          <input type="checkbox" id="cal-p-affect-cash">
+          <span>{{ t('cal.affect_cash_label') }}</span>
+        </label>
+        <p class="tiny" id="cal-pos-msg" style="min-height:18px;margin-top:6px;"></p>
+        <div class="modal-inline-actions">
+          <button type="button" class="btn" id="cal-pos-add">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 5v14M5 12h14"/>
+            </svg>
+            <span>{{ t('cal.add_pos_btn') }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</dialog>

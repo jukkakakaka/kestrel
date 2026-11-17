@@ -44,8 +44,9 @@ SECTIONS: list[Section] = [
     ]),
     Section("scan", "扫描", "Scanning", [
         Field("trade.horizon", "交易周期", "Trading horizon", "select",
-              options=[("auto", "自动（按行情与资金推荐）"), ("short", "短线 · 日线"),
-                       ("medium", "中线 · 周线"), ("long", "长线 · 月线（Beta）")],
+              options=[("auto", "自动（按行情与资金推荐）"), ("fast", "超短 · 日线"),
+                       ("short", "短线 · 日线"), ("medium", "中线 · 周线"),
+                       ("long", "长线 · 月线（Beta）")],
               help_zh="决定扫描读哪种 K 线、回测持有多久、计划活多久；选自动则每次扫描前重新判断",
               help_en="Bar size for scans, backtests and plan lifetime; auto re-decides each scan"),
         Field("scan.min_score", "触发门槛（0–1）", "Min score", "number", step="0.05",
@@ -59,6 +60,7 @@ SECTIONS: list[Section] = [
             ("za_hk", "众安银行"), ("futu_hk", "富途"), ("tiger_hk", "老虎")]),
         Field("broker.US", "美股券商", "US broker", "select", options=[
             ("fosun_us", "星财富（复星）"), ("usmart_us", "盈立香港"),
+            ("futu_us", "富途美股"), ("tiger_us", "老虎美股"),
             ("za_us", "众安银行"), ("ibkr_us", "IBKR")]),
         Field("broker.CN", "A 股券商", "CN broker", "select", options=[
             ("cn_generic", "通用 A 股（万 2.5）")]),

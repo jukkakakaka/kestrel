@@ -53,6 +53,12 @@ echo "==> build environment: $BUILD_ENV"
 
 echo "==> Kestrel ${VERSION}"
 
+# --- dependencies ----------------------------------------------------------
+# 先同步包含 Pillow 的 desktop 依赖，再生成品牌图标与执行 PyInstaller。
+echo "==> syncing build dependencies"
+uv sync --extra desktop --quiet
+uv pip install --python "$BUILD_PY" pyinstaller --quiet
+
 # --- icon ------------------------------------------------------------------
 # 所有图标都从 scripts/brand.py 一处定义生成，网页、README、Dock 看到的是同一个标。
 if [[ ! -f packaging/icon.png || packaging/icon.png -ot scripts/brand.py ]]; then
@@ -61,12 +67,6 @@ if [[ ! -f packaging/icon.png || packaging/icon.png -ot scripts/brand.py ]]; the
 else
   echo "==> brand assets up to date"
 fi
-
-# --- dependencies ----------------------------------------------------------
-# PyInstaller itself is a build tool, not a runtime dependency.
-echo "==> syncing build dependencies"
-uv sync --extra desktop --quiet
-uv pip install --python "$BUILD_PY" pyinstaller --quiet
 
 # --- build -----------------------------------------------------------------
 if [[ "$CLEAN" == "1" ]]; then
@@ -118,9 +118,11 @@ codesign --verify --deep --strict "$APP" && echo "    signature ok"
 # bundled, so check a rendered page rather than just the process.
 echo "==> smoke test"
 PORT=$(( 8300 + RANDOM % 400 ))
-KESTREL_HOME="$(mktemp -d)" "$APP/Contents/MacOS/Kestrel" serve --port "$PORT" &
+SMOKE_HOME="$(mktemp -d)"
+# 显式传入 KESTREL_TRAY=0 确保无头构建与冒烟测试绝不被系统托盘阻塞
+KESTREL_TRAY=0 KESTREL_HOME="$SMOKE_HOME" "$APP/Contents/MacOS/Kestrel" serve --port "$PORT" &
 SERVER_PID=$!
-trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+trap 'kill "$SERVER_PID" 2>/dev/null || true; rm -rf "$SMOKE_HOME"' EXIT
 
 for _ in $(seq 1 40); do
   if curl -fsS --noproxy '*' -m 2 "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; then break; fi
@@ -134,6 +136,7 @@ fi
 echo "    /advice renders"
 
 kill "$SERVER_PID" 2>/dev/null || true
+rm -rf "$SMOKE_HOME"
 trap - EXIT
 
 # --- package ---------------------------------------------------------------

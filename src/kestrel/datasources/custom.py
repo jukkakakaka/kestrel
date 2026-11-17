@@ -130,14 +130,15 @@ class CustomProvider:
         return url
 
     async def fetch(self, symbols: list[tuple[str, str]]) -> dict[str, Quote]:
+        supported = [(m, c) for m, c in symbols if self.supports(m)]
+        if not supported:
+            return {}
         out: dict[str, Quote] = {}
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; Kestrel/0.2)"}
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; Kestrel/0.4)"}
         headers.update({str(k): str(v) for k, v in (self.headers or {}).items()})
 
         async with httpx.AsyncClient(timeout=self.timeout, headers=headers) as client:
-            for market, code in symbols:
-                if not self.supports(market):
-                    continue
+            for market, code in supported:
                 url = self._url_for(market, code)
                 if not url.startswith("http"):
                     continue
@@ -190,7 +191,7 @@ class CustomProvider:
                     quoted_at=datetime.now(UTC),
                 )
 
-        if not out and symbols:
+        if not out and supported:
             raise DataSourceError(f"{self.label} 没有返回可用数据")
         return out
 

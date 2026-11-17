@@ -47,7 +47,20 @@ hiddenimports = [
     "webview.platforms.edgechromium",
     "pystray._darwin",
     "pystray._win32",
+    "darkdetect",
+    "kestrel.desktop.tray",
+    "kestrel.desktop.autostart",
 ] + collect_submodules("kestrel")
+
+# macOS 原生菜单栏托盘依赖 PyObjC 主线程桥接模块
+if sys.platform == "darwin":
+    hiddenimports += [
+        "objc",
+        "Foundation",
+        "AppKit",
+        "PyObjCTools",
+        "PyObjCTools.AppHelper",
+    ]
 
 # None of this needs the scientific stack; excluding it saves ~150 MB.
 excludes = [

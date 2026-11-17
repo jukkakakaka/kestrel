@@ -1,9 +1,4 @@
-"""Fee engine: exchange rules plus broker plans, all in Decimal.
-
-Numbers can be verified against a monthly statement with ``scripts/fee_verify.py``.
-Anything the broker actually charges that is not modelled here must be added as an
-exchange rule or a broker field — never hard-coded at the call site.
-"""
+"""费用引擎：交易所规则 + 券商套餐，全部使用 Decimal 精确计算。"""
 
 from __future__ import annotations
 
@@ -21,35 +16,34 @@ class BrokerPlan:
     platform_fixed: Decimal = Decimal("0")
     platform_per_share: Decimal = Decimal("0")
     platform_min: Decimal = Decimal("0")
-    # 能买什么，比费率更早决定一条计划能不能执行。
-    # 港股碎股只影响**买入**：卖出碎股任何券商都能做，那是持仓清尾。
+    # 券商能力：港股非整手买入开仓 / 美股小数股及最低金额门槛
     odd_lot_buy: bool = False
     fractional_us: bool = False
     fractional_min: Decimal = Decimal("0")
 
     def commission(self, amount: Decimal) -> Decimal:
         fee = amount * self.commission_rate
-        return max(fee, self.commission_min) if self.commission_rate or self.commission_min else Decimal("0")
+        return (
+            max(fee, self.commission_min)
+            if self.commission_rate or self.commission_min
+            else Decimal("0")
+        )
 
     def platform(self, shares: Decimal) -> Decimal:
         fee = self.platform_fixed + shares * self.platform_per_share
         return max(fee, self.platform_min) if fee else Decimal("0")
 
     def allows_odd_lot(self) -> bool:
-        """港股能不能买入不足一手的碎股。"""
+        """港股是否允许买入不足一手的碎股。"""
         return self.market.upper() == "HK" and bool(self.odd_lot_buy)
 
     def allows_fractional(self) -> bool:
-        """美股能不能买入小数股。"""
+        """美股是否允许买入小数股。"""
         return self.market.upper() == "US" and bool(self.fractional_us)
 
 
-PLANS: dict[str, BrokerPlan] = {
-    # Hong Kong
-    # 碎股能力按各家公开帮助文档核实（2026-11）：
-    #   星财富 / 富途：港股非整手可买入开仓；
-    #   老虎 / 盈立 / IBKR / 星财富 / 富途：美股碎股。
-    # 众安银行只做整手，A 股永远整手（100 股）。
+_BUILTIN_PLANS: dict[str, BrokerPlan] = {
+    # 港股券商套餐
     "fosun_hk": BrokerPlan(
         "fosun_hk", "星财富（复星）", "HK",
         platform_fixed=Decimal("15"), odd_lot_buy=True,
@@ -71,7 +65,7 @@ PLANS: dict[str, BrokerPlan] = {
         "tiger_hk", "老虎", "HK",
         commission_rate=Decimal("0.00029"), platform_fixed=Decimal("15"),
     ),
-    # United States
+    # 美股券商套餐
     "fosun_us": BrokerPlan(
         "fosun_us", "星财富（复星）", "US",
         platform_per_share=Decimal("0.005"), platform_min=Decimal("1"),
@@ -80,6 +74,18 @@ PLANS: dict[str, BrokerPlan] = {
     "usmart_us": BrokerPlan(
         "usmart_us", "盈立香港", "US",
         platform_per_share=Decimal("0.009"), platform_min=Decimal("1.88"),
+        fractional_us=True, fractional_min=Decimal("1"),
+    ),
+    "futu_us": BrokerPlan(
+        "futu_us", "富途美股", "US",
+        commission_rate=Decimal("0"), commission_min=Decimal("0.99"),
+        platform_per_share=Decimal("0.005"), platform_min=Decimal("1"),
+        fractional_us=True, fractional_min=Decimal("1"),
+    ),
+    "tiger_us": BrokerPlan(
+        "tiger_us", "老虎美股", "US",
+        commission_rate=Decimal("0"), commission_min=Decimal("0.99"),
+        platform_per_share=Decimal("0.005"), platform_min=Decimal("1"),
         fractional_us=True, fractional_min=Decimal("1"),
     ),
     "za_us": BrokerPlan(
@@ -91,12 +97,15 @@ PLANS: dict[str, BrokerPlan] = {
         platform_per_share=Decimal("0.005"), platform_min=Decimal("1"),
         fractional_us=True, fractional_min=Decimal("1"),
     ),
-    # Mainland
+    # A 股套餐
     "cn_generic": BrokerPlan(
         "cn_generic", "通用 A 股", "CN",
         commission_rate=Decimal("0.00025"), commission_min=Decimal("5"),
     ),
 }
+
+# 运行时生效套餐表（由 fees/plans.py 的 hydrate() 同步数据库改写后的状态）
+PLANS: dict[str, BrokerPlan] = dict(_BUILTIN_PLANS)
 
 DEFAULT_PLAN = {"HK": "fosun_hk", "US": "fosun_us", "CN": "cn_generic"}
 
@@ -142,6 +151,7 @@ def hk_fees(plan: BrokerPlan, amount: Decimal, shares: Decimal, is_sell: bool) -
 
 
 def us_fees(plan: BrokerPlan, amount: Decimal, shares: Decimal, is_sell: bool) -> FeeBreakdown:
+    commission = plan.commission(amount)
     platform = plan.platform(shares)
     sec = max(amount * Decimal("0.0000206"), Decimal("0.01")) if is_sell else Decimal("0")
     taf = (
@@ -150,8 +160,8 @@ def us_fees(plan: BrokerPlan, amount: Decimal, shares: Decimal, is_sell: bool) -
         else Decimal("0")
     )
     exchange = sec + taf
-    total = platform + exchange
-    return FeeBreakdown(Decimal("0"), platform, Decimal("0"), exchange, Decimal("0"), total)
+    total = commission + platform + exchange
+    return FeeBreakdown(commission, platform, Decimal("0"), exchange, Decimal("0"), total)
 
 
 def cn_fees(plan: BrokerPlan, amount: Decimal, shares: Decimal, is_sell: bool) -> FeeBreakdown:
@@ -169,9 +179,9 @@ def quote_fees(
     is_sell: bool,
     broker: str | None = None,
 ) -> FeeBreakdown:
-    code = broker or DEFAULT_PLAN.get(market, "cn_generic")
-    plan = PLANS.get(code) or PLANS[DEFAULT_PLAN.get(market, "cn_generic")]
     market = market.upper()
+    code = broker or DEFAULT_PLAN.get(market, "cn_generic")
+    plan = PLANS.get(code) or PLANS.get(DEFAULT_PLAN.get(market, "cn_generic")) or _BUILTIN_PLANS["cn_generic"]
     if market == "HK":
         return hk_fees(plan, amount, shares, is_sell)
     if market == "US":

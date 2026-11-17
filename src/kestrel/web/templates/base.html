@@ -1,74 +1,396 @@
 <!DOCTYPE html>
-<html lang="{{ locale }}" data-theme="{{ theme }}">
+{% set is_priv = ui_privacy if ui_privacy is defined else false %}
+{% set d_state = desktop_state if (desktop_state is defined and desktop_state) else {} %}
+{% set bg_running = d_state.scheduler_running if d_state.scheduler_running is defined else false %}
+<html lang="{{ locale }}" data-theme="{{ theme }}" data-privacy="{{ 'on' if is_priv else 'off' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>{% block title %}{{ t('app.name') }}{% endblock %}</title>
   <link rel="icon" href="/static/favicon/favicon-32.png" sizes="32x32">
   <link rel="apple-touch-icon" href="/static/favicon/favicon-180.png">
-  <link rel="stylesheet" href="/static/css/app.css">
   <script>
     (function () {
-      var saved = document.documentElement.getAttribute('data-theme');
+      var root = document.documentElement;
+      var meta = document.querySelector('meta[name="color-scheme"]');
       var mql = window.matchMedia('(prefers-color-scheme: dark)');
-      function apply() {
-        var mode = saved === 'auto' ? (mql.matches ? 'dark' : 'light') : saved;
-        document.documentElement.setAttribute('data-mode', mode);
+      function applyTheme() {
+        var pref = root.getAttribute('data-theme') || 'auto';
+        var mode = pref === 'auto' ? (mql.matches ? 'dark' : 'light') : pref;
+        root.setAttribute('data-mode', mode);
+        if (meta) meta.content = pref === 'auto' ? 'light dark' : mode;
       }
-      apply();
-      mql.addEventListener('change', function () { if (saved === 'auto') apply(); });
+      applyTheme();
+      mql.addEventListener('change', function () {
+        if ((root.getAttribute('data-theme') || 'auto') === 'auto') applyTheme();
+      });
+      try {
+        var rail = localStorage.getItem('kestrel.rail');
+        if (rail === 'collapsed' || rail === 'expanded') {
+          root.setAttribute('data-rail', rail);
+        }
+      } catch (e) {}
     })();
   </script>
+  <link rel="stylesheet" href="/static/css/app.css">
 </head>
-<body>
+<body data-learning="{{ '1' if (ui_learning and ui_glossary) else '0' }}"
+      data-path="{{ request.url.path }}">
 {% set path = request.url.path %}
-<header class="topbar">
-  <div class="wrap topbar-inner">
-    <a class="brand" href="/">
-      {% include "_logo.html" %}
-      <span class="brand-name">{{ t('app.name') }}</span>
-      <span class="brand-tag">{{ t('app.tagline') }}</span>
-    </a>
-    <nav class="nav">
-      <a href="/" class="{% if path == '/' %}active{% endif %}">{{ t('nav.today') }}</a>
-      <a href="/market" class="{% if path == '/market' or path.startswith('/stock') %}active{% endif %}">{{ t('nav.market') }}</a>
-      <a href="/advice" class="{% if path.startswith('/advice') %}active{% endif %}">{{ t('nav.advice') }}</a>
-      <a href="/journal" class="{% if path.startswith('/journal') %}active{% endif %}">{{ t('nav.journal') }}</a>
-      <a href="/cost" class="{% if path.startswith('/cost') %}active{% endif %}">{{ t('nav.cost') }}</a>
-      <a href="/sim" class="{% if path.startswith('/sim') %}active{% endif %}">{{ t('nav.sim') }}</a>
-      <a href="/rules" class="{% if path.startswith('/rules') %}active{% endif %}">{{ t('nav.rules') }}</a>
-      <a href="/settings" class="{% if path.startswith('/settings') %}active{% endif %}">{{ t('nav.settings') }}</a>
+
+<div class="workbench" id="workbench">
+  <div class="rail-backdrop" id="rail-backdrop" aria-hidden="true"></div>
+
+  {# 左侧可折叠金融工作台导航栏 #}
+  <aside class="app-rail" id="app-rail" aria-label="{{ t('app.name') }}">
+    <div class="rail-head">
+      <a class="brand rail-brand" href="/">
+        {% with size=28 %}{% include "_logo.html" %}{% endwith %}
+        <span class="rail-brand-copy">
+          <span class="brand-name">{{ t('app.name') }}</span>
+          <span class="brand-tag">{{ t('app.tagline') }}</span>
+        </span>
+      </a>
+      <button type="button" class="wb-icon-btn rail-mobile-close" id="rail-mobile-close" aria-label="{{ t('journal.close') }}" title="{{ t('journal.close') }}">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M18 6 6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <nav class="rail-nav" aria-label="Primary">
+      <div class="rail-group">
+        <div class="rail-group-label">{{ t('nav.group_core') }}</div>
+        <a href="/"
+           class="rail-link {% if path == '/' %}active{% endif %}"
+           {% if path == '/' %}aria-current="page"{% endif %}
+           title="{{ t('nav.today') }}">
+          <svg class="rail-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="7.5" height="7.5" rx="1.75"/>
+            <rect x="13.5" y="3" width="7.5" height="4.5" rx="1.5"/>
+            <rect x="13.5" y="10.5" width="7.5" height="10.5" rx="1.75"/>
+            <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.75"/>
+          </svg>
+          <span class="rail-text">{{ t('nav.today') }}</span>
+        </a>
+
+        <a href="/market"
+           class="rail-link {% if path == '/market' or path.startswith('/stock') %}active{% endif %}"
+           {% if path == '/market' or path.startswith('/stock') %}aria-current="page"{% endif %}
+           title="{{ t('nav.market') }}">
+          <svg class="rail-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 17l5.5-5.5 4 4L21 7"/>
+            <path d="M15 7h6v6"/>
+          </svg>
+          <span class="rail-text">{{ t('nav.market') }}</span>
+        </a>
+
+        <a href="/advice"
+           class="rail-link {% if path.startswith('/advice') or path.startswith('/scan') %}active{% endif %}"
+           {% if path.startswith('/advice') or path.startswith('/scan') %}aria-current="page"{% endif %}
+           title="{{ t('nav.advice') }}">
+          <svg class="rail-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9"/>
+            <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>
+          </svg>
+          <span class="rail-text">{{ t('nav.advice') }}</span>
+        </a>
+
+        <a href="/journal"
+           class="rail-link {% if path.startswith('/journal') or path.startswith('/ipo') %}active{% endif %}"
+           {% if path.startswith('/journal') or path.startswith('/ipo') %}aria-current="page"{% endif %}
+           title="{{ t('nav.journal') }}">
+          <svg class="rail-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/>
+            <path d="M8 9h8M8 13h8M8 17h5"/>
+          </svg>
+          <span class="rail-text">{{ t('nav.journal') }}</span>
+        </a>
+      </div>
+
+      <div class="rail-group">
+        <div class="rail-group-label">{{ t('nav.group_tools') }}</div>
+        <a href="/cost"
+           class="rail-link {% if path.startswith('/cost') or path.startswith('/fees') %}active{% endif %}"
+           {% if path.startswith('/cost') or path.startswith('/fees') %}aria-current="page"{% endif %}
+           title="{{ t('nav.cost') }}">
+          <svg class="rail-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="4" y="2.5" width="16" height="19" rx="2.2"/>
+            <line x1="8" y1="6.5" x2="16" y2="6.5"/>
+            <path d="M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15v3M8 18h4"/>
+          </svg>
+          <span class="rail-text">{{ t('nav.cost') }}</span>
+        </a>
+
+        <a href="/sim"
+           class="rail-link {% if path.startswith('/sim') or path.startswith('/backtest') %}active{% endif %}"
+           {% if path.startswith('/sim') or path.startswith('/backtest') %}aria-current="page"{% endif %}
+           title="{{ t('nav.sim') }}">
+          <svg class="rail-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 3h6M10 3v5.4L5.2 17a2.5 2.5 0 0 0 2.18 3.7h9.24A2.5 2.5 0 0 0 18.8 17L14 8.4V3"/>
+            <path d="M7.5 14.5h9"/>
+          </svg>
+          <span class="rail-text">{{ t('nav.sim') }}</span>
+        </a>
+
+        <a href="/rules"
+           class="rail-link {% if path.startswith('/rules') %}active{% endif %}"
+           {% if path.startswith('/rules') %}aria-current="page"{% endif %}
+           title="{{ t('nav.rules') }}">
+          <svg class="rail-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/>
+            <path d="m9 12 2 2 4-4"/>
+          </svg>
+          <span class="rail-text">{{ t('nav.rules') }}</span>
+        </a>
+      </div>
     </nav>
-    <div class="tools">
-      <select id="locale" aria-label="{{ t('lang.label') }}">
-        {% for code in locales %}
-        <option value="{{ code }}" {% if code == locale %}selected{% endif %}>{{ locale_label(code) }}</option>
-        {% endfor %}
-      </select>
-      <select id="theme" aria-label="{{ t('theme.label') }}">
-        <option value="auto" {% if theme == 'auto' %}selected{% endif %}>{{ t('theme.auto') }}</option>
-        <option value="light" {% if theme == 'light' %}selected{% endif %}>{{ t('theme.light') }}</option>
-        <option value="dark" {% if theme == 'dark' %}selected{% endif %}>{{ t('theme.dark') }}</option>
-      </select>
+
+    <div class="rail-foot">
+      <div class="rail-group-label">{{ t('nav.group_system') }}</div>
+
+      <a href="/settings#desktop"
+         class="rail-bg-pill {{ 'is-running' if bg_running else 'is-idle' }}"
+         title="{{ t('nav.bg_running') if bg_running else t('nav.bg_idle') }}">
+        <span class="rail-status-dot" aria-hidden="true"></span>
+        <span class="rail-text">{{ t('nav.bg_running') if bg_running else t('nav.bg_idle') }}</span>
+      </a>
+
+      <a href="/settings"
+         class="rail-link {% if path.startswith('/settings') %}active{% endif %}"
+         {% if path.startswith('/settings') %}aria-current="page"{% endif %}
+         title="{{ t('nav.settings') }}">
+        <svg class="rail-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
+        </svg>
+        <span class="rail-text">{{ t('nav.settings') }}</span>
+      </a>
+
+      <button type="button"
+              class="rail-link rail-collapse-btn"
+              id="rail-collapse-btn"
+              data-collapse-label="{{ t('nav.collapse') }}"
+              data-expand-label="{{ t('nav.expand') }}"
+              aria-label="{{ t('nav.collapse') }}"
+              title="{{ t('nav.collapse') }}">
+        <svg class="rail-icon rail-collapse-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="3" width="18" height="18" rx="2.5"/>
+          <line x1="9" y1="3" x2="9" y2="21"/>
+          <path class="rail-chevron" d="m15 9-3 3 3 3"/>
+        </svg>
+        <span class="rail-text" id="rail-collapse-text">{{ t('nav.collapse') }}</span>
+      </button>
+    </div>
+  </aside>
+
+  {# 主舞台：顶部精简工具栏 + 下方自适应容器查询工作区 + 右侧 Copilot #}
+  <div class="workspace-stage">
+    <header class="workspace-bar" id="workspace-bar">
+      <div class="wb-left">
+        <button type="button"
+                class="wb-icon-btn mobile-menu-btn"
+                id="mobile-nav-btn"
+                aria-label="{{ t('nav.menu') }}"
+                aria-expanded="false"
+                aria-controls="app-rail"
+                title="{{ t('nav.menu') }}">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="3.5" y1="6.5" x2="20.5" y2="6.5"/>
+            <line x1="3.5" y1="12" x2="20.5" y2="12"/>
+            <line x1="3.5" y1="17.5" x2="15.5" y2="17.5"/>
+          </svg>
+        </button>
+
+        <div class="quick-search" id="quick-search-box">
+          <svg class="qs-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7.5"/>
+            <path d="m20 20-3.6-3.6"/>
+          </svg>
+          <input id="quick-search-input"
+                 type="search"
+                 list="fd-code-known"
+                 autocomplete="off"
+                 placeholder="{{ t('nav.quick_search') }}"
+                 aria-label="{{ t('nav.quick_search') }}">
+          <kbd class="qs-kbd" aria-hidden="true">/</kbd>
+        </div>
+      </div>
+
+      <div class="wb-right">
+        {# 1 & 2. 资产总览胶囊 + 紧邻金额隐私打码眼睛按钮 #}
+        <div class="wealth-pod" role="group" aria-label="{{ t('cal.title') }}">
+          <button type="button" class="top-pill portfolio-pill" id="open-calibrate" title="{{ t('cal.btn_tip') }}">
+            <svg class="wb-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20 7H5a2 2 0 0 1 0-4h13"/>
+              <rect x="3" y="5" width="18" height="15" rx="2.2"/>
+              <circle cx="16.5" cy="12.5" r="1.2" fill="currentColor"/>
+            </svg>
+            <span class="pill-lbl">{{ t('cal.pill_eq') }}</span>
+            <strong id="top-eq" class="mono" data-priv="money">¥{{ portfolio_bar.total_equity_cny | num(0) }}</strong>
+            <span class="cash-extra muted">
+              <span class="cash-dot" aria-hidden="true">·</span>
+              <span>{{ t('cal.pill_cash') }}</span>
+              <span class="mono" id="top-cash" data-priv="money">¥{{ portfolio_bar.available_cash_cny | num(0) }}</span>
+            </span>
+          </button>
+
+          <button type="button"
+                  class="wb-icon-btn priv-toggle-btn"
+                  id="toggle-privacy"
+                  aria-pressed="{{ 'true' if is_priv else 'false' }}"
+                  aria-label="{{ t('priv.label') }}"
+                  title="{{ t('priv.show_tip') if is_priv else t('priv.hide_tip') }}"
+                  data-tip-hide="{{ t('priv.hide_tip') }}"
+                  data-tip-show="{{ t('priv.show_tip') }}">
+            <svg class="icon-eye-open" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+            <svg class="icon-eye-off" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M10.58 10.58a2 2 0 1 0 2.83 2.83"/>
+              <path d="M9.88 5.09A9.77 9.77 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-2.38 3.31"/>
+              <path d="M6.61 6.61A17.3 17.3 0 0 0 2 12s3.6 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/>
+              <line x1="2" y1="2" x2="22" y2="22"/>
+            </svg>
+          </button>
+        </div>
+
+        {# 3. 记一笔成交主按钮 #}
+        <button type="button" class="wb-action-primary" id="top-fill-btn" title="{{ t('journal.add_fill') }}">
+          <svg class="wb-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          <span class="wb-btn-label">{{ t('journal.add_fill') }}</span>
+        </button>
+
+        <span class="wb-sep" role="separator" aria-orientation="vertical"></span>
+
+        {# 4. 边做边学开关 #}
+        <button type="button"
+                class="top-pill wb-pill {% if ui_learning and ui_glossary %}active{% endif %}"
+                id="toggle-learning"
+                aria-pressed="{{ 'true' if (ui_learning and ui_glossary) else 'false' }}"
+                title="{{ t('learn.toggle_tip') }}">
+          <svg class="wb-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2 4.5A2.5 2.5 0 0 1 4.5 2H11v18H4.5A2.5 2.5 0 0 0 2 22.5v-18Z"/>
+            <path d="M22 4.5A2.5 2.5 0 0 0 19.5 2H13v18h6.5a2.5 2.5 0 0 1 2.5 2.5v-18Z"/>
+          </svg>
+          <span class="dot" aria-hidden="true"></span>
+          <span class="wb-btn-label wb-hide-md">{{ t('learn.pill') }}</span>
+        </button>
+
+        {# 5. AI 炒股顾问开关 #}
+        <button type="button"
+                class="top-pill wb-pill copilot-pill"
+                id="toggle-copilot"
+                aria-pressed="false"
+                title="{{ t('copilot.toggle_tip') }}">
+          <svg class="wb-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m12 3 1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3Z"/>
+            <path d="m19 15 .9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15Z"/>
+          </svg>
+          <span class="wb-btn-label">{{ t('copilot.pill') }}</span>
+          <kbd class="wb-kbd" aria-hidden="true">⌘K</kbd>
+        </button>
+
+        <span class="wb-sep" role="separator" aria-orientation="vertical"></span>
+
+        {# 6. 图标化三态主题切换器（太阳 light / 月亮 dark / 显示器 auto） #}
+        <div id="theme-switcher" class="theme-switcher" role="group" aria-label="{{ t('theme.switch_tip') }}">
+          <button type="button"
+                  class="theme-opt {% if theme == 'light' %}active{% endif %}"
+                  data-theme-value="light"
+                  aria-pressed="{{ 'true' if theme == 'light' else 'false' }}"
+                  aria-label="{{ t('theme.light') }}"
+                  title="{{ t('theme.light') }}">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4.2"/>
+              <path d="M12 2.5v2.2M12 19.3v2.2M4.93 4.93l1.55 1.55M17.52 17.52l1.55 1.55M2.5 12h2.2M19.3 12h2.2M4.93 19.07l1.55-1.55M17.52 6.48l1.55-1.55"/>
+            </svg>
+          </button>
+          <button type="button"
+                  class="theme-opt {% if theme == 'dark' %}active{% endif %}"
+                  data-theme-value="dark"
+                  aria-pressed="{{ 'true' if theme == 'dark' else 'false' }}"
+                  aria-label="{{ t('theme.dark') }}"
+                  title="{{ t('theme.dark') }}">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z"/>
+            </svg>
+          </button>
+          <button type="button"
+                  class="theme-opt {% if theme == 'auto' %}active{% endif %}"
+                  data-theme-value="auto"
+                  aria-pressed="{{ 'true' if theme == 'auto' else 'false' }}"
+                  aria-label="{{ t('theme.auto') }}"
+                  title="{{ t('theme.auto') }}">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="12.5" rx="2"/>
+              <path d="M8.5 20.5h7M12 16.5v4"/>
+            </svg>
+          </button>
+        </div>
+
+        {# 7. 紧凑双语切换按钮 #}
+        <button type="button"
+                class="top-pill locale-toggle"
+                id="locale-toggle"
+                data-locale="{{ locale }}"
+                aria-label="{{ t('lang.switch_tip') }}"
+                title="{{ t('lang.switch_tip') }}">
+          <svg class="wb-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9"/>
+            <path d="M3.6 9h16.8M3.6 15h16.8"/>
+            <path d="M12 3a14.5 14.5 0 0 0 0 18 14.5 14.5 0 0 0 0-18Z"/>
+          </svg>
+          <span class="locale-pair" aria-hidden="true">
+            <span class="{{ 'is-active' if locale.startswith('zh') else '' }}">中</span>
+            <span class="locale-div">/</span>
+            <span class="{{ 'is-active' if locale.startswith('en') else '' }}">EN</span>
+          </span>
+        </button>
+      </div>
+    </header>
+
+    <div class="workspace-body app-shell">
+      <main class="workspace-main app-main" id="workspace-main">
+        <div class="wrap">
+          {% block content %}{% endblock %}
+        </div>
+
+        <footer class="foot wrap">
+          <span class="foot-item">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/>
+            </svg>
+            <span>{{ t('footer.local') }}</span>
+          </span>
+          <span class="foot-dot" aria-hidden="true">·</span>
+          <span>{{ t('footer.disclaimer') }}</span>
+          <span class="foot-dot" aria-hidden="true">·</span>
+          <span class="mono">v{{ version }}</span>
+        </footer>
+      </main>
+
+      {% include "_copilot_drawer.html" %}
     </div>
   </div>
-</header>
+</div>
 
-<main>
-  <div class="wrap">
-    {% block content %}{% endblock %}
-  </div>
-</main>
+{# 全局股票联想列表（置于顶层 body，供顶栏快速搜索、成交弹窗与校准弹窗共享） #}
+<datalist id="fd-code-known">
+  {% for s in symbols_known %}
+  <option value="{{ s.market }}/{{ s.code }}">{{ s.name }}</option>
+  {% endfor %}
+</datalist>
 
-<footer class="foot wrap">
-  <span>{{ t('footer.disclaimer') }}</span>
-  <span>·</span>
-  <span>{{ t('footer.local') }}</span>
-  <span>·</span>
-  <span>v{{ version }}</span>
-</footer>
+<p id="ksl-sr-status" class="sr-only" role="status" aria-live="polite"></p>
 
-<script src="/static/js/app.js"></script>
+{% include "_fill_modal.html" %}
+{% include "_calibrate_modal.html" %}
+
 <script>
   window.I18N = Object.assign(window.I18N || {}, {
     updated: {{ t('market.updated') | tojson }},
@@ -91,9 +413,38 @@
     importFailed: {{ t('settings.import_failed') | tojson }},
     csRequesting: {{ t('settings.cs_requesting') | tojson }},
     csOk: {{ t('settings.cs_ok') | tojson }},
-    csFailed: {{ t('settings.cs_failed') | tojson }}
+    csFailed: {{ t('settings.cs_failed') | tojson }},
+    learnOnToast: {{ t('learn.on_toast') | tojson }},
+    learnOffToast: {{ t('learn.off_toast') | tojson }},
+    askAiTerm: {{ t('learn.ask_ai') | tojson }},
+    hideTerm: {{ t('learn.hide_term') | tojson }},
+    noticeTitle: {{ t('notice') | tojson }},
+    confirmTitle: {{ t('confirmTitle') | tojson }},
+    okText: {{ t('ok') | tojson }},
+    cancelText: {{ t('cancel') | tojson }},
+    calSaveBtn: {{ t('cal.row_save') | tojson }},
+    calRemoveBtn: {{ t('cal.row_remove') | tojson }},
+    calEmptyPos: {{ t('cal.empty_pos') | tojson }},
+    calUpdated: {{ t('cal.updated') | tojson }},
+    cpSending: {{ t('copilot.sending') | tojson }},
+    cpAskPrompt: {{ t('learn.ask_prompt') | tojson }},
+    requireFill: {{ t('journal.require_fill') | tojson }},
+    saving: {{ t('journal.saving') | tojson }},
+    saveFailedPlain: {{ t('journal.save_failed_plain') | tojson }},
+    codeHelp: {{ t('journal.code_help') | tojson }},
+    notCached: {{ t('journal.not_cached') | tojson }},
+    feesByBroker: {{ t('journal.fees_by_broker') | tojson }},
+    levelsNote: {{ t('journal.levels_note') | tojson }},
+    levelsOptional: {{ t('journal.levels_optional') | tojson }},
+    levelsUnavailable: {{ t('journal.levels_unavailable') | tojson }},
+    unknownSymbol: {{ t('journal.unknown_symbol') | tojson }},
+    privMaskedHint: {{ t('priv.masked_hint') | tojson }}
   });
 </script>
+<script src="/static/js/app.js"></script>
+<script src="/static/js/fill.js"></script>
+<script src="/static/js/calibrate.js"></script>
+<script src="/static/js/copilot.js"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

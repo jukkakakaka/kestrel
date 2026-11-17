@@ -1,7 +1,9 @@
 {% extends "base.html" %}
+{% from "_page_icons.html" import icon, page_ui %}
 {% block title %}{{ t('nav.cost') }} · {{ t('app.name') }}{% endblock %}
 
 {% block content %}
+{{ page_ui() }}
 <div class="page-head">
   <div>
     <h1>{{ t('nav.cost') }}</h1>
@@ -9,15 +11,59 @@
   </div>
 </div>
 
-<div class="tabs">
-  <button class="active" data-tab="calc">{{ t('cost.tab_calc') }}</button>
-  <button data-tab="brokers">{{ t('cost.tab_brokers') }}</button>
+<div class="tabs" role="tablist">
+  <button class="active" role="tab" aria-selected="true" data-tab="calc">
+    {{ icon('calculator', 14) }} {{ t('cost.tab_calc') }}
+  </button>
+  <button role="tab" aria-selected="false" data-tab="brokers">
+    {{ icon('briefcase', 14) }} {{ t('cost.tab_brokers') }}
+  </button>
 </div>
 
 <div data-pane="calc">
+  {% if result %}
+  <section class="stat-grid">
+    <div class="stat-card">
+      <div class="stat-label kp-stat-top">
+        <span>{{ t('cost.breakeven_pct') }}</span>
+        <span class="kp-icon-badge tone-up">{{ icon('trend-up', 16) }}</span>
+      </div>
+      <div class="stat-value up">{{ result.breakeven_pct }}%</div>
+      <div class="stat-sub"><span>{{ market }}</span></div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-label kp-stat-top">
+        <span>{{ t('cost.breakeven_price') }}</span>
+        <span class="kp-icon-badge">{{ icon('target', 16) }}</span>
+      </div>
+      <div class="stat-value">{{ result.breakeven_price }}</div>
+      <div class="stat-sub"><span>{{ shares }} {{ t('fees.shares') }}</span></div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-label kp-stat-top">
+        <span>{{ t('cost.round_trip_total') }}</span>
+        <span class="kp-icon-badge tone-warn">{{ icon('coins', 16) }}</span>
+      </div>
+      <div class="stat-value" data-priv="money">{{ result.total }}</div>
+      <div class="stat-sub"><span>{{ t('cost.buy') }} + {{ t('cost.sell') }}</span></div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-label kp-stat-top">
+        <span>{{ t('cost.amount') }}</span>
+        <span class="kp-icon-badge tone-neutral">{{ icon('wallet', 16) }}</span>
+      </div>
+      <div class="stat-value" data-priv="money">{{ amount }}</div>
+      <div class="stat-sub"><span>{{ market }}</span></div>
+    </div>
+  </section>
+  {% endif %}
+
   <section class="card">
     <div class="card-head">
-      <h2>{{ t('cost.calc_title') }}</h2>
+      <h2 class="kp-title-row">{{ icon('calculator', 17) }} <span>{{ t('cost.calc_title') }}</span></h2>
       <span class="meta">{{ t('cost.calc_meta') }}</span>
     </div>
     <div class="card-body">
@@ -33,7 +79,7 @@
           </div>
           <div class="field">
             <label>{{ t('cost.amount') }}</label>
-            <input name="amount" value="{{ amount }}" inputmode="decimal">
+            <input name="amount" value="{{ amount }}" inputmode="decimal" data-priv-input="1">
           </div>
           <div class="field">
             <label>{{ t('cost.shares') }}</label>
@@ -52,45 +98,43 @@
           </div>
         </div>
         <div class="row-actions">
-          <button class="btn" type="submit">{{ t('cost.calc') }}</button>
+          <button class="btn" type="submit">
+            {{ icon('calculator', 15) }}
+            <span>{{ t('cost.calc') }}</span>
+          </button>
         </div>
       </form>
 
       {% if result %}
       <div class="divider"></div>
-      <table class="grid">
-        <thead>
-          <tr><th>{{ t('cost.item') }}</th><th class="num">{{ t('cost.buy') }}</th><th class="num">{{ t('cost.sell') }}</th></tr>
-        </thead>
-        <tbody>
-          {% for key, label in [
-              ('commission', t('cost.fee_commission')),
-              ('platform', t('cost.fee_platform')),
-              ('stamp', t('cost.fee_stamp')),
-              ('exchange', t('cost.fee_exchange')),
-              ('settlement', t('cost.fee_settlement'))] %}
-          <tr>
-            <td>{{ label }}</td>
-            <td class="num mono">{{ result.buy[key] }}</td>
-            <td class="num mono">{{ result.sell[key] }}</td>
-          </tr>
-          {% endfor %}
-          <tr style="border-top:1px solid var(--line);">
-            <td><b>{{ t('cost.total') }}</b></td>
-            <td class="num mono" colspan="2"><b>{{ result.total }}</b></td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div class="kpi" style="margin-top:16px;margin-bottom:0;">
-        <div class="k">
-          <div class="v mono up">{{ result.breakeven_pct }}%</div>
-          <div class="l">{{ t('cost.breakeven_pct') }}</div>
-        </div>
-        <div class="k">
-          <div class="v mono">{{ result.breakeven_price }}</div>
-          <div class="l">{{ t('cost.breakeven_price') }}</div>
-        </div>
+      <div class="table-wrapper" tabindex="0" role="region" aria-label="{{ t('cost.calc_title') }}">
+        <table class="grid">
+          <thead>
+            <tr>
+              <th>{{ t('cost.item') }}</th>
+              <th class="num">{{ t('cost.buy') }}</th>
+              <th class="num">{{ t('cost.sell') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for key, label in [
+                ('commission', t('cost.fee_commission')),
+                ('platform', t('cost.fee_platform')),
+                ('stamp', t('cost.fee_stamp')),
+                ('exchange', t('cost.fee_exchange')),
+                ('settlement', t('cost.fee_settlement'))] %}
+            <tr>
+              <td>{{ label }}</td>
+              <td class="num mono" data-priv="money">{{ result.buy[key] }}</td>
+              <td class="num mono" data-priv="money">{{ result.sell[key] }}</td>
+            </tr>
+            {% endfor %}
+            <tr style="border-top:1px solid var(--line);">
+              <td><b>{{ t('cost.total') }}</b></td>
+              <td class="num mono" colspan="2"><b data-priv="money">{{ result.total }}</b></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <p class="hint" style="margin-top:14px;">{{ t('cost.note') }}</p>
@@ -102,57 +146,81 @@
 <div data-pane="brokers" class="hidden">
   <section class="card">
     <div class="card-head">
-      <h2>{{ t('cost.plans_title') }}</h2>
-      <button class="btn sm" id="new-plan">{{ t('cost.add_plan') }}</button>
+      <h2 class="kp-title-row">{{ icon('briefcase', 17) }} <span>{{ t('cost.plans_title') }}</span></h2>
+      <button class="btn sm" id="new-plan">
+        {{ icon('plus', 14) }}
+        <span>{{ t('cost.add_plan') }}</span>
+      </button>
     </div>
     <div class="card-body tight">
-      <table class="grid">
-        <thead>
-          <tr>
-            <th>{{ t('cost.plan_name') }}</th>
-            <th>{{ t('cost.plan_market') }}</th>
-            <th class="num">{{ t('cost.plan_commission') }}</th>
-            <th class="num">{{ t('cost.plan_commission_min') }}</th>
-            <th class="num">{{ t('cost.plan_platform') }}</th>
-            <th class="num">{{ t('cost.plan_per_share') }}</th>
-            <th class="num">{{ t('cost.plan_platform_min') }}</th>
-            <th>{{ t('cost.plan_capabilities') }}</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="plan-rows">
-          {% for p in plans %}
-          <tr data-plan='{{ p | tojson }}'>
-            <td><b>{{ p.label }}</b>{% if p.builtin %} <span class="muted tiny">{{ t('cost.builtin') }}</span>{% endif %}</td>
-            <td>{{ p.market }}</td>
-            <td class="num mono">{{ '%.4f'|format(p.commission * 100) }}%</td>
-            <td class="num mono">{{ p.commission_min }}</td>
-            <td class="num mono">{{ p.platform }}</td>
-            <td class="num mono">{{ p.platform_per_share }}</td>
-            <td class="num mono">{{ p.platform_min }}</td>
-            <td class="tiny">
-              {% if p.odd_lot_buy %}<span class="badge wait">{{ t('cost.cap_odd_lot') }}</span>{% endif %}
-              {% if p.fractional_us %}<span class="badge wait">{{ t('cost.cap_fractional') }}</span>{% endif %}
-              {% if not p.odd_lot_buy and not p.fractional_us %}<span class="muted">—</span>{% endif %}
-            </td>
-            <td>
-              <button class="btn sm ghost" data-edit>{{ t('cost.edit') }}</button>
-              <button class="btn danger sm" data-del="{{ p.key }}">{{ t('cost.delete') }}</button>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      <div class="table-wrapper" tabindex="0" role="region" aria-label="{{ t('cost.plans_title') }}">
+        <table class="grid">
+          <thead>
+            <tr>
+              <th>{{ t('cost.plan_name') }}</th>
+              <th>{{ t('cost.plan_market') }}</th>
+              <th class="num">{{ t('cost.plan_commission') }}</th>
+              <th class="num">{{ t('cost.plan_commission_min') }}</th>
+              <th class="num">{{ t('cost.plan_platform') }}</th>
+              <th class="num">{{ t('cost.plan_per_share') }}</th>
+              <th class="num">{{ t('cost.plan_platform_min') }}</th>
+              <th>{{ t('cost.plan_capabilities') }}</th>
+              <th class="num"></th>
+            </tr>
+          </thead>
+          <tbody id="plan-rows">
+            {% for p in plans %}
+            <tr data-plan='{{ p | tojson }}'>
+              <td>
+                <b>{{ p.label }}</b>
+                {% if p.builtin %}<span class="tag" style="margin-left:5px;">{{ t('cost.builtin') }}</span>{% endif %}
+              </td>
+              <td><span class="tag tag-{{ p.market|lower }}">{{ p.market }}</span></td>
+              <td class="num mono">{{ '%.4f'|format(p.commission * 100) }}%</td>
+              <td class="num mono">{{ p.commission_min }}</td>
+              <td class="num mono">{{ p.platform }}</td>
+              <td class="num mono">{{ p.platform_per_share }}</td>
+              <td class="num mono">{{ p.platform_min }}</td>
+              <td class="tiny">
+                {% if p.odd_lot_buy %}<span class="badge wait">{{ t('cost.cap_odd_lot') }}</span>{% endif %}
+                {% if p.fractional_us %}<span class="badge wait">{{ t('cost.cap_fractional') }}</span>{% endif %}
+                {% if not p.odd_lot_buy and not p.fractional_us %}<span class="muted">—</span>{% endif %}
+              </td>
+              <td class="num">
+                <div style="display:flex;gap:6px;justify-content:flex-end;">
+                  <button class="btn sm ghost" data-edit>
+                    {{ icon('edit', 13) }}
+                    <span>{{ t('cost.edit') }}</span>
+                  </button>
+                  <button class="btn danger sm" data-del="{{ p.key }}" title="{{ t('cost.delete') }}">
+                    {{ icon('trash', 13) }}
+                  </button>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
   </section>
 
   <section class="card" id="plan-editor" style="display:none;">
-    <div class="card-head"><h2 id="plan-editor-title">{{ t('cost.edit_plan') }}</h2></div>
+    <div class="card-head">
+      <h2 class="kp-title-row">
+        {{ icon('edit', 17) }}
+        <span id="plan-editor-title">{{ t('cost.edit_plan') }}</span>
+      </h2>
+    </div>
     <div class="card-body">
       <div class="grid g3">
         <div class="field"><label>{{ t('cost.plan_name') }}</label><input id="pl-label"></div>
         <div class="field"><label>{{ t('cost.plan_market') }}</label>
-          <select id="pl-market"><option value="HK">{{ t('cost.market_hk') }}</option><option value="US">{{ t('cost.market_us') }}</option><option value="CN">{{ t('cost.market_cn') }}</option></select>
+          <select id="pl-market">
+            <option value="HK">{{ t('cost.market_hk') }}</option>
+            <option value="US">{{ t('cost.market_us') }}</option>
+            <option value="CN">{{ t('cost.market_cn') }}</option>
+          </select>
         </div>
         <div class="field"><label>{{ t('cost.commission_rate') }}</label><input id="pl-commission" inputmode="decimal" placeholder="0.03"></div>
         <div class="field"><label>{{ t('cost.commission_min') }}</label><input id="pl-commission-min" inputmode="decimal" placeholder="0"></div>
@@ -160,7 +228,7 @@
         <div class="field"><label>{{ t('cost.platform_per_share') }}</label><input id="pl-per-share" inputmode="decimal" placeholder="0.005"></div>
         <div class="field"><label>{{ t('cost.platform_min') }}</label><input id="pl-platform-min" inputmode="decimal" placeholder="1"></div>
       </div>
-      <div class="grid g2" style="margin-top:6px;">
+      <div class="grid g2" style="margin-top:12px;">
         <div class="field">
           <label>{{ t('cost.odd_lot') }}</label>
           <label class="switch"><input type="checkbox" id="pl-odd-lot"><span></span></label>
@@ -178,9 +246,12 @@
         </div>
       </div>
       <div class="row-actions">
-        <button class="btn" id="plan-save">{{ t('cost.save') }}</button>
+        <button class="btn" id="plan-save">
+          {{ icon('check-circle', 15) }}
+          <span>{{ t('cost.save') }}</span>
+        </button>
         <button class="btn ghost" id="plan-cancel">{{ t('cost.cancel') }}</button>
-        <span class="tiny" id="plan-msg"></span>
+        <span class="tiny up" id="plan-msg"></span>
       </div>
     </div>
   </section>
@@ -195,10 +266,15 @@
   var editor = document.getElementById('plan-editor');
   var msg = document.getElementById('plan-msg');
   var currentKey = null;
+  var editTitle = {{ t('cost.edit_plan') | tojson }};
+  var newTitle = {{ t('cost.new_plan_title') | tojson }};
+  var nameReq = {{ t('cost.name_required') | tojson }};
+  var confirmDel = {{ t('cost.confirm_delete') | tojson }};
+  var saveFail = {{ t('settings.save_failed') | tojson }};
 
   function open(plan) {
     currentKey = plan && plan.key ? plan.key : null;
-    document.getElementById('plan-editor-title').textContent = currentKey ? '编辑套餐' : '新增套餐';
+    document.getElementById('plan-editor-title').textContent = currentKey ? editTitle : newTitle;
     document.getElementById('pl-label').value = plan ? plan.label : '';
     document.getElementById('pl-market').value = plan ? plan.market : 'HK';
     document.getElementById('pl-commission').value = plan ? (plan.commission * 100).toFixed(4) : '0';
@@ -209,6 +285,7 @@
     document.getElementById('pl-odd-lot').checked = !!(plan && plan.odd_lot_buy);
     document.getElementById('pl-fractional').checked = !!(plan && plan.fractional_us);
     document.getElementById('pl-fractional-min').value = plan ? (plan.fractional_min || 0) : '0';
+    msg.textContent = '';
     editor.style.display = '';
     editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
@@ -239,7 +316,7 @@
       fractional_us: document.getElementById('pl-fractional').checked,
       fractional_min: parseFloat(document.getElementById('pl-fractional-min').value || '0')
     };
-    if (!payload.label) { msg.textContent = '名称不能为空'; return; }
+    if (!payload.label) { msg.textContent = nameReq; return; }
     fetch('/api/brokers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -248,14 +325,14 @@
       .then(function (r) { return r.json(); })
       .then(function (res) {
         if (res.ok) { location.reload(); }
-        else { msg.textContent = res.error || '保存失败'; }
+        else { msg.textContent = res.error || saveFail; }
       });
   });
 
   document.querySelectorAll('[data-del]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var key = btn.getAttribute('data-del');
-      askConfirm('删除或停用这个套餐？内置套餐只会被停用，不会真的删除。').then(function (yes) {
+      askConfirm(confirmDel).then(function (yes) {
         if (!yes) return;
         fetch('/api/brokers/' + key + '/delete', { method: 'POST' })
           .then(function () { location.reload(); });

@@ -8,9 +8,19 @@ import sys
 def main() -> int:
     from kestrel.cli import main as cli_main
 
-    # Finder passes "-psn_0_123456" on some macOS versions, and an -AppleLanguages
-    # style flag can show up too; argparse would reject both.
-    argv = [a for a in sys.argv[1:] if not a.startswith("-psn_")]
+    # 过滤 macOS Finder / Xcode 自动附加的 -psn_*、-Apple*、-NSDocumentRevisionsDebugMode 等参数。
+    argv: list[str] = []
+    skip_next = False
+    for arg in sys.argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "-NSDocumentRevisionsDebugMode":
+            skip_next = True
+            continue
+        if arg.startswith(("-psn_", "-Apple", "-NS")):
+            continue
+        argv.append(arg)
     return cli_main(argv or ["desktop"])
 
 

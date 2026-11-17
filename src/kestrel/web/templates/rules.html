@@ -1,23 +1,31 @@
 {% extends "base.html" %}
+{% from "_page_icons.html" import icon, page_ui %}
 {% block title %}{{ t('rules.title') }} · {{ t('app.name') }}{% endblock %}
 
 {% block content %}
+{{ page_ui() }}
 <div class="page-head">
   <div>
     <h1>{{ t('rules.title') }}</h1>
     <div class="sub">{{ t('rules.sub') }}</div>
   </div>
   <div class="page-actions">
-    <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:6px;">
-      {{ t('rules.horizon') }}
-      <select id="validate-horizon" style="font-size:12.5px;padding:4px 6px;">
+    <label class="muted" style="font-size:12.5px;display:inline-flex;align-items:center;gap:6px;">
+      <span>{{ t('rules.horizon') }}</span>
+      <select id="validate-horizon" class="inline-select">
         {% for h in horizon_options %}
         <option value="{{ h.code }}" {% if h.beta %}data-beta="1"{% endif %}>{{ h.label }}</option>
         {% endfor %}
       </select>
     </label>
-    <button class="btn ghost" id="validate-all">{{ t('rules.validate_all') }}</button>
-    <button class="btn" id="new-rule">{{ t('rules.new') }}</button>
+    <button class="btn ghost" id="validate-all">
+      {{ icon('refresh', 15) }}
+      <span>{{ t('rules.validate_all') }}</span>
+    </button>
+    <button class="btn" id="new-rule">
+      {{ icon('plus', 15) }}
+      <span>{{ t('rules.new') }}</span>
+    </button>
   </div>
 </div>
 
@@ -28,98 +36,217 @@
   }
 </script>
 
+{% set ns = namespace(en_cnt=0, edge_cnt=0) %}
+{% for r in rules %}
+  {% if r.enabled %}{% set ns.en_cnt = ns.en_cnt + 1 %}{% endif %}
+  {% if r.last_verdict == '有优势' %}{% set ns.edge_cnt = ns.edge_cnt + 1 %}{% endif %}
+{% endfor %}
+
+<section class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('rules.stat_total') }}</span>
+      <span class="kp-icon-badge">{{ icon('layers', 16) }}</span>
+    </div>
+    <div class="stat-value">{{ rules | length }}</div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('rules.stat_enabled') }}</span>
+      <span class="kp-icon-badge tone-down">{{ icon('check-circle', 16) }}</span>
+    </div>
+    <div class="stat-value">{{ ns.en_cnt }}</div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('rules.stat_edge') }}</span>
+      <span class="kp-icon-badge">{{ icon('shield-check', 16) }}</span>
+    </div>
+    <div class="stat-value">{{ ns.edge_cnt }}</div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('rules.stat_horizon') }}</span>
+      <span class="kp-icon-badge tone-neutral">{{ icon('clock', 16) }}</span>
+    </div>
+    <div class="stat-value" style="font-size:16.5px;">
+      {{ horizon_options[0].label if horizon_options else '—' }}
+    </div>
+  </div>
+</section>
+
 <div id="rule-flash" class="notice hidden"></div>
 
 {% if engine.is_ai %}
 <div class="notice warn">
-  <strong>{{ t('rules.ai_notice_title', engine=engine.label) }}</strong>
+  <span class="kp-title-row">
+    {{ icon('cpu', 15) }}
+    <strong>{{ t('rules.ai_notice_title', engine=engine.label) }}</strong>
+  </span>
   {{ t('rules.ai_notice_body') }}
-  <a href="/settings#engine">{{ t('adv.engine_settings') }}</a>。
+  <a href="/settings#engine">{{ t('adv.engine_settings') }}</a>.
 </div>
 {% else %}
 <div class="notice">
-  <strong>{{ t('rules.rules_notice_title') }}</strong>
-  {{ t('rules.rules_notice_body') }}
+  <span class="kp-title-row">
+    {{ icon('shield-check', 15) }}
+    <strong>{{ t('rules.gates_title') }}</strong>
+  </span>
+  <span>{{ t('rules.gates_sub') }}</span>
+  <div class="tiny muted" style="margin-top:4px;">{{ t('rules.verdict_intro') }}</div>
 </div>
 {% endif %}
 
-<div class="notice">
-  {{ t('rules.verdict_intro') }}
-  <br><span class="muted" style="font-size:12.5px;">{{ t('rules.horizon_hint') }}</span>
-</div>
+<div class="grid" style="gap:14px;margin-bottom:18px;">
+  {% for r in rules %}
+  {% set r_drift = r.drift if r.drift is defined and r.drift else (drift_map.get(r.code) if drift_map is defined and drift_map else None) %}
+  <article class="advice" style="margin-bottom:0;">
+    <header class="advice-head">
+      <span class="kp-title-row">
+        {{ icon('shield', 16) }}
+        <span class="sym">{{ r.name }}</span>
+      </span>
+      <span class="code mono">{{ r.code }}</span>
+      {% if r.builtin %}<span class="tag">{{ t('rules.builtin') }}</span>{% endif %}
+      {% if r.last_verdict == '有优势' %}<span class="badge ok-badge">{{ t('sim.rule_advantage') }}</span>
+      {% elif r.last_verdict == '无优势' %}<span class="badge avoid">{{ t('sim.rule_none') }}</span>
+      {% elif r.last_verdict == '不稳定' %}<span class="badge warn-badge">{{ t('rules.verdict_unstable') }}</span>
+      {% elif r.last_verdict %}<span class="badge wait">{{ r.last_verdict }}</span>
+      {% else %}<span class="badge wait">{{ t('sim.rule_unproven') }}</span>{% endif %}
 
-{% for r in rules %}
-<article class="advice">
-  <header class="advice-head">
-    <span class="sym">{{ r.name }}</span>
-    <span class="code">{{ r.code }}</span>
-    {% if r.builtin %}<span class="tag">{{ t('rules.builtin') }}</span>{% endif %}
-    {% if r.last_verdict == '有优势' %}<span class="badge ok-badge">{{ t('sim.rule_advantage') }}</span>
-    {% elif r.last_verdict == '无优势' %}<span class="badge avoid">{{ t('sim.rule_none') }}</span>
-    {% elif r.last_verdict %}<span class="badge wait">{{ r.last_verdict }}</span>
-    {% else %}<span class="badge wait">{{ t('sim.rule_unproven') }}</span>{% endif %}
-    {% set tf_states = states.get(r.code, {}) %}
-    {% for h in horizon_options %}
-      {% set s = tf_states.get(h.code) %}
-      {% if s %}
-      <span class="tiny muted" title="{{ t('rules.validated_title', at=s.validated_at[:16], n=s.symbols) }}">
-        {{ h.label.split(' · ')[0] }}
-        <b class="{{ 'up' if s.verdict == '有优势' else ('down' if s.verdict == '无优势' else '') }}">{{ s.verdict }}</b>
+      {% if r.validation and r.validation.downgraded_by_perm %}
+      <span class="badge warn-badge" title="{{ t('rules.perm_downgraded') }}">
+        {{ icon('alert', 12) }} {{ t('rules.perm_downgraded') }}
       </span>
       {% endif %}
-    {% endfor %}
-    <span class="spacer"></span>
-    <label class="switch">
-      <input type="checkbox" class="rule-toggle" data-code="{{ r.code }}" {% if r.enabled %}checked{% endif %}>
-      <span></span>
-    </label>
-  </header>
 
-  <div class="advice-verdict">
-    <b>{{ t('rules.conditions') }}</b>{{ r.summary }}
-    {% if r.note %}<div class="muted" style="font-size:12px;margin-top:4px;">{{ r.note }}</div>{% endif %}
-  </div>
+      {% set tf_states = states.get(r.code, {}) %}
+      {% for h in horizon_options %}
+        {% set s = tf_states.get(h.code) %}
+        {% if s %}
+        <span class="tiny muted" title="{{ t('rules.validated_title', at=s.validated_at[:16], n=s.symbols) }}">
+          {{ h.label.split(' · ')[0] }}
+          <b class="{{ 'up' if s.verdict == '有优势' else ('down' if s.verdict == '无优势' else '') }}">
+            {{ t('sim.rule_advantage') if s.verdict == '有优势' else (t('sim.rule_none') if s.verdict == '无优势' else (t('rules.verdict_unstable') if s.verdict == '不稳定' else s.verdict)) }}
+          </b>
+        </span>
+        {% endif %}
+      {% endfor %}
+      <span class="spacer"></span>
+      <label class="switch">
+        <input type="checkbox" class="rule-toggle" data-code="{{ r.code }}" {% if r.enabled %}checked{% endif %}>
+        <span></span>
+      </label>
+    </header>
 
-  {% if r.validation and r.validation.folds %}
-  <div class="advice-figs" style="grid-template-columns: repeat({{ r.validation.folds|length }}, minmax(0,1fr));">
-    {% for f in r.validation.folds %}
-    <div>
-      <span class="k">{{ t('rules.fold', n=f.fold, trades=f.n) }}</span>
-      <span class="v {{ 'up' if f.exp > 0 else 'down' }}">{{ '%+.3f' % f.exp }}R</span>
-      <div class="tiny muted" style="margin-top:2px;">
-        {{ t('rules.hold_bench') }} {{ '%+.3f' % f.bench }} · {{ t('sim.excess') }}
-        <span class="{{ 'up' if f.edge > 0 else 'down' }}">{{ '%+.3f' % f.edge }}</span>
-      </div>
-      {% if f.pf is defined %}
-      <div class="tiny muted" style="margin-top:1px;">
-        {{ t('rules.pf_dd_streak', pf='%.2f'|format(f.pf), dd='%.1f'|format(f.dd), streak=f.streak) }}
-      </div>
-      {% endif %}
+    <div class="advice-verdict">
+      {% set cond_text = (r.summary
+          | replace('，且', ' AND ')
+          | replace(', 且', ' AND ')
+          | replace('，或', ' OR ')
+          | replace(' 为 真', ' is true')
+          | replace(' 为 假', ' is false')
+          | replace(' 在 ', ' in [')
+          | replace(' 之间', ']')) if locale.startswith('en') else r.summary %}
+      {% set tr_note = t('rule_note.' + r.code) %}
+      {% set note_text = tr_note if (r.builtin and tr_note != 'rule_note.' + r.code) else r.note %}
+      <b>{{ t('rules.conditions') }}</b><span class="mono" style="font-size:12.5px;">{{ cond_text }}</span>
+      {% if note_text %}<div class="muted" style="font-size:12px;margin-top:4px;">{{ note_text }}</div>{% endif %}
     </div>
-    {% endfor %}
-  </div>
-  {% endif %}
 
-  <footer class="advice-foot">
-    <span class="deadline">
-      {% if r.last_validated %}{{ t('rules.last_validated') }} {{ r.last_validated[:16] }}{% else %}{{ t('rules.never_validated') }}{% endif %}
-      {% if r.validation %}
-        · {{ horizon_labels.get(r.validation.timeframe or 'short', r.validation.timeframe or 'short') }}
-        · {{ t('rules.symbols_n', n=r.validation.symbols) }}
-        · {{ t('rules.trades_n', n=r.validation.folds | sum(attribute='n')) }}
+    {# 四关量化证伪闯关状态条 #}
+    {% if r.gates is defined and r.gates %}
+    <div class="kp-gate-strip">
+      {% for g in r.gates %}
+      <div class="kp-gate-pill st-{{ g.status }}" title="{{ g.detail_en if locale.startswith('en') else g.detail_zh }}">
+        <div class="kp-gate-top">
+          <span>G{{ g.gate }} · {{ g.name_en if locale.startswith('en') else g.name_zh }}</span>
+          <span class="kp-gate-dot">
+            {% if g.status == 'passed' %}{{ icon('check-circle', 13) }}
+            {% elif g.status in ('warn', 'failed') %}{{ icon('alert', 13) }}
+            {% else %}{{ icon('clock', 12) }}{% endif %}
+          </span>
+        </div>
+        <div class="kp-gate-val">
+          {{ (g.value | replace(' 笔', ' trades') | replace(' 折', ' folds')) if locale.startswith('en') else g.value }}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {# 实盘/推荐偏离预警横幅 #}
+    {% if r_drift and r_drift.warning %}
+    <div style="padding:10px 18px;background:var(--warn-soft);color:var(--warn);border-bottom:1px solid var(--warn-line);font-size:12.5px;display:flex;align-items:center;gap:8px;">
+      {{ icon('alert', 15) }}
+      <strong>{{ t('rules.drift_warn_title') }}：</strong>
+      <span>{{ r_drift.verdict_en if locale.startswith('en') else r_drift.verdict_zh }}</span>
+    </div>
+    {% endif %}
+
+    {% if r.validation and r.validation.folds %}
+    <div class="card-body" style="padding:12px 18px;">
+      <div class="kp-price-strip">
+        {% for f in r.validation.folds %}
+        <div>
+          <span class="k">{{ t('rules.fold', n=f.fold, trades=f.n) }}</span>
+          <span class="v {{ 'up' if f.exp > 0 else 'down' }}">{{ '%+.3f' % f.exp }}R</span>
+          <div class="tiny muted" style="margin-top:2px;">
+            {{ t('rules.hold_bench') }} {{ '%+.3f' % f.bench }} · {{ t('sim.excess') }}
+            <span class="{{ 'up' if f.edge > 0 else 'down' }}">{{ '%+.3f' % f.edge }}</span>
+          </div>
+          {% if f.pf is defined %}
+          <div class="tiny muted" style="margin-top:1px;">
+            {{ t('rules.pf_dd_streak', pf='%.2f'|format(f.pf), dd='%.1f'|format(f.dd), streak=f.streak) }}
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <footer class="advice-foot">
+      <span class="deadline">
+        {{ icon('clock', 13) }}
+        {% if r.last_validated %}{{ t('rules.last_validated') }} {{ r.last_validated[:16] }}{% else %}{{ t('rules.never_validated') }}{% endif %}
+        {% if r.validation %}
+          · {{ horizon_labels.get(r.validation.timeframe or 'short', r.validation.timeframe or 'short') }}
+          · {{ t('rules.symbols_n', n=r.validation.symbols) }}
+          · {{ t('rules.trades_n', n=r.validation.folds | sum(attribute='n')) }}
+          {% if r.validation.p_value is defined and r.validation.p_value is not none %}
+          · <span class="mono">p={{ '%.3f'|format(r.validation.p_value) }}</span>
+          {% endif %}
+        {% endif %}
+      </span>
+      <button class="btn sm ghost" data-validate="{{ r.code }}">
+        {{ icon('flask', 13) }}
+        <span>{{ t('rules.validate_one') }}</span>
+      </button>
+      <button class="btn sm ghost" data-edit="{{ r.code }}">
+        {{ icon('edit', 13) }}
+        <span>{{ t('cost.edit') }}</span>
+      </button>
+      <button class="btn sm ghost" data-copy="{{ r.code }}">
+        {{ icon('copy', 13) }}
+        <span>{{ t('rules.duplicate') }}</span>
+      </button>
+      {% if not r.builtin %}
+      <button class="btn sm danger" data-del="{{ r.code }}" title="{{ t('cost.delete') }}">
+        {{ icon('trash', 13) }}
+      </button>
       {% endif %}
-    </span>
-    <button class="btn sm ghost" data-validate="{{ r.code }}">{{ t('rules.validate_one') }}</button>
-    <button class="btn sm ghost" data-edit="{{ r.code }}">{{ t('cost.edit') }}</button>
-    <button class="btn sm ghost" data-copy="{{ r.code }}">{{ t('rules.duplicate') }}</button>
-    {% if not r.builtin %}<button class="btn sm danger" data-del="{{ r.code }}">{{ t('cost.delete') }}</button>{% endif %}
-  </footer>
-</article>
-{% endfor %}
+    </footer>
+  </article>
+  {% endfor %}
+</div>
 
-<dialog id="editor" class="modal">
+<dialog id="editor" class="modal" closedby="any" aria-labelledby="editor-title">
   <form method="dialog" class="modal-head">
-    <h2 id="editor-title">{{ t('rules.editor') }}</h2>
+    <h2 id="editor-title" class="kp-title-row">{{ icon('edit', 16) }} <span>{{ t('rules.editor') }}</span></h2>
     <button class="btn ghost sm" value="cancel">{{ t('journal.close') }}</button>
   </form>
   <div class="modal-body">
@@ -129,45 +256,52 @@
     </div>
     <div class="field">
       <label>{{ t('rules.json') }}</label>
-      <textarea id="ed-spec" rows="18" spellcheck="false"
-        style="font-family:var(--mono);font-size:12.5px;line-height:1.7;padding:12px;width:100%;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);color:var(--ink);resize:vertical;"></textarea>
+      <textarea id="ed-spec" class="textarea mono" rows="16" spellcheck="false"></textarea>
       <span class="help">{{ t('rules.fields') }}<span class="mono" style="font-size:11px;">{{ fields | join(', ') }}</span></span>
     </div>
-    <p class="tiny" id="ed-msg" style="min-height:18px;"></p>
+    <p class="tiny up" id="ed-msg" style="min-height:18px;margin-top:6px;"></p>
   </div>
   <div class="modal-foot">
     <button class="btn ghost" id="ed-cancel">{{ t('journal.cancel') }}</button>
-    <button class="btn" id="ed-save">{{ t('rules.save_validate') }}</button>
+    <button class="btn" id="ed-save">
+      {{ icon('check-circle', 15) }}
+      <span>{{ t('rules.save_validate') }}</span>
+    </button>
   </div>
 </dialog>
 
-<section class="card" id="for-ai">
-  <div class="card-head">
-    <h2>{{ t('rules.for_ai') }}</h2>
-    <span class="meta">{{ t('rules.for_ai_meta') }}</span>
-  </div>
-  <div class="card-body">
-    <p class="hint" style="margin-bottom:12px;">
-      {{ t('rules.for_ai_body') }}
-    </p>
-    <div class="row-actions" style="margin-top:0;margin-bottom:12px;">
-      <button class="btn sm" id="copy-prompt">{{ t('settings.copy_prompt') }}</button>
-      <a class="btn sm ghost" href="/api/rules/schema" target="_blank">{{ t('rules.view_schema') }}</a>
-      <span class="tiny" id="copy-msg"></span>
+<div class="grid g2">
+  <section class="card" id="for-ai" style="margin-bottom:0;">
+    <div class="card-head">
+      <h2 class="kp-title-row">{{ icon('sparkles', 17) }} <span>{{ t('rules.for_ai') }}</span></h2>
+      <span class="meta">{{ t('rules.for_ai_meta') }}</span>
     </div>
-    <pre id="ai-prompt" class="mono" style="font-size:11.5px;line-height:1.7;background:var(--surface-2);padding:14px;border-radius:9px;overflow:auto;max-height:320px;white-space:pre-wrap;">{{ ai_prompt }}</pre>
-  </div>
-</section>
+    <div class="card-body">
+      <p class="hint" style="margin-bottom:12px;">{{ t('rules.for_ai_body') }}</p>
+      <div class="row-actions" style="margin-top:0;margin-bottom:12px;">
+        <button class="btn sm" id="copy-prompt">
+          {{ icon('copy', 13) }}
+          <span>{{ t('settings.copy_prompt') }}</span>
+        </button>
+        <a class="btn sm ghost" href="/api/rules/schema" target="_blank">
+          <span>{{ t('rules.view_schema') }}</span>
+          {{ icon('external', 12) }}
+        </a>
+        <span class="tiny down" id="copy-msg"></span>
+      </div>
+      <pre id="ai-prompt" class="prompt-body" style="border:1px solid var(--line);border-radius:9px;">{{ ai_prompt }}</pre>
+    </div>
+  </section>
 
-<section class="card">
-  <div class="card-head"><h2>{{ t('rules.how_to_write') }}</h2></div>
-  <div class="card-body">
-    <p class="hint" style="margin-bottom:10px;">
-      {{ t('rules.how_to_write_body') }}
-    </p>
-    <pre class="mono" style="font-size:12px;line-height:1.75;background:var(--surface-2);padding:14px;border-radius:9px;overflow:auto;">{
+  <section class="card" style="margin-bottom:0;">
+    <div class="card-head">
+      <h2 class="kp-title-row">{{ icon('book', 17) }} <span>{{ t('rules.how_to_write') }}</span></h2>
+    </div>
+    <div class="card-body">
+      <p class="hint" style="margin-bottom:10px;">{{ t('rules.how_to_write_body') }}</p>
+      <pre class="prompt-body" style="border:1px solid var(--line);border-radius:9px;">{
   "code": "my_rule",
-  "name": "我的规则",
+  "name": "My Rule",
   "conditions": [
     {"left": "ma_stack", "op": "is_true"},
     {"left": "dist_sma20", "op": "between", "value": [-2, 0.5]},
@@ -182,11 +316,10 @@
   "stop":   {"field": "low20"},
   "target": {"field": "high20"}
 }</pre>
-    <p class="hint" style="margin-top:10px;">
-      {{ t('rules.operators') }}
-    </p>
-  </div>
-</section>
+      <p class="hint" style="margin-top:10px;">{{ t('rules.operators') }}</p>
+    </div>
+  </section>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -201,12 +334,12 @@ window.I18N = Object.assign(window.I18N || {}, {
   validatingAll: {{ t('rules.js_validating_all') | tojson }},
   copied: {{ t('rules.js_copied') | tojson }},
   newRuleName: {{ t('rules.js_new_name') | tojson }},
-  copySuffix: {{ t('rules.js_copy_suffix') | tojson }}
+  copySuffix: {{ t('rules.js_copy_suffix') | tojson }},
+  confirmDelRule: {{ t('rules.confirm_delete') | tojson }}
 });
 </script>
 <script>
 (function () {
-  var RULES = {{ rules | map(attribute='spec') | list | tojson }};
   var META = {};
   {% for r in rules %}
   META["{{ r.code }}"] = {{ {'code': r.code, 'name': r.name, 'note': r.note, 'spec': r.spec} | tojson }};
@@ -264,6 +397,8 @@ window.I18N = Object.assign(window.I18N || {}, {
     var parsed;
     try { parsed = JSON.parse(raw); }
     catch (e) { msg.textContent = window.I18N.jsonInvalid + e.message; return; }
+    var nameInput = document.getElementById('ed-name').value.trim();
+    if (nameInput) parsed.name = nameInput;
     msg.textContent = window.I18N.saving;
     fetch('/api/rules/save', {
       method: 'POST',
@@ -356,7 +491,7 @@ window.I18N = Object.assign(window.I18N || {}, {
 
   document.querySelectorAll('[data-del]').forEach(function (b) {
     b.addEventListener('click', function () {
-      askConfirm('删除这条规则？内置规则不能删，只能停用。').then(function (yes) {
+      askConfirm(window.I18N.confirmDelRule).then(function (yes) {
         if (!yes) return;
         fetch('/api/rules/' + b.getAttribute('data-del') + '/delete', { method: 'POST' })
           .then(function () { location.reload(); });

@@ -1,118 +1,114 @@
-{% set _ = t %}
-<!DOCTYPE html>
-<html lang="{{ locale }}" data-theme="{{ theme }}">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#16305c">
-  <title>{{ t('receipt.title') }} · {{ t('app.name') }}</title>
-  <link rel="icon" href="/static/favicon/favicon-32.png" sizes="32x32">
-  <link rel="apple-touch-icon" href="/static/favicon/favicon-180.png">
-  <link rel="stylesheet" href="/static/css/app.css">
-  <script>
-    (function () {
-      var saved = document.documentElement.getAttribute('data-theme');
-      var mql = window.matchMedia('(prefers-color-scheme: dark)');
-      var mode = saved === 'auto' ? (mql.matches ? 'dark' : 'light') : saved;
-      document.documentElement.setAttribute('data-mode', mode);
-    })();
-  </script>
-</head>
-<body>
-<main class="wrap receipt-wrap">
-  {% if not rec %}
-  <div class="panel">
-    <h1>{{ t('receipt.invalid') }}</h1>
-    <p class="hint">{{ t('receipt.invalid_hint') }}</p>
-  </div>
+{% extends "base.html" %}
+{% from "_page_icons.html" import icon, empty_art, page_ui %}
+{% block title %}{{ t('receipt.title') }} · {{ t('app.name') }}{% endblock %}
 
-  {% elif expired and not done %}
-  <div class="panel receipt-done">
-    <div class="done-mark muted-mark">⏳</div>
-    <h1>{{ t('receipt.expired_title') }}</h1>
-    <p class="hint">{{ t('receipt.expired_body') }}</p>
-  </div>
-
-  {% elif done %}
-  <div class="panel receipt-done">
-    <div class="done-mark">✓</div>
-    <h1>{{ t('receipt.thanks') }}</h1>
-    <p class="hint">{{ t('receipt.recorded') }}</p>
-
-    {% if result and result.ok %}
-    <div class="receipt-result">
-      <div class="row"><span>{{ t('receipt.filled') }}</span><b class="mono">{{ rec.name }} · {{ result.qty }} 股</b></div>
-      {% if result.deviation_pct is not none %}
-      <div class="row">
-        <span>{{ t('receipt.deviation_pct') }}</span>
-        <b class="mono {{ 'down' if result.deviation_pct < 0 else 'up' }}">
-          {{ '%+.2f'|format(result.deviation_pct) }}%
-        </b>
-      </div>
-      <div class="row">
-        <span>{{ t('receipt.deviation_r') }}</span>
-        <b class="mono">{{ '%+.2f'|format(result.deviation_r or 0) }} R</b>
-      </div>
-      <p class="hint" style="margin-top:10px;text-align:left;">
-        {{ t('receipt.deviation_hint') }}
-      </p>
-      {% else %}
-      <div class="row"><span>{{ t('receipt.result') }}</span><b>{{ result.message }}</b></div>
-      {% endif %}
+{% block content %}
+{{ page_ui() }}
+{% if not rec %}
+<section class="card" style="max-width:560px;margin:24px auto;">
+  <div class="empty">
+    {{ empty_art('alert', 'warn') }}
+    <strong>{{ t('receipt.unknown_title') }}</strong>
+    <p>{{ t('receipt.unknown_body') }}</p>
+    <div class="row-actions" style="justify-content:center;margin-top:14px;">
+      <a class="btn ghost sm" href="/advice">{{ icon('arrow-left', 14) }} <span>{{ t('receipt.back') }}</span></a>
     </div>
-    {% endif %}
-
-    <a class="btn" href="/journal">{{ t('receipt.go_positions') }}</a>
   </div>
-
-  {% else %}
-  <div class="panel">
-    <div class="receipt-head">
+</section>
+{% elif expired %}
+<section class="card" style="max-width:560px;margin:24px auto;">
+  <div class="empty">
+    {{ empty_art('clock', 'warn') }}
+    <strong>{{ t('receipt.expired_title') }}</strong>
+    <p>{{ t('receipt.expired_body') }}</p>
+    <div class="row-actions" style="justify-content:center;margin-top:14px;">
+      <a class="btn ghost sm" href="/advice">{{ icon('arrow-left', 14) }} <span>{{ t('receipt.back') }}</span></a>
+    </div>
+  </div>
+</section>
+{% else %}
+{% set cur = rec.currency or 'HKD' %}
+<section class="card" style="max-width:620px;margin:16px auto;">
+  <div class="card-head">
+    <h2 class="kp-title-row">
       <span class="tag tag-{{ rec.market|lower }}">{{ rec.market }}</span>
-      <span class="mono">{{ rec.code }}</span>
-      <strong>{{ rec.name }}</strong>
+      <span>{{ rec.name }}</span>
+      <span class="mono muted">{{ rec.code }}</span>
+    </h2>
+    <span class="badge wait">{{ icon('check-circle', 13) }} {{ t('receipt.title') }}</span>
+  </div>
+  <div class="card-body">
+    <div class="kp-price-strip" style="margin-bottom:16px;">
+      <div>
+        <span class="k">{{ icon('activity', 12) }} {{ t('adv.entry') }}</span>
+        <span class="v mono">{{ rec.entry_low | cur(cur) }} – {{ (rec.entry_high or rec.entry_low) | cur(cur) }}</span>
+      </div>
+      <div>
+        <span class="k">{{ icon('shield', 12) }} {{ t('adv.stop') }}</span>
+        <span class="v mono down">{{ rec.stop | cur(cur) }}</span>
+      </div>
+      <div>
+        <span class="k">{{ icon('target', 12) }} {{ t('adv.target') }}</span>
+        <span class="v mono up">{{ rec.target1 | cur(cur) }}</span>
+      </div>
+      <div>
+        <span class="k">{{ t('adv.qty') }}</span>
+        <span class="v mono" data-priv="qty">{{ rec.qty }}</span>
+      </div>
     </div>
-
-    <div class="receipt-verdict">{{ rec.headline }}</div>
-
-    <dl class="receipt-grid">
-      <div><dt>{{ t('scan.entry') }}</dt><dd class="mono">{{ rec.entry_low|money(3) }} – {{ rec.entry_high|money(3) }}</dd></div>
-      <div><dt>{{ t('scan.stop') }}</dt><dd class="mono down">{{ rec.stop|money(3) }}</dd></div>
-      <div><dt>{{ t('scan.target') }}</dt><dd class="mono up">{{ rec.target1|money(3) }}</dd></div>
-      <div><dt>{{ t('scan.qty') }}</dt><dd class="mono">{{ rec.qty }}</dd></div>
-    </dl>
 
     {% if error %}
-    <div class="notice err" style="margin:0 0 14px;">{{ error }}</div>
+    <div class="notice err">{{ icon('alert', 14) }} {{ error }}</div>
     {% endif %}
 
-    <form method="post" class="receipt-form">
-      <div class="field-pair">
-        <label>
-          <span class="field-label">{{ t('receipt.fill_price') }}</span>
-          <input type="text" inputmode="decimal" name="fill_price" placeholder="{{ rec.entry_low|money(3) }}">
-        </label>
-        <label>
-          <span class="field-label">{{ t('receipt.fill_qty') }}</span>
-          <input type="text" inputmode="numeric" name="fill_qty" placeholder="{{ rec.qty }}">
-        </label>
+    {% if done %}
+    <div class="notice ok">
+      <div class="kp-title-row">
+        {{ icon('check-circle', 16) }}
+        <strong>{{ t('receipt.recorded') }}</strong>
       </div>
-      <p class="hint tight">{{ t('receipt.fill_hint') }}</p>
-
-      <label class="field-label">{{ t('receipt.note') }}</label>
-      <input type="text" name="note" placeholder="{{ t('receipt.note_ph') }}">
-
-      <div class="receipt-actions">
-        <button class="btn ok" name="action" value="executed">{{ t('receipt.executed') }}</button>
-        <button class="btn ghost danger" name="action" value="skipped">{{ t('receipt.skipped') }}</button>
+      {% if result %}
+      <div class="tiny" style="margin-top:8px;line-height:1.7;">
+        <div>{{ result.message }}</div>
+        {% if result.deviation_pct is defined and result.deviation_pct is not none %}
+        <div>{{ t('receipt.deviation_pct') }}：<b class="mono">{{ '%+.2f'|format(result.deviation_pct) }}%</b>
+          {% if result.deviation_r is not none %}<span class="mono">（{{ '%+.2f'|format(result.deviation_r) }}R）</span>{% endif %}
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+      <div class="row-actions" style="margin-top:12px;">
+        <a class="btn sm" href="/journal">{{ icon('briefcase', 14) }} <span>{{ t('receipt.go_positions') }}</span></a>
+      </div>
+    </div>
+    {% else %}
+    <form method="post" action="/r/{{ code }}">
+      <div class="grid g2">
+        <div class="field">
+          <label>{{ t('receipt.fill_price') }}</label>
+          <input name="fill_price" type="number" step="0.001" value="{{ '%.3f'|format(rec.entry_low / 1000000) }}">
+        </div>
+        <div class="field">
+          <label>{{ t('receipt.fill_qty') }}</label>
+          <input name="fill_qty" type="text" inputmode="decimal" value="{{ rec.qty }}">
+        </div>
+        <div class="field" style="grid-column:1 / -1;">
+          <label>{{ t('journal.note') }}</label>
+          <input name="note" placeholder="{{ t('journal.fd_note_ph') }}">
+        </div>
+      </div>
+      <p class="tiny muted" style="margin-top:10px;">{{ t('receipt.fill_hint') }}</p>
+      <div class="row-actions" style="margin-top:14px;">
+        <button class="btn" type="submit" name="action" value="executed">
+          {{ icon('check-circle', 15) }}
+          <span>{{ t('receipt.act_executed') }}</span>
+        </button>
+        <button class="btn ghost" type="submit" name="action" value="partial">{{ t('receipt.act_partial') }}</button>
+        <button class="btn ghost" type="submit" name="action" value="skipped">{{ t('receipt.act_skipped') }}</button>
       </div>
     </form>
-
-    {% if existing %}
-    <p class="hint">{{ t('receipt.already') }}: {{ existing.action }} · {{ existing.created_at }}</p>
     {% endif %}
   </div>
-  {% endif %}
-</main>
-</body>
-</html>
+</section>
+{% endif %}
+{% endblock %}

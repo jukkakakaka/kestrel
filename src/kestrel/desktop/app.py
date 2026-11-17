@@ -1,154 +1,139 @@
-"""Desktop shell: a native window around the local server.
+"""原生桌面外壳：围绕本地 FastAPI 服务提供跨平台原生窗口与系统托盘后台常驻。
 
-Requires the ``desktop`` extra (pywebview, pystray, pillow).
-
-Platform note. On macOS AppKit requires ``NSStatusItem`` to be created on the
-main thread, and the main thread already belongs to pywebview's run loop.
-pystray's darwin backend builds the item on whatever thread called ``run()``,
-so putting it on a worker thread traps inside BoardServices
-(``-[BSServiceMainRunLoopQueue assertBarrierOnQueue]``) and kills the process a
-second after launch. There is only one main thread and pywebview needs it, so
-the menu-bar icon is simply not created on macOS: the window is the app, closing
-it quits, and ``kestrel serve`` is the way to scan headless.
-
-Windows and Linux backends own their own message loop and are fine on a worker
-thread, so the tray stays there. ``KESTREL_TRAY=0`` disables it anywhere.
+需要安装 ``desktop`` 可选依赖（pywebview, pystray, pillow, darkdetect）。
 """
 
 from __future__ import annotations
 
 import contextlib
 import logging
-import os
-import sys
 import threading
+from typing import Any
 
-from kestrel.settings import bundle_dir
+from kestrel.desktop.tray import (
+    BRAND,
+    TrayController,
+    load_pil_icon,
+    start_tray,
+    tray_supported,
+)
 
 log = logging.getLogger(__name__)
 
-BRAND = bundle_dir() / "assets" / "brand"
-
-_FALSY = ("0", "false", "no", "off")
-
-
-def tray_supported() -> bool:
-    """Whether a menu-bar / notification-area icon can be created here."""
-    flag = os.environ.get("KESTREL_TRAY", "").strip().lower()
-    if flag in _FALSY:
-        return False
-    if sys.platform == "darwin":
-        # Never: creating NSStatusItem off the main thread is a hard crash, and
-        # the main thread is taken by the window. See the module docstring.
-        return False
-    return True
+# 默认桌面工作台窗口尺寸与最小尺寸约束
+DEFAULT_WIDTH = 1360
+DEFAULT_HEIGHT = 860
+MIN_WINDOW_SIZE = (960, 640)
 
 
 def _icon_image():
-    from PIL import Image
-
-    for candidate in (
-        BRAND / "favicon" / "favicon-180.png",
-        BRAND / "png" / "logo-mark-512.png",
-    ):
-        if candidate.exists():
-            return Image.open(candidate)
-    return Image.new("RGBA", (64, 64), (22, 48, 92, 255))
+    """向后兼容获取 PIL 品牌图标。"""
+    return load_pil_icon()
 
 
-def _start_tray(url: str, on_quit):
-    """Start the tray icon, or return None. Never raises."""
-    if not tray_supported():
-        return None
-    try:
-        import pystray
-
-        def open_panel(_item=None):
-            import webbrowser
-
-            webbrowser.open(url)
-
-        menu = pystray.Menu(
-            pystray.MenuItem("Open Kestrel", open_panel, default=True),
-            pystray.MenuItem("Quit", lambda: (on_quit(), icon.stop())),
-        )
-        icon = pystray.Icon("kestrel", _icon_image(), "Kestrel", menu)
-        threading.Thread(target=icon.run, daemon=True, name="kestrel-tray").start()
-        return icon
-    except Exception as exc:  # noqa: BLE001
-        # A tray icon is a convenience; it must never be the reason the app dies.
-        log.warning("tray unavailable: %s", exc)
-        return None
+def _start_tray(url: str, on_quit, *, window: Any = None, server: Any = None) -> TrayController | None:
+    """启动系统托盘控制器；不支持或显式禁用时返回 ``None``。"""
+    return start_tray(url=url, on_quit=on_quit, window=window, server=server)
 
 
-def run_desktop(url: str, server=None) -> None:
-    """Open the native window and block until the app should quit.
+def run_desktop(url: str, server: Any = None, start_hidden: bool = False) -> None:
+    """创建原生窗口并阻塞运行直至用户显式退出应用。
 
-    With a tray icon the process outlives the window so the scheduler keeps
-    running; without one, closing the window quits, which is the macOS norm.
-
-    If the window cannot be created at all (no display, broken WKWebView), fall
-    back to the system browser and keep serving. Silently exiting would look
-    like the app is broken with nothing on screen to explain it.
+    - 当系统托盘可用且 ``desktop.close_to_tray`` 开启时，点击窗口关闭按钮只会隐藏窗口，
+      本地 uvicorn 服务与 APScheduler 盯盘任务继续在后台常驻运行；可通过菜单栏/托盘图标
+      或 macOS Dock 图标随时恢复显示。
+    - 当 ``start_hidden=True``（例如开机自启 ``kestrel desktop --minimized``）时，
+      主窗口初始以隐藏模式在后台启动。
+    - 若当前环境无法创建原生 WebView 窗口，则自动回退打开系统默认浏览器并保持服务运行。
     """
-    import time
-
     stop = threading.Event()
 
-    def quit_app():
+    def quit_app() -> None:
         if server is not None:
             server.should_exit = True
         stop.set()
 
-    icon = _start_tray(url, quit_app)
+    tray = TrayController(url=url, server=server, on_quit=quit_app)
 
-    started = time.monotonic()
     window_shown = False
     try:
         import webview
 
-        webview.create_window(
+        window = webview.create_window(
             "Kestrel",
             url,
-            width=1180,
-            height=820,
-            min_size=(900, 620),
-            background_color="#0b0f16" if _prefers_dark() else "#f6f7f9",
+            width=DEFAULT_WIDTH,
+            height=DEFAULT_HEIGHT,
+            min_size=MIN_WINDOW_SIZE,
+            hidden=bool(start_hidden),
+            background_color="#090d16" if _prefers_dark() else "#f4f6fa",
         )
-        webview.start()
-        window_shown = time.monotonic() - started > 1.0
+        tray.attach_window(window)
+        if window is not None and hasattr(window, "events"):
+            window.events.closing += tray.handle_window_closing
+
+        def _on_webview_ready() -> None:
+            tray.start()
+            if start_hidden and window is not None and not tray.active:
+                # 若要求隐藏启动但当前环境无系统托盘，避免成为不可见孤儿进程，自动恢复显示窗口
+                with contextlib.suppress(Exception):
+                    window.show()
+
+        webview.start(func=_on_webview_ready)
+        window_shown = True
     except Exception as exc:  # noqa: BLE001
         log.warning("native window unavailable: %s", exc)
 
     if not window_shown:
-        import webbrowser
+        # 原生窗口不可用时启动托盘（若支持）并在非隐藏启动时打开默认浏览器兜底
+        tray.start()
+        if not start_hidden:
+            import webbrowser
 
-        log.info("falling back to the browser at %s", url)
-        with contextlib.suppress(Exception):
-            webbrowser.open(url)
-        # No window and possibly no tray: keep serving until the process is
-        # stopped from the tray, the dock or the task manager.
+            log.info("falling back to the browser at %s", url)
+            with contextlib.suppress(Exception):
+                webbrowser.open(url)
         try:
             while not stop.is_set():
                 stop.wait(3600)
         except KeyboardInterrupt:
             pass
+        finally:
+            tray.stop()
+            quit_app()
         return
 
-    log.info("window closed")
+    log.info("desktop window loop exited")
 
-    if icon is None:
-        return
+    # 在 Windows / Linux 下若窗口销毁但托盘仍常驻且未请求退出，则阻塞保持后台服务
+    if tray.active and not tray.quitting:
+        tray.notify("Kestrel 仍在后台盯盘运行，点击托盘图标可重新打开。", "Kestrel")
+        try:
+            while not stop.is_set() and not tray.quitting:
+                stop.wait(3600)
+        except KeyboardInterrupt:
+            pass
 
-    with contextlib.suppress(Exception):
-        icon.notify("Kestrel is still running. Use the tray icon to reopen it.", "Kestrel")
-    stop.wait()
+    tray.stop()
+    quit_app()
 
 
 def _prefers_dark() -> bool:
+    """探测操作系统当前是否处于深色外观模式。"""
     try:
         import darkdetect
 
         return bool(darkdetect.isDark())
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
+
+
+__all__ = [
+    "BRAND",
+    "DEFAULT_HEIGHT",
+    "DEFAULT_WIDTH",
+    "MIN_WINDOW_SIZE",
+    "TrayController",
+    "run_desktop",
+    "tray_supported",
+]

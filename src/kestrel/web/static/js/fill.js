@@ -1,11 +1,4 @@
-/* 记一笔成交的弹窗。
- *
- * 台账页的「记一笔成交」和建议卡的「我已经买了」用的是同一个弹窗：
- * 建议卡只是先填好建议里的价格和数量，用户仍然可以改成真实成交。
- *
- * 市场、名称、手续费、止损/目标都由 /api/journal/fill/suggest 现算，
- * 用户什么都不用先知道。
- */
+/* 统一成交录入弹窗：买入建仓与卖出平仓共用，实时对比「实际 vs 计划」与账户影响（支持隐私打码联动）。 */
 (function () {
   'use strict';
 
@@ -13,7 +6,7 @@
   if (!dialog) return;
 
   var $ = function (id) { return document.getElementById(id); };
-  var I18N = window.I18N || {};
+  var i18n = function (k, d) { return (window.I18N && window.I18N[k]) || d || ''; };
 
   var codeEl = $('fd-code');
   var qtyEl = $('fd-qty');
@@ -29,21 +22,148 @@
   var feesHintEl = $('fd-fees-hint');
   var levelsEl = $('fd-levels');
   var levelsNoteEl = $('fd-levels-note');
+  var previewEl = $('fd-preview');
+  var buyExtrasEl = $('fd-buy-extras');
+  var sellExtrasEl = $('fd-sell-extras');
+  var exitReasonEl = $('fd-exit-reason');
+  var ruleBreakEl = $('fd-rule-break');
 
-  var state = { market: '', feesTouched: false, timer: null, preset: null };
+  var state = { market: '', code: '', feesTouched: false, timer: null, previewTimer: null, preset: null };
+
+  function syncSideUi() {
+    var isSell = sideEl.value === 'sell';
+    if (buyExtrasEl) buyExtrasEl.classList.toggle('hidden', isSell);
+    if (sellExtrasEl) sellExtrasEl.classList.toggle('hidden', !isSell);
+    if (isSell && levelsEl) {
+      levelsEl.classList.add('hidden');
+      if (levelsNoteEl) levelsNoteEl.textContent = '';
+    }
+  }
 
   function levelsLocked() {
     return !!(stopEl.value || targetEl.value);
   }
 
+  function renderPreview(res) {
+    if (!previewEl) return;
+    if (!res || !res.ok || (!res.summary && (!res.warnings || !res.warnings.length) && !res.qty_error)) {
+      previewEl.classList.add('hidden');
+      previewEl.textContent = '';
+      return;
+    }
+    previewEl.textContent = '';
+    var hasWarn = !res.qty_valid && res.qty_error || (res.warnings && res.warnings.length > 0);
+    previewEl.className = 'preview-box' + (hasWarn ? ' warn' : '');
+
+    if (res.summary) {
+      var sumLine = document.createElement('div');
+      sumLine.style.fontWeight = '600';
+      sumLine.textContent = res.summary;
+      previewEl.appendChild(sumLine);
+    }
+
+    var grid = document.createElement('div');
+    grid.className = 'preview-grid';
+    function addCell(label, value, privType) {
+      var cell = document.createElement('div');
+      var k = document.createElement('div');
+      k.className = 'tiny muted';
+      k.textContent = label;
+      var v = document.createElement('div');
+      v.className = 'mono';
+      v.style.fontWeight = '600';
+      if (privType) v.setAttribute('data-priv', privType);
+      v.textContent = value;
+      cell.appendChild(k);
+      cell.appendChild(v);
+      grid.appendChild(cell);
+    }
+
+    var isEn = document.documentElement.lang.indexOf('en') === 0;
+    if (res.breakeven !== null && res.breakeven !== undefined && sideEl.value === 'buy') {
+      addCell(isEn ? 'Break-even' : '含费保本价', String(res.breakeven));
+    }
+    if (res.actual_risk !== undefined) {
+      addCell(
+        isEn ? 'Actual risk' : '实际风险金',
+        Number(res.actual_risk).toFixed(1) + ' ' + (res.currency || ''),
+        'money'
+      );
+    }
+    if (res.actual_r !== undefined) {
+      addCell(isEn ? 'Actual R:R' : '实际盈亏比', res.actual_r + ':1');
+    }
+    if (res.plan && res.plan.deviation_pct !== null) {
+      addCell(
+        isEn ? 'Price drift' : '相对建议偏离',
+        (res.plan.deviation_pct >= 0 ? '+' : '') + res.plan.deviation_pct + '%' +
+        (res.plan.deviation_r !== null ? ' (' + (res.plan.deviation_r >= 0 ? '+' : '') + res.plan.deviation_r + 'R)' : '')
+      );
+    }
+    if (res.cash_after_cny !== undefined) {
+      addCell(
+        isEn ? 'Cash after' : '成交后可用现金',
+        '¥' + Number(res.cash_after_cny).toLocaleString(undefined, { maximumFractionDigits: 0 }),
+        'money'
+      );
+    }
+    if (grid.children.length) previewEl.appendChild(grid);
+
+    if (!res.qty_valid && res.qty_error) {
+      var errEl = document.createElement('div');
+      errEl.className = 'tiny up';
+      errEl.style.marginTop = '6px';
+      errEl.textContent = res.qty_error;
+      previewEl.appendChild(errEl);
+    }
+    (res.warnings || []).forEach(function (w) {
+      var wEl = document.createElement('div');
+      wEl.className = 'tiny';
+      wEl.style.marginTop = '4px';
+      wEl.textContent = '• ' + w;
+      previewEl.appendChild(wEl);
+    });
+    if (window.KestrelAnnotate) window.KestrelAnnotate(previewEl);
+  }
+
+  function runPreview() {
+    var code = state.code || (codeEl.value || '').trim();
+    var price = priceEl.value;
+    var qty = qtyEl.value;
+    if (!code || !price || !qty) {
+      if (previewEl) previewEl.classList.add('hidden');
+      return;
+    }
+    fetch('/api/journal/fill/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        market: state.market || (state.preset && state.preset.market) || '',
+        code: code,
+        side: sideEl.value,
+        qty: qty,
+        price: price,
+        fees: feesEl.value !== '' ? feesEl.value : null,
+        stop: stopEl.value || null,
+        target: targetEl.value || null,
+        rec_id: state.preset && state.preset.recId ? state.preset.recId : null,
+        trade_id: state.preset && state.preset.tradeId ? state.preset.tradeId : null
+      })
+    })
+      .then(function (r) { return r.json(); })
+      .then(renderPreview)
+      .catch(function () {});
+  }
+
   function suggest() {
     var code = (codeEl.value || '').trim();
     if (!code) {
-      resolvedEl.textContent = I18N.codeHelp || '';
+      resolvedEl.textContent = i18n('codeHelp');
       return;
     }
     var params = new URLSearchParams({
       code: code,
+      market: (state.preset && state.preset.market) || '',
       price: priceEl.value || '',
       qty: qtyEl.value || '',
       side: sideEl.value || 'buy'
@@ -53,54 +173,64 @@
       .then(function (res) {
         if (!res.ok) return;
         state.market = res.market || '';
+        state.code = res.code || '';
         if (!res.market) {
-          // 名称在库里查不到：不猜市场，直接告诉用户去加自选或换成代码。
-          resolvedEl.textContent = I18N.unknownSymbol || '';
+          resolvedEl.textContent = i18n('unknownSymbol');
           return;
         }
-        resolvedEl.textContent = res.known
+        var isPrivate = document.documentElement.getAttribute('data-privacy') === 'on';
+        var heldText = isPrivate ? '••••' : String(res.held_qty);
+        var heldInfo = (sideEl.value === 'sell' && res.held_qty > 0)
+          ? ' · ' + (document.documentElement.lang.indexOf('en') === 0 ? 'Held ' : '当前持仓 ') + heldText
+          : '';
+        resolvedEl.textContent = (res.known
           ? res.market + ' · ' + res.code + ' · ' + res.name
-          : res.market + ' · ' + res.code + ' · ' + (I18N.notCached || '');
+          : res.market + ' · ' + res.code + ' · ' + i18n('notCached')) + heldInfo;
 
-        if (res.fees !== null && res.fees !== undefined && !state.feesTouched) {
-          feesEl.value = Number(res.fees).toFixed(2);
+        if (res.fees !== null && res.fees !== undefined) {
+          feesEl.placeholder = Number(res.fees).toFixed(2);
+          if (!state.feesTouched) feesEl.value = '';
         }
         feesHintEl.textContent = res.broker
-          ? (I18N.feesByBroker || '{broker}').replace('{broker}', res.broker)
+          ? i18n('feesByBroker', '{broker}').replace('{broker}', res.broker)
           : '';
 
-        var lv = res.levels || {};
-        if (lv.ok) {
-          if (!levelsLocked() && sideEl.value === 'buy') {
-            stopEl.value = Number(lv.stop).toFixed(3);
-            targetEl.value = Number(lv.target).toFixed(3);
+        if (sideEl.value === 'buy') {
+          var lv = res.levels || {};
+          if (lv.ok) {
+            if (!levelsLocked()) {
+              stopEl.value = Number(lv.stop).toFixed(3);
+              targetEl.value = Number(lv.target).toFixed(3);
+            }
+            levelsEl.className = 'notice';
+            levelsEl.textContent = lv.basis + ' (' + lv.atr_pct + '% / ' + lv.risk_pct + '%)';
+            levelsNoteEl.textContent = i18n('levelsNote');
+          } else if (stopEl.value && targetEl.value) {
+            levelsEl.className = 'notice hidden';
+            levelsNoteEl.textContent = '';
+          } else {
+            levelsEl.className = 'notice warn';
+            levelsEl.textContent = lv.reason || i18n('levelsUnavailable');
+            levelsNoteEl.textContent = i18n('levelsOptional');
           }
-          levelsEl.className = 'notice';
-          levelsEl.textContent = lv.basis +
-            '（' + lv.atr_pct + '% / ' + lv.risk_pct + '%）';
-          levelsNoteEl.textContent = I18N.levelsNote || '';
-        } else if (stopEl.value && targetEl.value) {
-          // 从建议卡进来时止损/目标已经填好了，这时再警告「算不出建议止损」
-          // 只会制造噪音——用户已经有一个计划了。
-          levelsEl.className = 'notice hidden';
-          levelsNoteEl.textContent = '';
-        } else {
-          levelsEl.className = 'notice warn';
-          levelsEl.textContent = lv.reason || I18N.levelsUnavailable || '';
-          levelsNoteEl.textContent = I18N.levelsOptional || '';
+          if (!levelsEl.classList.contains('hidden')) levelsEl.classList.remove('hidden');
         }
-        if (!levelsEl.classList.contains('hidden')) levelsEl.classList.remove('hidden');
+        runPreview();
       })
-      .catch(function () { /* 建议失败不影响记账 */ });
+      .catch(function () {});
   }
 
   function debounced() {
     clearTimeout(state.timer);
-    state.timer = setTimeout(suggest, 350);
+    state.timer = setTimeout(suggest, 320);
+    clearTimeout(state.previewTimer);
+    state.previewTimer = setTimeout(runPreview, 360);
   }
 
   function open(preset) {
     state.preset = preset || null;
+    state.market = (preset && preset.market) || '';
+    state.code = (preset && preset.code) || '';
     state.feesTouched = false;
     msgEl.textContent = '';
     dateEl.value = new Date().toISOString().slice(0, 10);
@@ -108,36 +238,75 @@
     qtyEl.value = '';
     priceEl.value = '';
     feesEl.value = '';
+    feesEl.placeholder = 'Auto';
     stopEl.value = '';
     targetEl.value = '';
     noteEl.value = '';
+    if (ruleBreakEl) ruleBreakEl.checked = false;
+    if (exitReasonEl) exitReasonEl.value = (preset && preset.exitReason) || 'take_profit';
+    if (previewEl) previewEl.classList.add('hidden');
     sideEl.value = (preset && preset.side) || 'buy';
 
     if (preset) {
-      codeEl.value = preset.code || '';
+      codeEl.value = preset.market && preset.code ? (preset.market + '/' + preset.code) : (preset.code || '');
       qtyEl.value = preset.qty || '';
       priceEl.value = preset.price || '';
-      // 建议里的止损/目标已经是这一笔的计划，先填上，允许改。
       stopEl.value = preset.stop || '';
       targetEl.value = preset.target || '';
       if (preset.note) noteEl.value = preset.note;
     }
 
+    syncSideUi();
     if (typeof dialog.showModal === 'function') dialog.showModal();
     else dialog.setAttribute('open', '');
-    codeEl.focus();
+    (sideEl.value === 'sell' && priceEl.value ? priceEl : codeEl).focus();
+    if (window.KestrelAnnotate) window.KestrelAnnotate(dialog);
     if (preset && preset.code) suggest();
   }
 
   window.openFillDialog = open;
 
+  var topBtn = document.getElementById('top-fill-btn');
+  if (topBtn) topBtn.addEventListener('click', function () { open(null); });
+
+  var pageFillBtn = document.getElementById('fill-btn');
+  if (pageFillBtn) pageFillBtn.addEventListener('click', function () { open(null); });
+
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('[data-open-fill]');
+    if (!btn) return;
+    e.preventDefault();
+    open({
+      side: btn.getAttribute('data-side') || 'buy',
+      market: btn.getAttribute('data-market') || '',
+      code: btn.getAttribute('data-code') || '',
+      qty: btn.getAttribute('data-qty') || '',
+      price: btn.getAttribute('data-price') || '',
+      stop: btn.getAttribute('data-stop') || '',
+      target: btn.getAttribute('data-target') || '',
+      recId: btn.getAttribute('data-rec-id') || '',
+      tradeId: btn.getAttribute('data-trade-id') || '',
+      exitReason: btn.getAttribute('data-exit-reason') || '',
+      note: btn.getAttribute('data-note') || ''
+    });
+  });
+
   ['input', 'change'].forEach(function (evt) {
     codeEl.addEventListener(evt, debounced);
     qtyEl.addEventListener(evt, debounced);
     priceEl.addEventListener(evt, debounced);
+    stopEl.addEventListener(evt, function () { clearTimeout(state.previewTimer); state.previewTimer = setTimeout(runPreview, 250); });
+    targetEl.addEventListener(evt, function () { clearTimeout(state.previewTimer); state.previewTimer = setTimeout(runPreview, 250); });
   });
-  sideEl.addEventListener('change', suggest);
-  feesEl.addEventListener('input', function () { state.feesTouched = true; });
+  sideEl.addEventListener('change', function () {
+    syncSideUi();
+    suggest();
+  });
+  feesEl.addEventListener('input', function () {
+    state.feesTouched = feesEl.value !== '';
+    clearTimeout(state.previewTimer);
+    state.previewTimer = setTimeout(runPreview, 250);
+  });
 
   $('fd-cancel').addEventListener('click', function () {
     if (typeof dialog.close === 'function') dialog.close();
@@ -146,25 +315,27 @@
 
   $('fd-save').addEventListener('click', function () {
     var payload = {
-      market: state.market || '',
+      market: state.market || (state.preset && state.preset.market) || '',
       code: (codeEl.value || '').trim(),
       side: sideEl.value,
       qty: qtyEl.value,
       price: priceEl.value,
-      fees: feesEl.value || 0,
+      fees: feesEl.value !== '' ? feesEl.value : null,
       filled_at: dateEl.value || null,
       stop: stopEl.value || null,
       target: targetEl.value || null,
-      note: noteEl.value
+      note: noteEl.value,
+      exit_reason: sideEl.value === 'sell' && exitReasonEl ? exitReasonEl.value : '',
+      rule_break: sideEl.value === 'sell' && ruleBreakEl ? ruleBreakEl.checked : false
     };
-    // 从建议卡进来的成交要挂回那条建议：否则建议仍显示「待处理」，
-    // 执行质量页也统计不到这一笔。
-    if (state.preset && state.preset.recId) payload.rec_id = state.preset.recId;
+    if (state.preset && state.preset.recId) payload.rec_id = Number(state.preset.recId);
+    if (state.preset && state.preset.tradeId) payload.trade_id = Number(state.preset.tradeId);
+
     if (!payload.code || !payload.qty || !payload.price) {
-      msgEl.textContent = I18N.requireFill || '';
+      msgEl.textContent = i18n('requireFill');
       return;
     }
-    msgEl.textContent = I18N.saving || '';
+    msgEl.textContent = i18n('saving');
     fetch('/api/journal/fill', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -173,11 +344,11 @@
       .then(function (r) { return r.json(); })
       .then(function (res) {
         if (!res.ok) {
-          msgEl.textContent = res.error || I18N.saveFailedPlain || '';
+          msgEl.textContent = res.error || i18n('saveFailedPlain');
           return;
         }
         var done = state.preset && state.preset.onSaved;
-        if (typeof done === 'function') { done(); return; }
+        if (typeof done === 'function') { done(res); return; }
         location.reload();
       })
       .catch(function (e) { msgEl.textContent = String(e); });

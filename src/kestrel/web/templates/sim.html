@@ -1,48 +1,112 @@
 {% extends "base.html" %}
+{% from "_page_icons.html" import icon, empty_art, page_ui %}
 {% block title %}{{ t('sim.title') }} · {{ t('app.name') }}{% endblock %}
 
 {% block content %}
+{{ page_ui() }}
 <div class="page-head">
   <div>
     <h1>{{ t('sim.title') }}</h1>
     <div class="sub">{{ t('sim.sub') }}</div>
   </div>
   <div class="page-actions">
-    <button class="btn ghost" id="recheck">{{ t('sim.recheck') }}</button>
+    <span class="badge ok-badge">
+      {{ icon('shield-check', 13) }}
+      <span>{{ t('sim.next_open_badge') }}</span>
+    </span>
+    <button class="btn ghost" id="recheck">
+      {{ icon('refresh', 15) }}
+      <span class="label">{{ t('sim.recheck') }}</span>
+    </button>
   </div>
 </div>
 
-<div class="notice">{{ t("sim.what") }}</div>
+{% set rule_list = report.rules if (report and report.rules) else [] %}
+{% set ns = namespace(edge_cnt=0, en_cnt=0) %}
+{% for r in rule_list %}
+  {% if r.last_verdict == '有优势' %}{% set ns.edge_cnt = ns.edge_cnt + 1 %}{% endif %}
+  {% if r.enabled %}{% set ns.en_cnt = ns.en_cnt + 1 %}{% endif %}
+{% endfor %}
+
+<section class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('sim.stat_total_rules') }}</span>
+      <span class="kp-icon-badge">{{ icon('layers', 16) }}</span>
+    </div>
+    <div class="stat-value">{{ rule_list | length }}</div>
+    <div class="stat-sub"><a href="/rules">{{ t('sim.page_rules') }} →</a></div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('sim.stat_verified_edge') }}</span>
+      <span class="kp-icon-badge tone-down">{{ icon('shield-check', 16) }}</span>
+    </div>
+    <div class="stat-value">{{ ns.edge_cnt }}</div>
+    <div class="stat-sub"><span>{{ t('sim.v_ok') }}</span></div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('sim.stat_enabled') }}</span>
+      <span class="kp-icon-badge">{{ icon('radar', 16) }}</span>
+    </div>
+    <div class="stat-value">{{ ns.en_cnt }}</div>
+    <div class="stat-sub"><span>{{ t('sim.stat_recent_runs') }} {{ runs | length }}</span></div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('cal.total_equity') }}</span>
+      <span class="kp-icon-badge tone-neutral">{{ icon('wallet', 16) }}</span>
+    </div>
+    <div class="stat-value" data-priv="money">¥{{ portfolio_bar.total_equity_cny | num(0) }}</div>
+    <div class="stat-sub"><span>1R = {{ t('settings.risk') }}</span></div>
+  </div>
+</section>
+
+<div class="notice">
+  <span class="kp-title-row">{{ icon('info', 15) }} <span>{{ t('sim.what') }}</span></span>
+</div>
 
 <div id="edge-note" class="notice warn hidden"></div>
 
 {% if engine.is_ai %}
 <div class="notice warn">
-  <strong>提醒：当前建议由 {{ engine.label }} 产生，这个页面不参与选股。</strong>
-  这里的作用是检验规则到底有没有用——AI 模式下的建议不受这些规则约束，
-  但它们的实测结果会作为参考资料交给 AI。想看 AI 的判断，去
-  <a href="/advice">{{ t('nav.advice') }}</a>。
+  <span class="kp-title-row">
+    {{ icon('cpu', 15) }}
+    <strong>{{ t('sim.ai_notice_title', engine=engine.label) }}</strong>
+  </span>
+  {{ t('sim.ai_notice_body') }}
+  <a href="/advice">{{ t('nav.advice') }}</a>.
 </div>
 {% endif %}
 
 {% if report and report.rules %}
-<div id="edge-report">
-  <div class="kpi" style="grid-template-columns: repeat(4, minmax(0,1fr));">
-    {% for r in report.rules[:8] %}
-    <div class="k">
-      <div class="v" style="font-size:15px;">
-        {{ r.name }}
-        {% if r.last_verdict == '有优势' %}<span class="badge ok-badge" style="font-size:11px;">{{ t('sim.rule_advantage') }}</span>
-        {% elif r.last_verdict == '无优势' %}<span class="badge avoid" style="font-size:11px;">{{ t('sim.rule_none') }}</span>
-        {% elif r.last_verdict %}<span class="badge wait" style="font-size:11px;">{{ r.last_verdict }}</span>
-        {% else %}<span class="badge wait" style="font-size:11px;">{{ t('sim.rule_unproven') }}</span>{% endif %}
+<div id="edge-report" style="margin-bottom:16px;">
+  <div class="grid g3">
+    {% for r in report.rules[:9] %}
+    <div class="stat-card">
+      <div class="kp-stat-top" style="margin-bottom:4px;">
+        <strong style="font-size:14.5px;color:var(--ink);">{{ r.name }}</strong>
+        {% if r.last_verdict == '有优势' %}<span class="badge ok-badge">{{ t('sim.rule_advantage') }}</span>
+        {% elif r.last_verdict == '无优势' %}<span class="badge avoid">{{ t('sim.rule_none') }}</span>
+        {% elif r.last_verdict == '不稳定' %}<span class="badge warn-badge">{{ t('rules.verdict_unstable') }}</span>
+        {% elif r.last_verdict %}<span class="badge wait">{{ r.last_verdict }}</span>
+        {% else %}<span class="badge wait">{{ t('sim.rule_unproven') }}</span>{% endif %}
       </div>
-      <div class="l" style="margin-top:8px;font-size:12.5px;line-height:1.7;">
+      <div class="tiny" style="line-height:1.75;color:var(--ink-2);">
         {% if r.validation and r.validation.folds %}
           {% set f = r.validation.folds[-1] %}
           <div>{{ t('sim.last_fold') }}<b class="mono">{{ f.n }}</b> {{ t('sim.trades_win') }} <b class="mono">{{ '%.0f'|format(f.win) }}%</b></div>
-          <div>{{ t('sim.per_trade') }} <b class="mono {{ 'up' if f.exp > 0 else 'down' }}">{{ '%+.2f'|format(f.exp) }}R</b>
-               {{ t('sim.excess') }} <b class="mono {{ 'up' if f.edge > 0 else 'down' }}">{{ '%+.2f'|format(f.edge) }}</b></div>
+          <div>
+            {{ t('sim.per_trade') }} <b class="mono {{ 'up' if f.exp > 0 else 'down' }}">{{ '%+.2f'|format(f.exp) }}R</b>
+            · {{ t('sim.excess') }} <b class="mono {{ 'up' if f.edge > 0 else 'down' }}">{{ '%+.2f'|format(f.edge) }}</b>
+            {% if r.validation.p_value is defined and r.validation.p_value is not none %}
+            · <span class="mono">p={{ '%.3f'|format(r.validation.p_value) }}</span>
+            {% endif %}
+          </div>
         {% else %}
           <div class="muted">{{ t('sim.no_validation') }}</div>
         {% endif %}
@@ -51,27 +115,28 @@
     {% endfor %}
   </div>
 
-  <p class="hint" style="margin:6px 0 14px;">
+  <p class="hint" style="margin:10px 0 0;">
     {{ t('sim.full_data') }} <a href="/rules">{{ t('sim.page_rules') }}</a> {{ t('sim.page_suffix') }}
   </p>
 </div>
 {% else %}
-<div class="card">
+<section class="card">
   <div class="empty">
+    {{ empty_art('flask') }}
     <strong>{{ t('sim.none_title') }}</strong>
-    {{ t('sim.none') }}
+    <p>{{ t('sim.none') }}</p>
   </div>
-</div>
+</section>
 {% endif %}
 
 <section class="card">
   <div class="card-head">
-    <h2>{{ t('sim.single') }}</h2>
+    <h2 class="kp-title-row">{{ icon('flask', 17) }} <span>{{ t('sim.single') }}</span></h2>
     <span class="meta">{{ t('sim.single_meta') }}</span>
   </div>
   <div class="card-body">
     <form method="post" action="/sim">
-      <div class="grid g4">
+      <div class="grid g3">
         <div class="field">
           <label>{{ t('sim.symbol') }}</label>
           <input name="symbol" list="sim-symbols" autocomplete="off"
@@ -81,9 +146,7 @@
             <option value="{{ s.market }}/{{ s.code }}">{{ s.name }}</option>
             {% endfor %}
           </datalist>
-          <small class="muted" style="font-size:11.5px;">
-            {{ t('sim.symbol_hint') }}
-          </small>
+          <span class="help">{{ t('sim.symbol_hint') }}</span>
         </div>
         <div class="field">
           <label>{{ t('sim.strategy') }}</label>
@@ -102,69 +165,217 @@
             </option>
             {% endfor %}
           </select>
-          <small class="muted" style="font-size:11.5px;">{{ t('sim.horizon_hint') }}</small>
+          <span class="help">{{ t('sim.horizon_hint') }}</span>
         </div>
-        <div class="field" style="justify-content:flex-end;">
-          <button class="btn block">{{ t('sim.run') }}</button>
+      </div>
+
+      <div class="grid g3" style="margin-top:12px;">
+        <div class="field">
+          <label>{{ t('sim.fee_bps') }}</label>
+          <input name="fee_bps" type="number" step="1" min="0" max="500"
+                 value="{{ (form.fee_bps | num) if form.fee_bps is defined else 20 }}">
+          <span class="help">{{ t('sim.fee_bps_hint') }}</span>
+        </div>
+        <div class="field">
+          <label>{{ t('sim.slippage_bps') }}</label>
+          <input name="slippage_bps" type="number" step="1" min="0" max="500"
+                 value="{{ (form.slippage_bps | num) if form.slippage_bps is defined else 10 }}">
+          <span class="help">{{ t('sim.slippage_bps_hint') }}</span>
+        </div>
+        <div class="field" style="justify-content:flex-start;">
+          <label>&nbsp;</label>
+          <button class="btn block" type="submit">
+            {{ icon('flask', 15) }}
+            <span>{{ t('sim.run') }}</span>
+          </button>
         </div>
       </div>
     </form>
 
     {% if error %}
-    <div class="notice err" style="margin-top:14px;">{{ error }}</div>
+    <div class="notice err" style="margin-top:14px;">{{ icon('alert', 14) }} {{ error }}</div>
     {% endif %}
 
     {% if result %}
     <div class="divider"></div>
     {% set st = result.stats %}
-    <p class="hint" style="margin:0 0 8px;">
-      {{ t('sim.horizon') }}：<b>{{ horizon_labels.get(result.timeframe or 'short') }}</b>
-      {% if result.note %} · {{ result.note }}{% endif %}
-    </p>
+    {% set perm = permutation if permutation is defined and permutation else result.permutation %}
+    {% set plat = plateau if plateau is defined and plateau else result.plateau %}
+    {% set pf_val = profit_factor if (profit_factor is defined and profit_factor is not none) else st.get('profit_factor') %}
+    {% set sharpe_val = bar_sharpe if (bar_sharpe is defined and bar_sharpe is not none) else st.get('bar_sharpe') %}
+
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+      <span class="hint">
+        {{ t('sim.horizon') }}：<b>{{ horizon_labels.get(result.timeframe or 'short') }}</b>
+        {% if result.note %} · {{ result.note }}{% endif %}
+      </span>
+      {% if st.determinism_hash %}
+      <span class="tiny muted mono">{{ t('sim.det_hash') }}: #{{ st.determinism_hash[:10] }}</span>
+      {% endif %}
+    </div>
+
+    {% if result.pending_signal %}
+    <div class="notice warn">
+      {{ icon('clock', 14) }}
+      {{ t('sim.pending_signal', date=result.pending_signal.signal_date, stop=result.pending_signal.stop_ref) }}
+    </div>
+    {% endif %}
+
     {% if st.count %}
-    <p style="font-size:14px;line-height:1.8;">
+    <p style="font-size:14px;line-height:1.8;margin-bottom:12px;">
       {{ t('sim.result_intro', n=st.count, win=(st.win_rate * 100) | round | int,
            total=(st.total_r | round(1)), avg=(st.avg_r | round(2))) }}
     </p>
-    <div class="kpi" style="margin-top:14px;">
-      <div class="k"><div class="v mono">{{ st.count }}</div><div class="l">{{ t('sim.trades') }}</div></div>
-      <div class="k"><div class="v mono">{{ '%.0f'|format(st.win_rate * 100) }}%</div><div class="l">{{ t('sim.winrate') }}</div></div>
-      <div class="k"><div class="v mono {{ 'up' if st.total_r >= 0 else 'down' }}">{{ '%+.1f'|format(st.total_r) }}R</div><div class="l">{{ t('sim.total_r') }}</div></div>
-      <div class="k"><div class="v mono {{ 'up' if st.avg_r >= 0 else 'down' }}">{{ '%+.2f'|format(st.avg_r) }}R</div><div class="l">{{ t('sim.expectancy') }}</div></div>
+    <div class="kp-price-strip" style="margin-bottom:16px;">
+      <div>
+        <span class="k">{{ t('sim.trades') }}</span>
+        <span class="v mono">{{ st.count }}</span>
+      </div>
+      <div>
+        <span class="k">{{ t('sim.winrate') }}</span>
+        <span class="v mono">{{ '%.0f'|format(st.win_rate * 100) }}%</span>
+      </div>
+      <div>
+        <span class="k">{{ t('sim.total_r') }}</span>
+        <span class="v mono {{ 'up' if st.total_r >= 0 else 'down' }}">{{ '%+.1f'|format(st.total_r) }}R</span>
+      </div>
+      <div>
+        <span class="k">{{ t('sim.expectancy') }}</span>
+        <span class="v mono {{ 'up' if st.avg_r >= 0 else 'down' }}">{{ '%+.2f'|format(st.avg_r) }}R</span>
+      </div>
+      {% if pf_val is not none %}
+      <div>
+        <span class="k">{{ t('sim.pf_short') }}</span>
+        <span class="v mono">{{ '%.2f'|format(pf_val) }}</span>
+      </div>
+      {% endif %}
+      {% if sharpe_val is not none %}
+      <div>
+        <span class="k">{{ t('sim.bar_sharpe') }}</span>
+        <span class="v mono {{ 'up' if sharpe_val >= 0 else 'down' }}">{{ '%+.2f'|format(sharpe_val) }}</span>
+      </div>
+      {% endif %}
     </div>
+
+    {# 量化证伪双翼：置换检验 + 3x3 参数高原热力图 #}
+    {% if perm or plat %}
+    <div class="grid g2">
+      {% if perm %}
+      <div class="card" style="margin-bottom:0;">
+        <div class="card-head">
+          <h2 class="kp-title-row">{{ icon('shield-check', 16) }} <span>{{ t('sim.perm_title') }}</span></h2>
+          <span class="badge {{ 'ok-badge' if perm.significant else 'warn-badge' }}">
+            {{ perm.verdict_en if locale.startswith('en') else perm.verdict_zh }}
+          </span>
+        </div>
+        <div class="card-body">
+          <div class="kp-price-strip" style="margin-bottom:12px;">
+            <div>
+              <span class="k">{{ t('sim.perm_pvalue') }}</span>
+              <span class="v mono {{ 'down' if perm.significant else 'up' }}">p = {{ '%.3f'|format(perm.p_value) }}</span>
+            </div>
+            <div>
+              <span class="k">{{ t('sim.perm_observed') }}</span>
+              <span class="v mono {{ 'up' if perm.observed >= 0 else 'down' }}">{{ '%+.2f'|format(perm.observed) }}R</span>
+            </div>
+            <div>
+              <span class="k">{{ t('sim.perm_null95') }}</span>
+              <span class="v mono">{{ '%+.2f'|format(perm.null_p95) }}R</span>
+            </div>
+          </div>
+          <p class="tiny muted" style="line-height:1.7;">
+            {{ t('sim.perm_sub') }} · {{ t('sim.perm_desc') }}
+          </p>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if plat and plat.grid %}
+      <div class="card" style="margin-bottom:0;">
+        <div class="card-head">
+          <h2 class="kp-title-row">{{ icon('layers', 16) }} <span>{{ t('sim.plateau_title') }}</span></h2>
+          <span class="badge {{ 'ok-badge' if plat.shape == 'plateau' else ('warn-badge' if plat.shape == 'spike' else 'avoid') }}">
+            {{ plat.label_en if locale.startswith('en') else plat.label_zh }}
+            ({{ plat.positive_cells }}/9)
+          </span>
+        </div>
+        <div class="card-body">
+          <div class="kp-heatmap" role="table" aria-label="{{ t('sim.plateau_title') }}">
+            <div class="kp-hm-axis"></div>
+            {% for atr_m in plat.atr_steps %}
+            <div class="kp-hm-axis mono">{{ t('sim.plateau_axis_atr', m=atr_m) }}</div>
+            {% endfor %}
+
+            {% for row in plat.grid %}
+            {% set h_val = plat.hold_steps[loop.index0] if plat.hold_steps else row[0].max_hold %}
+            <div class="kp-hm-axis mono">{{ t('sim.plateau_axis_hold', n=h_val) }}</div>
+            {% for cell in row %}
+            {% set tone = ('pos-strong' if cell.avg_r >= 0.2 else 'pos-mild') if cell.positive else 'neg-cell' %}
+            <div class="kp-hm-cell {{ tone }} {{ 'is-center' if cell.is_center else '' }}">
+              <span class="kp-hm-r {{ 'up' if cell.avg_r >= 0 else 'down' }}">{{ '%+.2f'|format(cell.avg_r) }}R</span>
+              <span class="kp-hm-meta">{{ cell.trades }} · {{ '%.0f'|format((cell.win_rate or 0) * 100) }}%</span>
+            </div>
+            {% endfor %}
+            {% endfor %}
+          </div>
+          <p class="tiny muted" style="margin-top:10px;line-height:1.65;">{{ t('sim.plateau_desc') }}</p>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
     {% else %}
-    <p class="empty">{{ t('sim.no_trades') }}</p>
+    <div class="empty">
+      {{ empty_art('search') }}
+      <p>{{ t('sim.no_trades') }}</p>
+    </div>
     {% endif %}
     {% endif %}
   </div>
 </section>
 
 <section class="card">
-  <div class="card-head"><h2>{{ t('sim.history') }}</h2></div>
+  <div class="card-head">
+    <h2 class="kp-title-row">{{ icon('clock', 17) }} <span>{{ t('sim.history') }}</span></h2>
+    <span class="meta">{{ runs | length }}</span>
+  </div>
   {% if runs %}
   <div class="card-body tight">
-    <table class="grid">
-      <thead><tr><th>{{ t('sim.col_date') }}</th><th>{{ t('sim.symbol') }}</th><th>{{ t('sim.strategy') }}</th>
-        <th>{{ t('sim.horizon') }}</th>
-        <th class="num">{{ t('sim.trades') }}</th><th class="num">{{ t('sim.winrate') }}</th>
-        <th class="num">{{ t('sim.expectancy') }}</th></tr></thead>
-      <tbody>
-        {% for r in runs %}
-        <tr>
-          <td class="mono muted">{{ r.created_at[:16] }}</td>
-          <td>{{ r.market }} {{ r.code }}</td>
-          <td>{{ t('strategy.' + r.strategy) }}</td>
-          <td class="tiny muted">{{ horizon_labels.get(r.timeframe or 'short', r.timeframe or 'short') }}</td>
-          <td class="num mono">{{ r.trades }}</td>
-          <td class="num mono">{{ '%.0f'|format(r.win_rate * 100) }}%</td>
-          <td class="num mono {{ 'up' if r.avg_r > 0 else 'down' }}">{{ '%+.2f'|format(r.avg_r) }}R</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="table-wrapper" tabindex="0" role="region" aria-label="{{ t('sim.history') }}">
+      <table class="grid">
+        <thead>
+          <tr>
+            <th>{{ t('sim.col_date') }}</th>
+            <th>{{ t('sim.symbol') }}</th>
+            <th>{{ t('sim.strategy') }}</th>
+            <th>{{ t('sim.horizon') }}</th>
+            <th class="num">{{ t('sim.trades') }}</th>
+            <th class="num">{{ t('sim.winrate') }}</th>
+            <th class="num">{{ t('sim.expectancy') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in runs %}
+          <tr>
+            <td class="mono muted tiny">{{ r.created_at[:16] }}</td>
+            <td><span class="tag tag-{{ r.market|lower }}">{{ r.market }}</span> <strong class="mono">{{ r.code }}</strong></td>
+            <td>{{ t('rule.' + r.strategy) if t('rule.' + r.strategy) != 'rule.' + r.strategy else r.strategy }}</td>
+            <td class="tiny muted">{{ horizon_labels.get(r.timeframe or 'short', r.timeframe or 'short') }}</td>
+            <td class="num mono">{{ r.trades }}</td>
+            <td class="num mono">{{ '%.0f'|format(r.win_rate * 100) }}%</td>
+            <td class="num mono {{ 'up' if r.avg_r > 0 else 'down' }}">{{ '%+.2f'|format(r.avg_r) }}R</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
   {% else %}
-  <div class="empty">{{ t('sim.empty') }}</div>
+  <div class="empty">
+    {{ empty_art('clock') }}
+    <p>{{ t('sim.empty') }}</p>
+  </div>
   {% endif %}
 </section>
 {% endblock %}
@@ -176,15 +387,13 @@
   var btn = document.getElementById('recheck');
   if (!btn) return;
   btn.addEventListener('click', function () {
-    var original = btn.textContent;
+    var originalHTML = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = '<span class="spin"></span><span class="label">{{ t('sim.calculating') }}</span>';
     fetch('/api/edge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       .then(function (r) { return r.json(); })
       .then(function (res) {
         if (!res.ok) { showAlert(res.error || window.I18N.failed); return; }
-        // "Nothing saved" has to be visible: reloading to an unchanged page
-        // looks like the button did nothing at all.
         if (res.note) {
           var note = document.getElementById('edge-note');
           if (note) {
@@ -196,7 +405,7 @@
         }
         location.reload();
       })
-      .finally(function () { btn.disabled = false; btn.textContent = original; });
+      .finally(function () { btn.disabled = false; btn.innerHTML = originalHTML; });
   });
 })();
 </script>

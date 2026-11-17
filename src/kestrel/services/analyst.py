@@ -1,19 +1,4 @@
-"""Let a model do the thinking, and keep the arithmetic local.
-
-The rule engine decides by comparing indicators to numbers. That is auditable but
-it cannot weigh a earnings date, a sector rotation or a chart shape it was not
-told about. This module hands a model the actual market snapshot and asks it to
-pick and argue — then enforces every number it returns.
-
-The division of labour is deliberate:
-
-* the model chooses *what* and *why*: which names, which action, the reasoning,
-  where the stop belongs and what would prove it wrong;
-* this module decides *how much*: position size comes from the risk budget, never
-  from the model, and any level that breaks the stop band is thrown out.
-
-Nothing the model writes reaches the database unchecked.
-"""
+"""AI 分析引擎（大模型 / WorkBuddy）：模型负责选股和论证，本地强控风控、仓位与 Tick。"""
 
 from __future__ import annotations
 
@@ -27,13 +12,16 @@ from typing import Any
 
 import httpx
 
-from kestrel.core.money import to_micro
+from kestrel.core.money import currency_for, from_cny, round_tick, to_cny, to_micro
+from kestrel.core.quantity import db_value, display, tradable_buy_qty
 from kestrel.db.engine import connect
 from kestrel.fees.calculator import round_trip
 from kestrel.indicators.engine import Series, compute
 from kestrel.planning.builder import valid_until
+from kestrel.receipts import tokens
 from kestrel.services import bars as bars_service
 from kestrel.services import config as config_service
+from kestrel.services import portfolio as portfolio_service
 from kestrel.services import rules as rule_service
 
 log = logging.getLogger(__name__)
@@ -47,11 +35,11 @@ SYSTEM = """你是一名谨慎的股票交易分析员。你只做多，不使�
 
 你的输出会被程序逐项校验，不合规的建议会被直接丢弃并记录原因。所以：
 - 只能从给定的候选列表里选，code 必须原样照抄
-- 止损必须在入场价下方 1.5% 到 15% 之间
+- 止损必须落在 brief.constraints 规定的止损带内（min_stop_pct ~ max_stop_pct）
 - 目标价至少是入场到止损距离的 1.5 倍
-- 不要给仓位建议，仓位由程序按风险预算计算
+- 不要给仓位建议，仓位与可用现金约束由程序本地强制计算
 
-判断依据要具体，引用你看到的数字（涨幅、RSI、距离均线、量比、位置），
+判断依据要具体，引用你看到的数字（涨幅、RSI、距离均线、量比、VCP 收敛度），
 不要写"看好后市"这种没有信息量的话。最多选 3 只，没有合适的就一只都不选。"""
 
 OUTPUT_SPEC = """只输出 JSON，不要 Markdown 代码块，结构如下：
@@ -95,34 +83,33 @@ class Pick:
     risks: list[str] = field(default_factory=list)
 
 
-# --------------------------------------------------------------------- brief
-
 def build_brief(markets: list[str], limit: int = 40, history: int | None = None) -> dict:
-    """A compact, honest snapshot: what the model is allowed to reason about.
-
-    The bar size comes from the same resolution the scanner uses. Showing the
-    model daily indicators while the scan trades weekly bars would make its
-    opinion about a different market than the one the user is acting in.
-    """
+    """组装供大模型推理的盘面简报（与当前启用市场、周期与动态账本严格同步）。"""
     from kestrel.services import advisor, timeframe
+
+    clean_markets = [str(m).upper() for m in (markets or ["CN", "HK", "US"]) if str(m).strip()]
+    if not clean_markets:
+        clean_markets = ["CN", "HK", "US"]
 
     conn = connect()
     try:
         settings = config_service.all_values(conn)
-        horizon_code, _advice = advisor.resolve(settings.get("trade.horizon"))
+        snap = portfolio_service.snapshot(conn=conn, include_quotes=False)
+        horizon_code, advice = advisor.resolve(settings.get("trade.horizon"))
         cfg = timeframe.get(horizon_code)
         history = history or cfg.lookback
+        marks = ",".join("?" * len(clean_markets))
         rows = conn.execute(
-            """
+            f"""
             SELECT s.id, s.market, s.code, s.name, s.sector, s.lot_size, s.pool_rank
             FROM symbol s
             LEFT JOIN watchlist w ON w.symbol_id = s.id
-            WHERE s.market IN ({})
+            WHERE s.market IN ({marks})
               AND (s.is_pool = 1 OR w.id IS NOT NULL)
             ORDER BY (w.id IS NULL), s.pool_rank
             LIMIT ?
-            """.format(",".join("?" * len(markets))),
-            (*markets, limit),
+            """,
+            (*clean_markets, limit),
         ).fetchall()
 
         candidates = []
@@ -154,7 +141,9 @@ def build_brief(markets: list[str], limit: int = 40, history: int | None = None)
                     "ret60": _round(ind.get("ret60")),
                     "rsi14": _round(ind.get("rsi14")),
                     "atr_pct": _round(ind.get("atr_pct")),
+                    "vcp_ratio": _round(ind.get("vcp_ratio")),
                     "vol_ratio": _round(ind.get("vol_ratio")),
+                    "vol_today_ratio": _round(ind.get("vol_today_ratio")),
                     "dist_sma20": _round(ind.get("dist_sma20")),
                     "dist_sma60": _round(ind.get("dist_sma60")),
                     "range_pos20": _round(ind.get("range_pos20")),
@@ -195,6 +184,8 @@ def build_brief(markets: list[str], limit: int = 40, history: int | None = None)
                 }
             )
 
+    capital_cny = float(snap["total_equity_cny"] or settings.get("account.capital") or 50000)
+
     return {
         "as_of": datetime.now(UTC).isoformat(timespec="seconds"),
         "horizon": {
@@ -204,15 +195,18 @@ def build_brief(markets: list[str], limit: int = 40, history: int | None = None)
             "max_hold_bars": cfg.max_hold,
             "note": (
                 f"价格与指标都基于 {cfg.bar} 线；计划应在 {cfg.max_hold} 根 {cfg.bar} 线内了结。"
-                if cfg.code != "short"
-                else "日线级别；通常持有几天到几周。"
+                if cfg.code not in ("short", "fast")
+                else f"日线级别（{cfg.zh}）；持有约 {cfg.max_hold} 个交易日。"
             ),
         },
+        "market_regimes": ((advice or {}).get("metrics") or {}).get("market_regimes") or {},
         "account": {
-            "capital_cny": settings.get("account.capital"),
+            "capital_cny": round(capital_cny, 2),
+            "available_cash_cny": round(float(snap["available_cash_cny"]), 2),
+            "invested_cost_cny": round(float(snap["invested_cost_cny"]), 2),
             "risk_per_trade_pct": settings.get("risk.per_trade_pct"),
+            "max_total_exposure_pct": settings.get("risk.max_total_exposure_pct", 60),
             "max_per_sector": settings.get("risk.max_per_sector"),
-            # 模型不该猜「能不能买碎股」：这是账户层面的硬约束。
             "brokers": {
                 market: settings.get(f"broker.{market}")
                 for market in ("CN", "HK", "US")
@@ -246,10 +240,8 @@ def render_prompt(brief: dict, locale: str = "zh-CN") -> str:
     )
 
 
-# ------------------------------------------------------------------- provider
-
 def budget_state(cfg: dict) -> tuple[bool, int]:
-    """今天的模型调用额度还剩多少。返回 (是否允许, 已用次数)。"""
+    """检查今日模型调用额度。返回 (是否允许, 已用次数)。"""
     limit = int(cfg.get("agent.daily_budget") or 0)
     if limit <= 0:
         return True, 0
@@ -258,7 +250,7 @@ def budget_state(cfg: dict) -> tuple[bool, int]:
     try:
         row = conn.execute(
             "SELECT COUNT(*) AS n FROM analyst_run"
-            " WHERE provider='llm' AND date(started_at)=? AND error IS NULL",
+            " WHERE provider IN ('llm', 'copilot') AND date(started_at)=? AND error IS NULL",
             (today,),
         ).fetchone()
         used = int(row["n"] or 0)
@@ -268,7 +260,7 @@ def budget_state(cfg: dict) -> tuple[bool, int]:
 
 
 async def ask_model(brief: dict, cfg: dict, timeout: float = 90.0) -> dict:
-    """Call an OpenAI-compatible endpoint and return parsed JSON."""
+    """调用 OpenAI 兼容接口并解析返回 JSON。"""
     base_url = str(cfg.get("agent.base_url") or "").rstrip("/")
     model = str(cfg.get("agent.model") or "")
     api_key = str(cfg.get("agent.api_key") or "")
@@ -298,7 +290,6 @@ async def ask_model(brief: dict, cfg: dict, timeout: float = 90.0) -> dict:
 
 
 def parse_reply(text: str) -> dict:
-    """Models like to wrap JSON in fences. Accept that, reject everything else."""
     cleaned = (text or "").strip()
     if cleaned.startswith("```"):
         cleaned = cleaned.split("```", 2)[1] if cleaned.count("```") >= 2 else cleaned
@@ -315,10 +306,8 @@ def parse_reply(text: str) -> dict:
         raise RuntimeError(f"模型返回的 JSON 解析失败：{exc}") from exc
 
 
-# ----------------------------------------------------------------- validation
-
 def validate_pick(raw: dict, brief: dict) -> tuple[Pick | None, str]:
-    """Enforce every constraint the model was told about. Returns (pick, reason)."""
+    """逐项核验大模型选股输出，不合规则直接丢弃并保留原因。"""
     allowed = {(c["market"], c["code"]): c for c in brief["candidates"]}
     market = str(raw.get("market") or "").upper().strip()
     code = str(raw.get("code") or "").strip()
@@ -339,8 +328,12 @@ def validate_pick(raw: dict, brief: dict) -> tuple[Pick | None, str]:
     except (KeyError, TypeError, ValueError):
         return None, "价格字段缺失或不是数字"
 
-    for name, value in (("entry_low", entry_low), ("entry_high", entry_high),
-                        ("stop", stop), ("target", target)):
+    for name, value in (
+        ("entry_low", entry_low),
+        ("entry_high", entry_high),
+        ("stop", stop),
+        ("target", target),
+    ):
         if not (0 < value < price * 5):
             return None, f"{name} 明显不合理（{value}）"
 
@@ -380,10 +373,10 @@ def validate_pick(raw: dict, brief: dict) -> tuple[Pick | None, str]:
             action=action,
             conviction=max(0, min(100, conviction)),
             thesis=thesis[:300],
-            entry_low=entry_low,
-            entry_high=entry_high,
-            stop=stop,
-            target=target,
+            entry_low=float(round_tick(entry_low, market, code)),
+            entry_high=float(round_tick(entry_high, market, code)),
+            stop=float(round_tick(stop, market, code)),
+            target=float(round_tick(target, market, code)),
             invalidation=str(raw.get("invalidation") or "")[:200],
             catalysts=[str(c)[:120] for c in (raw.get("catalysts") or [])][:4],
             risks=[str(c)[:120] for c in (raw.get("risks") or [])][:4],
@@ -393,58 +386,71 @@ def validate_pick(raw: dict, brief: dict) -> tuple[Pick | None, str]:
 
 
 def size_position(
-    pick: Pick, brief: dict, lot_size: int, broker: str | None = None
+    pick: Pick,
+    brief: dict,
+    lot_size: int,
+    broker: str | None = None,
+    available_cash_cny: float | None = None,
 ) -> tuple[Decimal, float, float]:
-    """Position size from the risk budget — the model never touches this.
+    """根据风控预算、券商碎股能力及可用现金算可买股数，绝不采用模型给出的数量。"""
+    acct = brief.get("account") or {}
+    capital = Decimal(str(acct.get("capital_cny") or 50000))
+    risk_pct = Decimal(str(acct.get("risk_per_trade_pct") or 2.0))
+    cur = currency_for(pick.market)
+    capital_local = from_cny(capital, cur)
 
-    和规则引擎共用 ``core.quantity.tradable_step``：券商能买碎股时，预算不够
-    一手也照样给出可执行的股数，而不是直接判「买不起」。
-    """
-    from kestrel.core.quantity import floor_step, tradable_step
-
-    capital = float(brief["account"]["capital_cny"])
-    risk_pct = float(brief["account"]["risk_per_trade_pct"])
-    fx = {"CNY": 1.0, "HKD": 0.92}.get(_currency(pick.market), 7.1)
-    capital_local = capital / fx
-
-    risk_budget = capital_local * risk_pct / 100
-    risk_per_share = pick.entry_low - pick.stop
+    entry_d = Decimal(str(pick.entry_low))
+    stop_d = Decimal(str(pick.stop))
+    risk_budget = capital_local * risk_pct / Decimal("100")
+    risk_per_share = entry_d - stop_d
     if risk_per_share <= 0:
         return Decimal("0"), 0.0, 0.0
 
-    lot = max(1, lot_size)
-    step = tradable_step(pick.market, lot, broker)
-    qty = floor_step(Decimal(str(risk_budget)) / Decimal(str(risk_per_share)), step)
-    cap_qty = floor_step(
-        Decimal(str(capital_local * 0.35 / pick.entry_low)), step
+    lot = max(1, int(lot_size or 1))
+    qty = tradable_buy_qty(
+        risk_budget / risk_per_share,
+        pick.market,
+        lot,
+        broker,
+        code=pick.code,
+        entry_price=entry_d,
+    )
+    cap_qty = tradable_buy_qty(
+        (capital_local * Decimal("0.35")) / entry_d,
+        pick.market,
+        lot,
+        broker,
+        code=pick.code,
+        entry_price=entry_d,
     )
     qty = min(qty, cap_qty)
+
+    if available_cash_cny is not None:
+        cash_local = from_cny(Decimal(str(max(0.0, available_cash_cny))), cur)
+        cash_qty = tradable_buy_qty(
+            (cash_local * Decimal("0.992")) / entry_d,
+            pick.market,
+            lot,
+            broker,
+            code=pick.code,
+            entry_price=entry_d,
+        )
+        qty = min(qty, cash_qty)
+
     if qty <= 0:
         return Decimal("0"), 0.0, 0.0
 
-    cost = Decimal(str(pick.entry_low)) * qty
-    fees = round_trip(pick.market, _dec(cost), _dec(qty), broker)
-    return qty, float(fees), float(Decimal(str(risk_per_share)) * qty)
+    cost = entry_d * qty
+    fees = round_trip(pick.market, cost, qty, broker)
+    return qty, float(fees), float(risk_per_share * qty)
 
-
-def _currency(market: str) -> str:
-    return {"CN": "CNY", "HK": "HKD"}.get(market.upper(), "USD")
-
-
-def _dec(value: float):
-    from decimal import Decimal
-
-    return Decimal(str(round(value, 4)))
-
-
-# ---------------------------------------------------------------------- run
 
 async def analyse(
     markets: list[str] | None = None,
     limit: int = 40,
     dry_reply: dict | None = None,
 ) -> dict:
-    """Ask the model, validate everything, size it, store it."""
+    """组装简报 -> 调用模型 -> 校验风控并核算仓位 -> 写入建议与回执 token。"""
     started = datetime.now(UTC)
     conn = connect()
     try:
@@ -460,8 +466,6 @@ async def analyse(
     provider = "dry" if dry_reply is not None else str(cfg.get("agent.provider") or "rules")
     model = str(cfg.get("agent.model") or "")
 
-    # 预算必须在调用模型之前检查。文档一直宣称「超了会明确报错，不会偷偷退回
-    # 规则引擎」，但代码里根本没读这个设置——那等于没有上限。
     if provider == "llm" and dry_reply is None:
         allowed, spent = budget_state(cfg)
         if not allowed:
@@ -476,8 +480,6 @@ async def analyse(
                 "budget": {"spent": spent, "limit": cfg.get("agent.daily_budget")},
             }
 
-    # WorkBuddy has no synchronous entry point, so the request is queued and the
-    # answer is collected later. Pretending otherwise would hang the page.
     if provider == "workbuddy" and dry_reply is None:
         from kestrel.services import bridge
 
@@ -505,12 +507,8 @@ async def analyse(
             "bridge": bridge.bridge_info(),
         }
 
-    raw_reply: dict
     try:
-        if dry_reply is not None:
-            raw_reply = dry_reply
-        else:
-            raw_reply = await ask_model(brief, cfg)
+        raw_reply = dry_reply if dry_reply is not None else await ask_model(brief, cfg)
     except Exception as exc:  # noqa: BLE001
         _record_run(provider, model, brief, 0, 0, [], str(exc), None, started)
         return {"ok": False, "error": str(exc)}
@@ -519,15 +517,25 @@ async def analyse(
 
 
 def _finish(brief: dict, raw_reply: dict, provider: str, model: str, started) -> dict:
-    """Validate, size and store. Shared by the HTTP path and the file bridge."""
+    """通用校验、仓位与敞口核验、入库。"""
     accepted: list[dict] = []
     rejected: list[dict] = []
     seen_sector: dict[str, int] = {}
-    max_sector = int(brief["account"].get("max_per_sector") or 2)
+    acct = brief.get("account") or {}
+    max_sector = int(acct.get("max_per_sector") or 2)
+    capital = Decimal(str(acct.get("capital_cny") or 50000))
+    exposure_pct = Decimal(str(acct.get("max_total_exposure_pct") or 60))
+    exposure_cap = capital * exposure_pct / Decimal("100")
+    exposure_used = Decimal(str(acct.get("invested_cost_cny") or 0))
+    exposure_added = Decimal("0")
+    cash_left = float(acct["available_cash_cny"]) if "available_cash_cny" in acct else None
 
     picks = raw_reply.get("picks") or []
     if not isinstance(picks, list):
         picks = []
+
+    lots = brief.get("_lots") or {}
+    brokers = acct.get("brokers") or {}
 
     for raw in picks[: MAX_PICKS * 2]:
         if not isinstance(raw, dict):
@@ -544,27 +552,44 @@ def _finish(brief: dict, raw_reply: dict, provider: str, model: str, started) ->
         if sector and seen_sector.get(sector, 0) >= max_sector:
             rejected.append({"code": pick.code, "reason": f"行业集中度：{sector} 已满"})
             continue
-        # Can this account even afford a tradable size? Saying "no" beats dropping it.
-        lots = brief.get("_lots") or {}
-        brokers = (brief.get("account") or {}).get("brokers") or {}
-        qty, _fees, _risk = size_position(
-            pick, brief, lots.get(f"{pick.market}:{pick.code}", 1),
-            brokers.get(pick.market),
+
+        lot = lots.get(f"{pick.market}:{pick.code}", 1)
+        broker = brokers.get(pick.market)
+        qty, fees, risk_amount = size_position(
+            pick, brief, lot, broker, available_cash_cny=cash_left
         )
         if qty <= 0:
             rejected.append(
-                {"code": pick.code, "reason": "本金不够买最小可成交单位（或超出单票 35% 上限）"}
+                {"code": pick.code, "reason": "可用现金或风险预算不足以买最小可成交单位"}
             )
             continue
+
+        cost_cny = to_cny(Decimal(str(pick.entry_low)) * qty, currency_for(pick.market))
+        if exposure_cap > 0 and exposure_used + exposure_added + cost_cny > exposure_cap:
+            rejected.append({"code": pick.code, "reason": "总仓位敞口已达上限"})
+            continue
+
+        exposure_added += cost_cny
+        if cash_left is not None:
+            cash_left = max(0.0, cash_left - float(cost_cny))
         if sector:
             seen_sector[sector] = seen_sector.get(sector, 0) + 1
-        accepted.append({"pick": pick, "sector": sector})
+        accepted.append(
+            {
+                "pick": pick,
+                "sector": sector,
+                "qty": qty,
+                "fees": fees,
+                "risk_amount": risk_amount,
+                "lot": lot,
+            }
+        )
         if len(accepted) >= MAX_PICKS:
             break
 
     stored = 0
     if accepted:
-        stored = _store(accepted, brief, model or provider, raw_reply)
+        stored = _store(accepted, brief, model or provider)
 
     duration = int((datetime.now(UTC) - started).total_seconds() * 1000)
     _record_run(provider, model, brief, len(picks), stored, rejected, None, raw_reply, started, duration)
@@ -584,7 +609,6 @@ def _finish(brief: dict, raw_reply: dict, provider: str, model: str, started) ->
 
 
 def ingest() -> dict:
-    """Pick up answers the WorkBuddy agent has written and store them."""
     from kestrel.services import bridge
 
     collected = bridge.collect("analyse")
@@ -624,39 +648,55 @@ def ingest() -> dict:
     return {"ok": True, "collected": len(collected), "stored": stored, "results": results}
 
 
-def _store(accepted: list[dict], brief: dict, label: str, raw_reply: dict) -> int:
+def _store(accepted: list[dict], brief: dict, label: str) -> int:
     conn = connect()
     saved = 0
     horizon_code = str((brief.get("horizon") or {}).get("code") or "short")
     try:
-        lots = {
-            f"{r['market']}:{r['code']}": r["lot_size"]
-            for r in conn.execute("SELECT market, code, lot_size FROM symbol").fetchall()
-        }
         for item in accepted:
             pick: Pick = item["pick"]
-            brokers = (brief.get("account") or {}).get("brokers") or {}
-            qty, fees, risk_amount = size_position(
-                pick, brief, lots.get(f"{pick.market}:{pick.code}", 1),
-                brokers.get(pick.market),
-            )
-            if qty <= 0:
-                continue
-            from kestrel.core.quantity import db_value
-
+            qty: Decimal = item["qty"]
+            fees_d = Decimal(str(item["fees"]))
+            risk_d = Decimal(str(item["risk_amount"]))
+            lot = int(item.get("lot") or 1)
             qty_db = db_value(qty)
-            symbol_id = conn.execute(
-                "SELECT id FROM symbol WHERE market=? AND code=?", (pick.market, pick.code)
-            ).fetchone()["id"]
 
+            sym_row = conn.execute(
+                "SELECT id FROM symbol WHERE market=? AND code=?", (pick.market, pick.code)
+            ).fetchone()
+            if sym_row is None:
+                continue
+            symbol_id = sym_row["id"]
+
+            # 作废同标的旧有效建议，确保同一时间只保留最新一条操作计划
             conn.execute(
                 "UPDATE recommendation SET status='superseded'"
-                " WHERE symbol_id=? AND status='active' AND source='ai'",
+                " WHERE symbol_id=? AND status='active'",
                 (symbol_id,),
             )
-            r_multiple = (pick.target - pick.entry_low) / (pick.entry_low - pick.stop)
-            currency = _currency(pick.market)
-            conn.execute(
+
+            entry_low_d = Decimal(str(pick.entry_low))
+            stop_d = Decimal(str(pick.stop))
+            target_d = Decimal(str(pick.target))
+            r_multiple = float((target_d - entry_low_d) / (entry_low_d - stop_d))
+            currency = currency_for(pick.market)
+
+            # 修复致命 Decimal/float 混算 TypeError：全部用 Decimal 计算保本价
+            fee_per_share = (fees_d / qty) if qty > 0 else Decimal("0")
+            breakeven_d = round_tick(entry_low_d + fee_per_share, pick.market, pick.code)
+            target2_d = round_tick(
+                entry_low_d + (target_d - entry_low_d) * Decimal("1.5"),
+                pick.market,
+                pick.code,
+            )
+
+            learn_zh, learn_en = _learn_text(pick)
+            explain_en = (
+                f"Why: {pick.thesis}\n"
+                f"How: limit buy {display(qty)} shares near {pick.entry_low:.2f}.\n"
+                f"If wrong: exit below {pick.stop:.2f}. {pick.invalidation}"
+            )
+            cur = conn.execute(
                 """
                 INSERT INTO recommendation
                     (scan_id, symbol_id, market, code, name, currency, strategy, score,
@@ -666,29 +706,36 @@ def _store(accepted: list[dict], brief: dict, label: str, raw_reply: dict) -> in
                      action, headline, learn_zh, learn_en,
                      source, ai_model, ai_thesis, ai_confidence, horizon)
                 VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active',
-                        ?,?,?,'', 'ai',?,?,?,?)
+                        ?,?,?,?,'ai',?,?,?,?)
                 """,
                 (
                     symbol_id, pick.market, pick.code, pick.name, currency,
                     "ai", pick.conviction / 100.0,
-                    to_micro(pick.entry_low), to_micro(pick.entry_high),
-                    to_micro(pick.stop), to_micro(pick.target),
-                    to_micro(pick.entry_low + (pick.target - pick.entry_low) * 1.5),
-                    qty_db, lots.get(f"{pick.market}:{pick.code}", 1),
-                    to_micro(risk_amount), to_micro(fees),
-                    to_micro(pick.entry_low + fees / max(1, qty)),
+                    to_micro(entry_low_d), to_micro(Decimal(str(pick.entry_high))),
+                    to_micro(stop_d), to_micro(target_d),
+                    to_micro(target2_d),
+                    qty_db, lot,
+                    to_micro(risk_d), to_micro(fees_d),
+                    to_micro(breakeven_d),
                     round(r_multiple, 2), pick.conviction / 100.0,
                     valid_until(pick.market, horizon_code),
                     json.dumps([pick.invalidation or "model_invalidation"]),
-                    pick.thesis, "",
+                    pick.thesis, explain_en,
                     pick.action,
                     pick.thesis,
-                    _learn_text(pick),
+                    learn_zh,
+                    learn_en,
                     label,
                     pick.thesis,
                     pick.conviction,
                     horizon_code,
                 ),
+            )
+            rec_id = cur.lastrowid
+            conn.execute(
+                "INSERT OR IGNORE INTO receipt_token (code, rec_id, expires_at)"
+                " VALUES (?,?,?)",
+                (tokens.make_code(rec_id), rec_id, tokens.expiry()),
             )
             saved += 1
         conn.commit()
@@ -697,14 +744,23 @@ def _store(accepted: list[dict], brief: dict, label: str, raw_reply: dict) -> in
     return saved
 
 
-def _learn_text(pick: Pick) -> str:
+def _learn_text(pick: Pick) -> tuple[str, str]:
     risk_pct = (pick.entry_low - pick.stop) / pick.entry_low * 100
-    return (
+    catalysts = "；".join(pick.catalysts) if pick.catalysts else "结合趋势与指标结构触发"
+    catalysts_en = "; ".join(pick.catalysts) if pick.catalysts else "technical structure and risk budget"
+    zh = (
         f"这是什么：AI 选出的一笔做多计划，理由是「{pick.thesis}」。\n"
-        f"为什么是它：{('；'.join(pick.catalysts) if pick.catalysts else '模型给出的判断见上方')}。\n"
+        f"为什么是它：{catalysts}。\n"
         f"如果错了会怎样：跌破 {pick.stop:.2f}（约 −{risk_pct:.1f}%）就要走，"
-        f"{pick.invalidation or '理由是它不再成立。'}"
+        f"{pick.invalidation or '触发条件失效。'}"
     )
+    en = (
+        f"What this is: an AI long plan — {pick.thesis}.\n"
+        f"Why now: {catalysts_en}.\n"
+        f"If wrong: exit below {pick.stop:.2f} (about −{risk_pct:.1f}%). "
+        f"{pick.invalidation or 'Setup invalidated.'}"
+    )
+    return zh, en
 
 
 def _record_run(provider, model, brief, picks, accepted, rejected, error, reply, started, duration=None):
@@ -737,12 +793,6 @@ def _record_run(provider, model, brief, picks, accepted, rejected, error, reply,
 
 
 def recent_runs(limit: int = 5) -> list[dict]:
-    """最近的分析记录，附带引擎标签、模型名和当时使用的周期。
-
-    保险点是「provider=workbuddy、model=workbuddy」两列都写着 workbuddy，
-    页面把它们并排显示就成了 "workbuddy · workbuddy"。这里统一成一份可读的
-    描述，页面只负责排版。
-    """
     conn = connect()
     try:
         rows = conn.execute(
@@ -775,15 +825,8 @@ def recent_runs(limit: int = 5) -> list[dict]:
 
 
 def _horizon_of(item: dict) -> str:
-    """这次分析用的是哪种 K 线。
-
-    简报存在 ``brief`` 字段里，解析失败就返回空串——页面对空值会隐藏，
-    而不是显示一个假的「短线」。
-    """
-    import json as _json
-
     try:
-        brief = _json.loads(item.get("brief") or "{}")
+        brief = json.loads(item.get("brief") or "{}")
     except (TypeError, ValueError):
         return ""
     code = (brief.get("horizon") or {}).get("code")

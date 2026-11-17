@@ -1,7 +1,17 @@
 {% extends "base.html" %}
+{% from "_page_icons.html" import icon, page_ui %}
 {% block title %}{{ t('nav.settings') }} · {{ t('app.name') }}{% endblock %}
 
 {% block content %}
+{{ page_ui() }}
+{% set dstate = desktop_state if desktop_state is defined else {
+  'close_to_tray': values.get('desktop.close_to_tray', True),
+  'autostart': values.get('desktop.autostart', False),
+  'scheduler_running': False,
+  'tray_supported': True
+} %}
+{% set priv_on = ui_privacy if ui_privacy is defined else values.get('ui.privacy', False) %}
+
 <div class="page-head">
   <div>
     <h1>{{ t('nav.settings') }}</h1>
@@ -11,560 +21,767 @@
 
 <div id="save-flash" class="notice hidden"></div>
 
-<div class="tabs">
-  <button class="active" data-tab="general">{{ t('settings.tab_general') }}</button>
-  <button data-tab="scan">{{ t('settings.tab_scan') }}</button>
-  <button data-tab="sources">{{ t('settings.tab_sources') }}</button>
-  <button data-tab="engine">{{ t('settings.tab_engine') }}</button>
-  <button data-tab="notify">{{ t('settings.tab_notify') }}</button>
-  <button data-tab="data">{{ t('settings.tab_data') }}</button>
-  <button data-tab="glossary">{{ t('settings.tab_glossary') }}</button>
-  <button data-tab="about">{{ t('settings.about_tab') }}</button>
-</div>
+<div class="settings-layout">
+  {# 左侧分组快速定位导航 #}
+  <nav class="settings-nav" aria-label="{{ t('nav.settings') }}">
+    <a class="kp-snav-link active" href="#general" data-snav="general">
+      {{ icon('sliders', 15) }} <span>{{ t('settings.tab_general') }}</span>
+    </a>
+    <a class="kp-snav-link" href="#desktop" data-snav="desktop">
+      {{ icon('desktop', 15) }} <span>{{ t('settings.tab_desktop') }}</span>
+    </a>
+    <a class="kp-snav-link" href="#scan" data-snav="scan">
+      {{ icon('globe', 15) }} <span>{{ t('settings.tab_scan') }}</span>
+    </a>
+    <a class="kp-snav-link" href="#engine" data-snav="engine">
+      {{ icon('cpu', 15) }} <span>{{ t('settings.tab_engine') }}</span>
+    </a>
+    <a class="kp-snav-link" href="#sources" data-snav="sources">
+      {{ icon('activity', 15) }} <span>{{ t('settings.tab_sources') }}</span>
+    </a>
+    <a class="kp-snav-link" href="#notify" data-snav="notify">
+      {{ icon('bell', 15) }} <span>{{ t('settings.tab_notify') }}</span>
+    </a>
+    <a class="kp-snav-link" href="#data" data-snav="data">
+      {{ icon('database', 15) }} <span>{{ t('settings.tab_data') }}</span>
+    </a>
+    <a class="kp-snav-link" href="#glossary" data-snav="glossary">
+      {{ icon('book', 15) }} <span>{{ t('settings.tab_glossary') }}</span>
+    </a>
+    <a class="kp-snav-link" href="#about" data-snav="about">
+      {{ icon('info', 15) }} <span>{{ t('settings.about_tab') }}</span>
+    </a>
+  </nav>
 
-<div data-pane="general">
-  <section class="card">
-    <div class="card-head"><h2>{{ t('settings.general') }}</h2></div>
-    <div class="card-body">
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>{{ t('settings.capital') }}</span>
-          <small>{{ t('settings.capital_hint') }}</small>
-        </div>
-        <div class="setting-input">
-          <input data-key="account.capital" type="number" step="100" value="{{ values.get('account.capital') | num }}">
-        </div>
+  {# 右侧分组卡片面板 #}
+  <div style="min-width:0;">
+    {# 1. 通用与资金风控 #}
+    <section class="settings-section card" id="general" data-pane="general">
+      <div class="card-head">
+        <h2 class="kp-title-row">{{ icon('sliders', 17) }} <span>{{ t('settings.general') }}</span></h2>
       </div>
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>{{ t('settings.risk') }}</span>
-          <small>{{ t('settings.risk_help') }}</small>
-        </div>
-        <div class="setting-input">
-          <input data-key="risk.per_trade_pct" type="number" step="0.1" min="0.1" max="100"
-                 value="{{ values.get('risk.per_trade_pct') | num }}">
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>{{ t('settings.exposure') }}</span>
-          <small>{{ t('settings.exposure_hint') }}</small>
-        </div>
-        <div class="setting-input">
-          <input data-key="risk.max_total_exposure_pct" type="number" step="5" min="0" max="100"
-                 value="{{ values.get('risk.max_total_exposure_pct') | num }}">
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>{{ t('settings.learning') }}</span>
-          <small>{{ t('settings.learning_hint') }}</small>
-        </div>
-        <div class="setting-input">
-          <label class="switch">
-            <input type="checkbox" data-key="ui.learning_mode" {% if values.get('ui.learning_mode', True) %}checked{% endif %}>
-            <span></span>
-          </label>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>{{ t('settings.glossary_on') }}</span>
-          <small>{{ t('settings.glossary_hint') }}</small>
-        </div>
-        <div class="setting-input">
-          <label class="switch">
-            <input type="checkbox" data-key="ui.glossary" {% if values.get('ui.glossary', True) %}checked{% endif %}>
-            <span></span>
-          </label>
-        </div>
-      </div>
-      <div class="row-actions">
-        <button class="btn" data-save>{{ t('action.save') }}</button>
-      </div>
-    </div>
-  </section>
-</div>
-
-<div data-pane="scan" class="hidden">
-  <section class="card">
-    <div class="card-head">
-      <h2>{{ t('settings.scan_title') }}</h2>
-      <span class="meta">{{ t('settings.scan_meta') }}</span>
-    </div>
-    <div class="card-body">
-      <div class="setting-row" style="border-bottom:none;padding-bottom:2px;">
-        <div class="setting-label">
-          <span>{{ t('settings.markets') }}</span>
-          <small>{{ t('settings.markets_hint') }}</small>
-        </div>
-        <div class="setting-input"></div>
-      </div>
-      {# 市场是三个独立开关，不是一组多选框：和数据源开关用同一种控件，
-         用户一眼就知道「关掉 = 这个市场彻底不参与」。 #}
-      {% set mk = values.get('scan.markets', ['CN','HK','US']) %}
-      {% for code, label, note in [
-          ('CN', t('market.cn'), t('settings.market_cn_hint')),
-          ('HK', t('market.hk'), t('settings.market_hk_hint')),
-          ('US', t('market.us'), t('settings.market_us_hint'))] %}
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>{{ label }}</span>
-          <small>{{ note }}</small>
-        </div>
-        <div class="setting-input">
-          <label class="switch">
-            <input type="checkbox" data-multi="scan.markets" value="{{ code }}"
-                   {% if code in mk %}checked{% endif %}>
-            <span></span>
-          </label>
-        </div>
-      </div>
-      {% endfor %}
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>{{ t('horizon.title') }}</span>
-          <small>{{ t('horizon.hint') }}</small>
-        </div>
-        <div class="setting-input">
-          <select data-key="trade.horizon">
-            <option value="auto" {% if values.get('trade.horizon','auto') == 'auto' %}selected{% endif %}>{{ t('horizon.auto') }}</option>
-            {% for h in horizon_options %}
-            <option value="{{ h.code }}" {% if values.get('trade.horizon') == h.code %}selected{% endif %}>
-              {{ h.label }}{% if h.beta %} · {{ t('horizon.beta') }}{% endif %}
-            </option>
-            {% endfor %}
-          </select>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>{{ t('settings.universe') }}</span>
-          <small>{{ t('settings.universe_hint') }}</small>
-        </div>
-        <div class="setting-input">
-          <select data-key="scan.universe">
-            {% for key, label in [('both', t('settings.watchlist_pool')),
-                                  ('pool', t('settings.watchlist_pool_only')),
-                                  ('watchlist', t('settings.watchlist_only'))] %}
-            <option value="{{ key }}" {% if values.get('scan.universe','both') == key %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>{{ t('settings.pool_size') }}</span>
-          <small>{{ t('settings.pool_size_hint') }}</small>
-        </div>
-        <div class="setting-input">
-          <input data-key="scan.pool_size" type="number" min="10" max="100" value="{{ values.get('scan.pool_size', 30) | num }}">
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>{{ t('settings.min_score') }}</span>
-          <small>{{ t('settings.min_score_hint') }}</small>
-        </div>
-        <div class="setting-input">
-          <input data-key="scan.min_score" type="number" step="0.05" min="0.3" max="0.95" value="{{ values.get('scan.min_score', 0.55) | num }}">
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>{{ t('settings.auto') }}</span>
-          <small>{{ t('settings.auto_hint') }}</small>
-        </div>
-        <div class="setting-input">
-          <label class="switch">
-            <input type="checkbox" data-key="scan.auto_enabled" {% if values.get('scan.auto_enabled') %}checked{% endif %}>
-            <span></span>
-          </label>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>{{ t('settings.interval') }}</span>
-          <small>{{ t('settings.interval_hint') }}</small>
-        </div>
-        <div class="setting-input">
-          <input data-key="scan.interval_minutes" type="number" min="5" step="5" value="{{ values.get('scan.interval_minutes', 60) | num }}">
-        </div>
-      </div>
-      <div class="row-actions">
-        <button class="btn" data-save>{{ t('action.save') }}</button>
-        <button class="btn ghost" id="refresh-pool">{{ t('settings.refresh_pool') }}</button>
-        <span class="tiny" id="pool-msg">
-          {% for m, n in pool.items() %}{{ m }} {{ n }} {{ t('settings.pool_unit') }} {% endfor %}
-        </span>
-      </div>
-    </div>
-  </section>
-</div>
-
-<script id="preset-data" type="application/json">{{ presets | tojson }}</script>
-
-<div data-pane="sources" class="hidden">
-  <section class="card">
-    <div class="card-head">
-      <h2>{{ t('settings.sources_title') }}</h2>
-      <span class="meta">{{ t('settings.sources_meta') }}</span>
-    </div>
-    <div class="card-body tight">
-      <table class="grid">
-        <thead>
-          <tr><th>{{ t('settings.source_name') }}</th><th>{{ t('settings.source_markets') }}</th><th>{{ t('settings.source_note') }}</th><th style="width:90px;">{{ t('settings.source_on') }}</th></tr>
-        </thead>
-        <tbody>
-          {% for s in sources %}
-          <tr>
-            <td><b>{{ s.label }}</b><div class="tiny muted mono">{{ s.key }}</div></td>
-            <td class="tiny">{{ s.markets }}</td>
-            <td class="tiny muted" style="word-break:break-all;">{{ s.note }}</td>
-            <td>
-              {% if s.builtin %}
-              <label class="switch">
-                <input type="checkbox" class="src-toggle" data-src="{{ s.key }}" {% if s.enabled %}checked{% endif %}>
-                <span></span>
-              </label>
-              {% else %}
-              <button class="btn danger sm" data-src-del="{{ s.key }}">{{ t('settings.cs_delete') }}</button>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="card">
-    <div class="card-head">
-      <h2>{{ t('settings.custom_source') }}</h2>
-      <span class="meta">{{ t('settings.custom_source_meta') }}</span>
-    </div>
-    <div class="card-body">
-      <p class="hint" style="margin-bottom:14px;">{{ t('settings.custom_source_hint') }}</p>
-
-      <div class="field" style="margin-bottom:16px;">
-        <label>{{ t('settings.preset') }}</label>
-        <select id="cs-preset">
-          <option value="">{{ t('settings.preset_none') }}</option>
-          {% for p in presets %}
-          <option value="{{ p.key }}">{{ p.label }}{% if p.verified %} ✓{% endif %}</option>
-          {% endfor %}
-        </select>
-        <span class="help" id="cs-preset-note">{{ t('settings.preset_help') }}</span>
-      </div>
-
-      <div class="grid g2">
-        <div class="field"><label>{{ t('settings.cs_name') }}</label><input id="cs-label" placeholder="我的券商行情"></div>
-        <div class="field"><label>{{ t('settings.cs_markets') }}</label>
-          <input id="cs-markets" placeholder="US,HK（留空=全部）">
-        </div>
-        <div class="field" style="grid-column:1 / -1;">
-          <label>{{ t('settings.cs_url') }}</label>
-          <input id="cs-url" placeholder="https://example.com/quote?symbol={code}">
-          <span class="help">占位符：{code} {market} {symbol} {yf_symbol} {key}</span>
-        </div>
-        <div class="field"><label>API Key</label><input id="cs-key" type="password" placeholder="付费源填这里"></div>
-        <div class="field"><label>{{ t('settings.cs_method') }}</label>
-          <select id="cs-method"><option>GET</option><option>POST</option></select>
-        </div>
-        <div class="field" style="grid-column:1 / -1;">
-          <label>{{ t('settings.cs_body') }}</label>
-          <input id="cs-body" placeholder='{"codes":"{code}","token":"{key}"}'>
-        </div>
-        <div class="field"><label>{{ t('settings.cs_price') }}</label><input id="cs-price" value="price" placeholder="data.last"></div>
-        <div class="field"><label>{{ t('settings.cs_prev') }}</label><input id="cs-prev" placeholder="data.prevClose"></div>
-        <div class="field"><label>{{ t('settings.cs_change') }}</label><input id="cs-change" placeholder="data.changePct"></div>
-        <div class="field"><label>{{ t('settings.cs_name_path') }}</label><input id="cs-name" placeholder="data.name"></div>
-        <div class="field"><label>{{ t('settings.cs_scale') }}</label><input id="cs-scale" value="1" placeholder="1000"></div>
-        <div class="field"><label>{{ t('settings.cs_test_code') }}</label><input id="cs-test-code" placeholder="AAPL"></div>
-        <div class="field"><label>{{ t('settings.cs_test_market') }}</label>
-          <select id="cs-test-market"><option>US</option><option>HK</option><option>CN</option></select>
-        </div>
-      </div>
-      <div class="row-actions">
-        <button class="btn ghost" id="cs-test">{{ t('settings.cs_test') }}</button>
-        <button class="btn" id="cs-save">{{ t('settings.cs_save') }}</button>
-        <button class="btn subtle" id="cs-add-builtin">{{ t('settings.cs_yahoo') }}</button>
-        <span class="tiny" id="cs-msg"></span>
-      </div>
-      <p class="tiny muted" style="margin-top:10px;">{{ t('settings.custom_source_fields') }}</p>
-    </div>
-  </section>
-
-  <p class="hint">{{ t('settings.sources_hint') }}</p>
-</div>
-
-<div data-pane="engine" class="hidden">
-  <section class="card">
-    <div class="card-head"><h2>{{ t('settings.engine_title') }}</h2></div>
-    <div class="card-body">
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>{{ t('settings.engine_mode') }}</span>
-          <small>{{ t('settings.engine_mode_hint') }}</small>
-        </div>
-        <div class="setting-input">
-          <select data-key="agent.provider" id="engine-provider">
-            {% for key, label in [('rules', t('settings.engine_rules_option')),
-                                  ('llm', t('settings.engine_llm_option')),
-                                  ('workbuddy', t('settings.engine_wb_option'))] %}
-            <option value="{{ key }}" {% if values.get('agent.provider','rules') == key %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-      </div>
-
-      <div id="engine-llm" class="hidden">
+      <div class="card-body">
         <div class="setting-row">
-          <div class="setting-label"><span>{{ t('settings.engine_base') }}</span><small>{{ t('settings.engine_base_hint') }}</small></div>
-          <div class="setting-input"><input data-key="agent.base_url" value="{{ values.get('agent.base_url','') }}" placeholder="https://api.deepseek.com/v1"></div>
-        </div>
-        <div class="setting-row">
-          <div class="setting-label"><span>{{ t('settings.engine_model') }}</span><small>{{ t('settings.engine_model_hint') }}</small></div>
-          <div class="setting-input"><input data-key="agent.model" value="{{ values.get('agent.model','') }}" placeholder="deepseek-chat"></div>
-        </div>
-        <div class="setting-row">
-          <div class="setting-label"><span>{{ t('settings.engine_key') }}</span><small>{{ t('settings.engine_key_hint') }}</small></div>
-          <div class="setting-input"><input data-key="agent.api_key" type="password" value="{{ values.get('agent.api_key','') }}"></div>
-        </div>
-        <div class="setting-row">
-          <div class="setting-label"><span>{{ t('settings.engine_budget') }}</span><small>{{ t('settings.engine_budget_hint') }}</small></div>
-          <div class="setting-input"><input data-key="agent.daily_budget" type="number" value="{{ values.get('agent.daily_budget', 200) | num }}"></div>
+          <div class="setting-label">
+            <span>{{ t('settings.capital') }}</span>
+            <small>{{ t('settings.capital_hint') }}</small>
+          </div>
+          <div class="setting-input">
+            <input data-key="account.capital" data-priv-input="1" type="number" step="100"
+                   value="{{ values.get('account.capital') | num }}">
+          </div>
         </div>
         <div class="setting-row">
           <div class="setting-label">
-            <span>{{ t('settings.bridge_root') }}</span>
-            <small>{{ t('settings.bridge_root_hint') }}</small>
+            <span>{{ t('settings.risk') }}</span>
+            <small>{{ t('settings.risk_help') }}</small>
           </div>
-          <div class="setting-input"><input data-key="bridge.root" value="{{ values.get('bridge.root','') }}" placeholder="{{ about.home }}/bridge"></div>
-        </div>
-      </div>
-
-      <div id="engine-workbuddy" class="hidden">
-        <div class="notice">
-          <strong>{{ t('settings.wb_title') }}</strong>
-          {{ t('settings.wb_body') }}
-          <br><br>
-          {{ t('settings.wb_queue') }}<span class="mono" style="font-size:12px;">{{ prompts.analyse.split('`')[1] if '`' in prompts.analyse else 'data/bridge/pending' }}</span>
-          {{ t('settings.wb_need_cron') }}
-        </div>
-
-        <div class="prompt-card">
-          <div class="prompt-head">
-            <div>
-              <b>{{ t('settings.wb_job1') }}</b>
-              <div class="tiny muted">{{ t('settings.wb_job1_hint') }}</div>
-            </div>
-            <button class="btn sm ghost" data-copy-prompt="analyse">{{ t('settings.copy_prompt') }}</button>
+          <div class="setting-input">
+            <input data-key="risk.per_trade_pct" type="number" step="0.1" min="0.1" max="100"
+                   value="{{ values.get('risk.per_trade_pct') | num }}">
           </div>
-          <pre class="prompt-body">{{ prompts.analyse }}</pre>
         </div>
-
-        {# 转发消息的提示词只放在「推送 → WorkBuddy」一处。
-           同一段文案在两个页面各留一份，改了一处忘了另一处，用户就会照着
-           过期的路径去建定时任务。这里只给一句指路。 #}
-        <p class="tiny muted" style="margin-top:10px;">
-          {{ t('settings.wb_forward_elsewhere') }}
-          <a href="/settings#notify">{{ t('settings.wb_forward_link') }}</a>
-        </p>
-      </div>
-
-      <div id="engine-rules" class="notice">
-        <strong>{{ t('settings.rules_engine') }}</strong>：{{ t('settings.rule_engine_hint') }}
-        {{ t('settings.rule_engine_limit') }}
-      </div>
-
-      <div id="engine-llm-note" class="notice hidden">
-        <strong>{{ t('settings.llm_mode') }}</strong>：{{ t('settings.llm_note') }}
-      </div>
-
-      <div class="row-actions"><button class="btn" data-save>{{ t('action.save') }}</button></div>
-    </div>
-  </section>
-</div>
-
-<div data-pane="notify" class="hidden">
-  {% for ch in channels %}
-  <section class="card">
-    <div class="card-head">
-      <h2>{{ ch.label }}</h2>
-      <label class="switch">
-        <input type="checkbox" class="ch-enable" data-ch="{{ ch.key }}" {% if ch.enabled %}checked{% endif %}>
-        <span></span>
-      </label>
-    </div>
-    <div class="card-body">
-      <p class="hint" style="margin-bottom:12px;">{{ ch.hint }}</p>
-      <div class="grid g2">
-        {% for f in ch.fields %}
-        <div class="field">
-          <label>{{ f.label }}</label>
-          <input data-ch-field="{{ ch.key }}" data-field="{{ f.key }}"
-                 type="{{ 'password' if f.kind == 'password' else ('number' if f.kind == 'number' else 'text') }}"
-                 value="{{ ch.config.get(f.key, '') }}" placeholder="{{ f.placeholder }}">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span>{{ t('settings.exposure') }}</span>
+            <small>{{ t('settings.exposure_hint') }}</small>
+          </div>
+          <div class="setting-input">
+            <input data-key="risk.max_total_exposure_pct" type="number" step="5" min="0" max="100"
+                   value="{{ values.get('risk.max_total_exposure_pct') | num }}">
+          </div>
         </div>
-        {% endfor %}
-      </div>
-      <div class="row-actions">
-        <button class="btn" data-ch-save="{{ ch.key }}">{{ t('settings.save') }}</button>
-        <button class="btn ghost" data-ch-test="{{ ch.key }}">{{ t('settings.send_test') }}</button>
-        <span class="tiny">
-          {% if ch.last_test %}<span class="down">{{ t('settings.last_test_ok') }} {{ ch.last_test[5:16] }}</span>{% endif %}
-          {% if ch.last_error %}<span class="up">{{ t('settings.last_test_failed') }}{{ ch.last_error }}</span>{% endif %}
-        </span>
-      </div>
-      {% if ch.key == 'workbuddy' %}
-      <div class="divider"></div>
-      <p class="hint" style="margin-bottom:8px;">{{ t('settings.wb_channel_hint') }}</p>
-      <div class="prompt-card">
-        <div class="prompt-head">
-          <b class="tiny">{{ t('settings.wb_forward_prompt') }}</b>
-          <button class="btn sm ghost" data-copy-prompt="notify">{{ t('settings.copy_prompt') }}</button>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span>{{ t('settings.daily_loss_limit') }}</span>
+            <small>{{ t('settings.daily_loss_limit_hint') }}</small>
+          </div>
+          <div class="setting-input">
+            <input data-key="risk.daily_loss_limit_pct" type="number" step="0.5" min="0" max="50"
+                   value="{{ values.get('risk.daily_loss_limit_pct', 5.0) | num }}">
+          </div>
         </div>
-        <pre class="prompt-body">{{ prompts.notify }}</pre>
-      </div>
-      {% endif %}
-    </div>
-  </section>
-  {% endfor %}
-
-  {# 回执链接前缀以前只存在于代码里，设置页没有任何入口——于是手机上的
-     提醒永远点不开。它是推送功能的一部分，放在推送这一页。 #}
-  <section class="card">
-    <div class="card-head"><h2>{{ t('settings.receipt_base') }}</h2></div>
-    <div class="card-body">
-      <div class="setting-row" style="border-bottom:none;">
-        <div class="setting-label">
-          <span>{{ t('settings.receipt_base_label') }}</span>
-          <small>{{ t('settings.receipt_base_hint') }}</small>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span>{{ t('settings.learning') }}</span>
+            <small>{{ t('settings.learning_hint') }}</small>
+          </div>
+          <div class="setting-input">
+            <label class="switch">
+              <input type="checkbox" data-key="ui.learning" {% if values.get('ui.learning', True) %}checked{% endif %}>
+              <span></span>
+            </label>
+          </div>
         </div>
-        <div class="setting-input">
-          <input data-key="receipt.public_base" value="{{ values.get('receipt.public_base','') }}"
-                 placeholder="http://192.168.1.20:8000">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span>{{ t('settings.glossary_on') }}</span>
+            <small>{{ t('settings.glossary_hint') }}</small>
+          </div>
+          <div class="setting-input">
+            <label class="switch">
+              <input type="checkbox" data-key="ui.glossary" {% if values.get('ui.glossary', True) %}checked{% endif %}>
+              <span></span>
+            </label>
+          </div>
+        </div>
+        <div class="row-actions">
+          <button class="btn" data-save>
+            {{ icon('check-circle', 15) }}
+            <span>{{ t('action.save') }}</span>
+          </button>
         </div>
       </div>
-      <div class="row-actions"><button class="btn" data-save>{{ t('action.save') }}</button></div>
-    </div>
-  </section>
-</div>
+    </section>
 
-<div data-pane="data" class="hidden">
-  <section class="card">
-    <div class="card-head"><h2>{{ t('settings.backup') }}</h2></div>
-    <div class="card-body">
-      <p class="hint" style="margin-bottom:14px;">{{ t('settings.backup_hint') }}</p>
-      <div class="row-actions">
-        <a class="btn" href="/api/backup/export">{{ t('settings.export_db') }}</a>
-        <a class="btn ghost" href="/api/backup/json" download="kestrel-backup.json">{{ t('settings.export_json') }}</a>
-        <button class="btn ghost" id="import-btn">{{ t('settings.import_json') }}</button>
-        <input type="file" id="import-file" accept=".json" class="hidden">
-      </div>
-      <p class="tiny muted" style="margin-top:12px;">{{ t('settings.backup_warn') }}</p>
-    </div>
-  </section>
-</div>
-
-
-<div data-pane="about" class="hidden">
-  <section class="card">
-    <div class="card-head">
-      <h2>{{ t('settings.about_version') }}</h2>
-      <span class="meta">{{ about.platform }} · {{ about.mode }}</span>
-    </div>
-    <div class="card-body">
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>{{ t('settings.about_current') }}</span>
-          <small>v{{ about.current }} · Python {{ about.python }}</small>
-        </div>
-        <div class="setting-input">
-          <button class="btn ghost" id="check-update">{{ t('settings.check_update') }}</button>
+    {# 2. 桌面端与后台常驻 (#desktop) #}
+    <section class="settings-section card" id="desktop" data-pane="desktop">
+      <div class="card-head">
+        <h2 class="kp-title-row">{{ icon('desktop', 17) }} <span>{{ t('desktop.section_title') }}</span></h2>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <span class="badge {{ 'ok-badge' if dstate.tray_supported else 'avoid' }}">
+            {{ t('desktop.tray_badge_on') if dstate.tray_supported else t('desktop.tray_badge_off') }}
+          </span>
+          <span class="badge {{ 'ok-badge' if dstate.scheduler_running else 'wait' }}">
+            <span class="dot-live {% if not dstate.scheduler_running %}off{% endif %}"></span>
+            {{ t('desktop.scheduler_on') if dstate.scheduler_running else t('desktop.scheduler_off') }}
+          </span>
         </div>
       </div>
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>{{ t('settings.auto_check') }}</span>
-          <small>{{ t('settings.auto_check_hint') }}</small>
-        </div>
-        <div class="setting-input">
+      <div class="card-body">
+        <p class="hint" style="margin-bottom:10px;">{{ t('desktop.section_desc') }}</p>
+
+        <div class="switch-row">
+          <div class="setting-label">
+            <span>{{ t('desktop.close_to_tray') }}</span>
+            <small>{{ t('desktop.close_to_tray_hint') }}</small>
+          </div>
           <label class="switch">
-            <input type="checkbox" data-key="update.auto_check"
-                   {% if values.get('update.auto_check', True) %}checked{% endif %}>
+            <input type="checkbox" id="dt-close-to-tray" name="desktop.close_to_tray"
+                   {% if dstate.close_to_tray %}checked{% endif %}>
             <span></span>
           </label>
         </div>
+
+        <div class="switch-row">
+          <div class="setting-label">
+            <span>{{ t('desktop.autostart') }}</span>
+            <small>{{ t('desktop.autostart_hint') }}</small>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="dt-autostart" name="desktop.autostart"
+                   {% if dstate.autostart %}checked{% endif %}>
+            <span></span>
+          </label>
+        </div>
+
+        <div class="switch-row">
+          <div class="setting-label">
+            <span>{{ t('desktop.privacy_default') }}</span>
+            <small>{{ t('desktop.privacy_hint') }}</small>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="dt-privacy" name="ui_privacy"
+                   {% if priv_on %}checked{% endif %}>
+            <span></span>
+          </label>
+        </div>
+
+        <div class="row-actions">
+          <button type="button" class="btn" id="save-desktop-btn">
+            {{ icon('check-circle', 15) }}
+            <span>{{ t('desktop.save_btn') }}</span>
+          </button>
+          <span class="tiny down" id="desktop-save-msg"></span>
+        </div>
+      </div>
+    </section>
+
+    {# 3. 市场与选股 #}
+    <section class="settings-section card" id="scan" data-pane="scan">
+      <div class="card-head">
+        <h2 class="kp-title-row">{{ icon('globe', 17) }} <span>{{ t('settings.scan_title') }}</span></h2>
+        <span class="meta">{{ t('settings.scan_meta') }}</span>
+      </div>
+      <div class="card-body">
+        <div class="setting-row" style="border-bottom:none;padding-bottom:2px;">
+          <div class="setting-label">
+            <span>{{ t('settings.markets') }}</span>
+            <small>{{ t('settings.markets_hint') }}</small>
+          </div>
+          <div class="setting-input"></div>
+        </div>
+        {% set mk = values.get('scan.markets', ['CN','HK','US']) %}
+        {% for code, label, note in [
+            ('CN', t('market.cn'), t('settings.market_cn_hint')),
+            ('HK', t('market.hk'), t('settings.market_hk_hint')),
+            ('US', t('market.us'), t('settings.market_us_hint'))] %}
+        <div class="setting-row">
+          <div class="setting-label">
+            <span><span class="tag tag-{{ code|lower }}" style="margin-right:6px;">{{ code }}</span>{{ label }}</span>
+            <small>{{ note }}</small>
+          </div>
+          <div class="setting-input">
+            <label class="switch">
+              <input type="checkbox" data-multi="scan.markets" value="{{ code }}"
+                     {% if code in mk %}checked{% endif %}>
+              <span></span>
+            </label>
+          </div>
+        </div>
+        {% endfor %}
+        <div class="setting-row">
+          <div class="setting-label">
+            <span>{{ t('horizon.title') }}</span>
+            <small>{{ t('horizon.hint') }}</small>
+          </div>
+          <div class="setting-input">
+            <select data-key="trade.horizon">
+              <option value="auto" {% if values.get('trade.horizon','auto') == 'auto' %}selected{% endif %}>{{ t('horizon.auto') }}</option>
+              {% for h in horizon_options %}
+              <option value="{{ h.code }}" {% if values.get('trade.horizon') == h.code %}selected{% endif %}>
+                {{ h.label }}{% if h.beta %} · {{ t('horizon.beta') }}{% endif %}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span>{{ t('settings.universe') }}</span>
+            <small>{{ t('settings.universe_hint') }}</small>
+          </div>
+          <div class="setting-input">
+            <select data-key="scan.universe">
+              {% for key, label in [('both', t('settings.watchlist_pool')),
+                                    ('pool', t('settings.watchlist_pool_only')),
+                                    ('watchlist', t('settings.watchlist_only'))] %}
+              <option value="{{ key }}" {% if values.get('scan.universe','both') == key %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span>{{ t('settings.pool_size') }}</span>
+            <small>{{ t('settings.pool_size_hint') }}</small>
+          </div>
+          <div class="setting-input">
+            <input data-key="scan.pool_size" type="number" min="10" max="100" value="{{ values.get('scan.pool_size', 30) | num }}">
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span>{{ t('settings.min_score') }}</span>
+            <small>{{ t('settings.min_score_hint') }}</small>
+          </div>
+          <div class="setting-input">
+            <input data-key="scan.min_score" type="number" step="0.05" min="0.3" max="0.95" value="{{ values.get('scan.min_score', 0.55) | num }}">
+          </div>
+        </div>
+        {% for mkt, lbl in [('CN', t('settings.broker_cn')), ('HK', t('settings.broker_hk')), ('US', t('settings.broker_us'))] %}
+        <div class="setting-row">
+          <div class="setting-label">
+            <span>{{ lbl }}</span>
+            <small>{{ t('settings.broker_hint') }}</small>
+          </div>
+          <div class="setting-input">
+            <select data-key="broker.{{ mkt }}">
+              {% for b in broker_options.get(mkt, []) %}
+              <option value="{{ b.key }}" {% if values.get('broker.' + mkt) == b.key %}selected{% endif %}>
+                {{ b.name_en if locale.startswith('en') else b.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        {% endfor %}
+        <div class="setting-row">
+          <div class="setting-label">
+            <span>{{ t('settings.auto') }}</span>
+            <small>{{ t('settings.auto_hint') }}</small>
+          </div>
+          <div class="setting-input">
+            <label class="switch">
+              <input type="checkbox" data-key="scan.auto_enabled" {% if values.get('scan.auto_enabled') %}checked{% endif %}>
+              <span></span>
+            </label>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span>{{ t('settings.interval') }}</span>
+            <small>{{ t('settings.interval_hint') }}</small>
+          </div>
+          <div class="setting-input">
+            <input data-key="scan.interval_minutes" type="number" min="5" step="5" value="{{ values.get('scan.interval_minutes', 60) | num }}">
+          </div>
+        </div>
+        <div class="row-actions">
+          <button class="btn" data-save>
+            {{ icon('check-circle', 15) }}
+            <span>{{ t('action.save') }}</span>
+          </button>
+          <button class="btn ghost" id="refresh-pool">
+            {{ icon('refresh', 14) }}
+            <span>{{ t('settings.refresh_pool') }}</span>
+          </button>
+          <span class="tiny muted" id="pool-msg">
+            {% for m, n in pool.items() %}{{ m }} {{ n }} {{ t('settings.pool_unit') }} {% endfor %}
+          </span>
+        </div>
+      </div>
+    </section>
+
+    {# 4. 分析引擎 #}
+    <section class="settings-section card" id="engine" data-pane="engine">
+      <div class="card-head">
+        <h2 class="kp-title-row">{{ icon('cpu', 17) }} <span>{{ t('settings.engine_title') }}</span></h2>
+      </div>
+      <div class="card-body">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span>{{ t('settings.engine_mode') }}</span>
+            <small>{{ t('settings.engine_mode_hint') }}</small>
+          </div>
+          <div class="setting-input">
+            <select data-key="agent.provider" id="engine-provider">
+              {% for key, label in [('rules', t('settings.engine_rules_option')),
+                                    ('llm', t('settings.engine_llm_option')),
+                                    ('workbuddy', t('settings.engine_wb_option'))] %}
+              <option value="{{ key }}" {% if values.get('agent.provider','rules') == key %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div id="engine-llm" class="hidden">
+          <div class="setting-row">
+            <div class="setting-label"><span>{{ t('settings.engine_base') }}</span><small>{{ t('settings.engine_base_hint') }}</small></div>
+            <div class="setting-input"><input data-key="agent.base_url" value="{{ values.get('agent.base_url','') }}" placeholder="https://api.deepseek.com/v1"></div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-label"><span>{{ t('settings.engine_model') }}</span><small>{{ t('settings.engine_model_hint') }}</small></div>
+            <div class="setting-input"><input data-key="agent.model" value="{{ values.get('agent.model','') }}" placeholder="deepseek-chat"></div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-label">
+              <span class="kp-title-row">{{ icon('key', 14) }} <span>{{ t('settings.engine_key') }}</span></span>
+              <small>{{ t('settings.engine_key_hint') }}</small>
+            </div>
+            <div class="setting-input"><input data-key="agent.api_key" type="password" value="{{ values.get('agent.api_key','') }}"></div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-label"><span>{{ t('settings.engine_budget') }}</span><small>{{ t('settings.engine_budget_hint') }}</small></div>
+            <div class="setting-input"><input data-key="agent.daily_budget" type="number" value="{{ values.get('agent.daily_budget', 200) | num }}"></div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-label">
+              <span>{{ t('settings.bridge_root') }}</span>
+              <small>{{ t('settings.bridge_root_hint') }}</small>
+            </div>
+            <div class="setting-input"><input data-key="bridge.root" value="{{ values.get('bridge.root','') }}" placeholder="{{ about.home }}/bridge"></div>
+          </div>
+        </div>
+
+        <div id="engine-workbuddy" class="hidden">
+          <div class="notice" style="margin-top:12px;">
+            <strong>{{ t('settings.wb_title') }}</strong>
+            {{ t('settings.wb_body') }}
+            <br><br>
+            {{ t('settings.wb_queue') }}<span class="mono" style="font-size:12px;">{{ prompts.analyse.split('`')[1] if '`' in prompts.analyse else 'data/bridge/pending' }}</span>
+            {{ t('settings.wb_need_cron') }}
+          </div>
+
+          <div class="prompt-card">
+            <div class="prompt-head">
+              <div>
+                <b>{{ t('settings.wb_job1') }}</b>
+                <div class="tiny muted">{{ t('settings.wb_job1_hint') }}</div>
+              </div>
+              <button class="btn sm ghost" data-copy-prompt="analyse">
+                {{ icon('copy', 13) }}
+                <span>{{ t('settings.copy_prompt') }}</span>
+              </button>
+            </div>
+            <pre class="prompt-body">{{ prompts.analyse }}</pre>
+          </div>
+
+          <p class="tiny muted" style="margin-top:10px;">
+            {{ t('settings.wb_forward_elsewhere') }}
+            <a href="#notify">{{ t('settings.wb_forward_link') }}</a>
+          </p>
+        </div>
+
+        <div id="engine-rules" class="notice" style="margin-top:12px;">
+          <strong>{{ t('settings.rules_engine') }}</strong>：{{ t('settings.rule_engine_hint') }}
+          {{ t('settings.rule_engine_limit') }}
+        </div>
+
+        <div id="engine-llm-note" class="notice hidden" style="margin-top:12px;">
+          <strong>{{ t('settings.llm_mode') }}</strong>：{{ t('settings.llm_note') }}
+        </div>
+
+        <div class="row-actions">
+          <button class="btn" data-save>
+            {{ icon('check-circle', 15) }}
+            <span>{{ t('action.save') }}</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <script id="preset-data" type="application/json">{{ presets | tojson }}</script>
+
+    {# 5. 行情数据源 #}
+    <section class="settings-section" id="sources" data-pane="sources">
+      <div class="card">
+        <div class="card-head">
+          <h2 class="kp-title-row">{{ icon('activity', 17) }} <span>{{ t('settings.sources_title') }}</span></h2>
+          <span class="meta">{{ t('settings.sources_meta') }}</span>
+        </div>
+        <div class="card-body tight">
+          <div class="table-wrapper" tabindex="0" role="region" aria-label="{{ t('settings.sources_title') }}">
+            <table class="grid">
+              <thead>
+                <tr>
+                  <th>{{ t('settings.source_name') }}</th>
+                  <th>{{ t('settings.source_markets') }}</th>
+                  <th>{{ t('settings.source_note') }}</th>
+                  <th class="num">{{ t('settings.source_on') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for s in sources %}
+                <tr>
+                  <td><b>{{ s.label }}</b><div class="tiny muted mono">{{ s.key }}</div></td>
+                  <td class="tiny">{{ s.markets }}</td>
+                  <td class="tiny muted" style="word-break:break-word;">{{ s.note }}</td>
+                  <td class="num">
+                    {% if s.builtin %}
+                    <label class="switch">
+                      <input type="checkbox" class="src-toggle" data-src="{{ s.key }}" {% if s.enabled %}checked{% endif %}>
+                      <span></span>
+                    </label>
+                    {% else %}
+                    <button class="btn danger sm" data-src-del="{{ s.key }}">
+                      {{ icon('trash', 13) }}
+                      <span>{{ t('settings.cs_delete') }}</span>
+                    </button>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
-      <div id="update-result" class="update-result hidden"></div>
+      <div class="card">
+        <div class="card-head">
+          <h2 class="kp-title-row">{{ icon('plus', 17) }} <span>{{ t('settings.custom_source') }}</span></h2>
+          <span class="meta">{{ t('settings.custom_source_meta') }}</span>
+        </div>
+        <div class="card-body">
+          <p class="hint" style="margin-bottom:14px;">{{ t('settings.custom_source_hint') }}</p>
 
-      <div class="row-actions">
-        <button class="btn" data-save>{{ t('action.save') }}</button>
-        <a class="btn ghost" href="{{ about.releases_url }}" target="_blank" rel="noopener">
-          {{ t('settings.releases') }}
-        </a>
+          <div class="field" style="margin-bottom:16px;">
+            <label>{{ t('settings.preset') }}</label>
+            <select id="cs-preset">
+              <option value="">{{ t('settings.preset_none') }}</option>
+              {% for p in presets %}
+              <option value="{{ p.key }}">{{ p.label }}{% if p.verified %} ✓{% endif %}</option>
+              {% endfor %}
+            </select>
+            <span class="help" id="cs-preset-note">{{ t('settings.preset_help') }}</span>
+          </div>
+
+          <div class="grid g2">
+            <div class="field"><label>{{ t('settings.cs_name') }}</label><input id="cs-label" placeholder="Custom Quote API"></div>
+            <div class="field"><label>{{ t('settings.cs_markets') }}</label>
+              <input id="cs-markets" placeholder="US,HK">
+            </div>
+            <div class="field" style="grid-column:1 / -1;">
+              <label>{{ t('settings.cs_url') }}</label>
+              <input id="cs-url" placeholder="https://example.com/quote?symbol={code}">
+              <span class="help">{{ t('settings.cs_placeholders_help') }}</span>
+            </div>
+            <div class="field"><label>API Key</label><input id="cs-key" type="password" placeholder="sk-..."></div>
+            <div class="field"><label>{{ t('settings.cs_method') }}</label>
+              <select id="cs-method"><option>GET</option><option>POST</option></select>
+            </div>
+            <div class="field" style="grid-column:1 / -1;">
+              <label>{{ t('settings.cs_body') }}</label>
+              <input id="cs-body" placeholder='{"codes":"{code}","token":"{key}"}'>
+            </div>
+            <div class="field"><label>{{ t('settings.cs_price') }}</label><input id="cs-price" value="price" placeholder="data.last"></div>
+            <div class="field"><label>{{ t('settings.cs_prev') }}</label><input id="cs-prev" placeholder="data.prevClose"></div>
+            <div class="field"><label>{{ t('settings.cs_change') }}</label><input id="cs-change" placeholder="data.changePct"></div>
+            <div class="field"><label>{{ t('settings.cs_name_path') }}</label><input id="cs-name" placeholder="data.name"></div>
+            <div class="field"><label>{{ t('settings.cs_scale') }}</label><input id="cs-scale" value="1" placeholder="1000"></div>
+            <div class="field"><label>{{ t('settings.cs_test_code') }}</label><input id="cs-test-code" placeholder="AAPL"></div>
+            <div class="field"><label>{{ t('settings.cs_test_market') }}</label>
+              <select id="cs-test-market"><option>US</option><option>HK</option><option>CN</option></select>
+            </div>
+          </div>
+          <div class="row-actions">
+            <button class="btn ghost" id="cs-test">
+              {{ icon('activity', 14) }}
+              <span>{{ t('settings.cs_test') }}</span>
+            </button>
+            <button class="btn" id="cs-save">
+              {{ icon('check-circle', 14) }}
+              <span>{{ t('settings.cs_save') }}</span>
+            </button>
+            <button class="btn subtle" id="cs-add-builtin">{{ t('settings.cs_yahoo') }}</button>
+            <span class="tiny" id="cs-msg"></span>
+          </div>
+          <p class="tiny muted" style="margin-top:10px;">{{ t('settings.custom_source_fields') }}</p>
+          <p class="hint" style="margin-top:8px;">{{ t('settings.sources_hint') }}</p>
+        </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <section class="card">
-    <div class="card-head"><h2>{{ t('settings.paths') }}</h2></div>
-    <div class="card-body">
-      <table class="grid">
-        <tbody>
-          <tr><td>{{ t('settings.data_dir') }}</td><td class="mono tiny">{{ about.home }}</td></tr>
-          <tr><td>{{ t('settings.db_file') }}</td><td class="mono tiny">{{ about.db_path }}</td></tr>
-        </tbody>
-      </table>
-      <p class="hint" style="margin-top:12px;">
-        {{ t('settings.paths_hint') }}
-      </p>
-    </div>
-  </section>
+    {# 6. 消息推送与回执链接 #}
+    <section class="settings-section" id="notify" data-pane="notify">
+      {% for ch in channels %}
+      <div class="card">
+        <div class="card-head">
+          <h2 class="kp-title-row">{{ icon('bell', 17) }} <span>{{ ch.label }}</span></h2>
+          <label class="switch">
+            <input type="checkbox" class="ch-enable" data-ch="{{ ch.key }}" {% if ch.enabled %}checked{% endif %}>
+            <span></span>
+          </label>
+        </div>
+        <div class="card-body">
+          <p class="hint" style="margin-bottom:12px;">{{ ch.hint }}</p>
+          <div class="grid g2">
+            {% for f in ch.fields %}
+            <div class="field">
+              <label>{{ f.label }}</label>
+              <input data-ch-field="{{ ch.key }}" data-field="{{ f.key }}"
+                     type="{{ 'password' if f.kind == 'password' else ('number' if f.kind == 'number' else 'text') }}"
+                     value="{{ ch.config.get(f.key, '') }}" placeholder="{{ f.placeholder }}">
+            </div>
+            {% endfor %}
+          </div>
+          <div class="row-actions">
+            <button class="btn" data-ch-save="{{ ch.key }}">
+              {{ icon('check-circle', 14) }}
+              <span>{{ t('settings.save') }}</span>
+            </button>
+            <button class="btn ghost" data-ch-test="{{ ch.key }}">
+              {{ icon('bell', 14) }}
+              <span>{{ t('settings.send_test') }}</span>
+            </button>
+            <span class="tiny">
+              {% if ch.last_test %}<span class="down">{{ t('settings.last_test_ok') }} {{ ch.last_test[5:16] }}</span>{% endif %}
+              {% if ch.last_error %}<span class="up">{{ t('settings.last_test_failed') }}{{ ch.last_error }}</span>{% endif %}
+            </span>
+          </div>
+          {% if ch.key == 'workbuddy' %}
+          <div class="divider"></div>
+          <p class="hint" style="margin-bottom:8px;">{{ t('settings.wb_channel_hint') }}</p>
+          <div class="prompt-card">
+            <div class="prompt-head">
+              <b class="tiny">{{ t('settings.wb_forward_prompt') }}</b>
+              <button class="btn sm ghost" data-copy-prompt="notify">
+                {{ icon('copy', 13) }}
+                <span>{{ t('settings.copy_prompt') }}</span>
+              </button>
+            </div>
+            <pre class="prompt-body">{{ prompts.notify }}</pre>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
 
-  <section class="card">
-    <div class="card-head"><h2>{{ t('settings.license') }}</h2></div>
-    <div class="card-body">
-      <p class="hint" style="margin:0;">{{ t('settings.license_body') }}</p>
-    </div>
-  </section>
-</div>
+      <div class="card">
+        <div class="card-head">
+          <h2 class="kp-title-row">{{ icon('external', 17) }} <span>{{ t('settings.receipt_base') }}</span></h2>
+        </div>
+        <div class="card-body">
+          <div class="setting-row" style="border-bottom:none;">
+            <div class="setting-label">
+              <span>{{ t('settings.receipt_base_label') }}</span>
+              <small>{{ t('settings.receipt_base_hint') }}</small>
+            </div>
+            <div class="setting-input">
+              <input data-key="receipt.public_base" value="{{ values.get('receipt.public_base','') }}"
+                     placeholder="http://192.168.1.20:8000">
+            </div>
+          </div>
+          <div class="row-actions">
+            <button class="btn" data-save>
+              {{ icon('check-circle', 15) }}
+              <span>{{ t('action.save') }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
 
-<div data-pane="glossary" class="hidden">
-  <section class="card">
-    <div class="card-head">
-      <h2>{{ t('settings.glossary_title') }}</h2>
-      <span class="meta">{{ glossary|length }} {{ t('settings.terms') }}</span>
-    </div>
-    <div class="card-body tight">
-      <table class="grid">
-        <thead><tr><th>{{ t('settings.term') }}</th><th>{{ t('settings.meaning') }}</th><th style="width:110px;">{{ t('settings.show') }}</th></tr></thead>
-        <tbody>
-          {% for g in glossary %}
-          <tr>
-            {% if locale.startswith('en') %}
-            <td><b>{{ g.term_en }}</b><div class="tiny muted">{{ g.term_zh }}</div></td>
-            <td class="tiny">{{ g.body_en }}</td>
-            {% else %}
-            <td><b>{{ g.term_zh }}</b><div class="tiny muted">{{ g.term_en }}</div></td>
-            <td class="tiny">{{ g.body_zh }}</td>
-            {% endif %}
-            <td>
-              <form method="post" action="/glossary/{{ g.key }}/toggle">
-                <button class="btn sm {{ 'ghost' if g.suppressed else 'subtle' }}" type="submit">
-                  {{ t('settings.hidden') if g.suppressed else t('settings.showing') }}
-                </button>
-              </form>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
+    {# 7. 备份与恢复 #}
+    <section class="settings-section card" id="data" data-pane="data">
+      <div class="card-head">
+        <h2 class="kp-title-row">{{ icon('database', 17) }} <span>{{ t('settings.backup') }}</span></h2>
+      </div>
+      <div class="card-body">
+        <p class="hint" style="margin-bottom:14px;">{{ t('settings.backup_hint') }}</p>
+        <div class="row-actions">
+          <a class="btn" href="/api/backup/export">
+            {{ icon('download', 15) }}
+            <span>{{ t('settings.export_db') }}</span>
+          </a>
+          <a class="btn ghost" href="/api/backup/json" download="kestrel-backup.json">
+            {{ icon('download', 15) }}
+            <span>{{ t('settings.export_json') }}</span>
+          </a>
+          <button class="btn ghost" id="import-btn">
+            {{ icon('upload', 15) }}
+            <span>{{ t('settings.import_json') }}</span>
+          </button>
+          <input type="file" id="import-file" accept=".json" class="hidden">
+        </div>
+        <p class="tiny muted" style="margin-top:12px;">{{ t('settings.backup_warn') }}</p>
+      </div>
+    </section>
+
+    {# 8. 术语库 #}
+    <section class="settings-section card" id="glossary" data-pane="glossary">
+      <div class="card-head">
+        <h2 class="kp-title-row">{{ icon('book', 17) }} <span>{{ t('settings.glossary_title') }}</span></h2>
+        <span class="meta">{{ glossary|length }} {{ t('settings.terms') }}</span>
+      </div>
+      <div class="card-body">
+        <div class="filter-bar" style="justify-content:space-between;margin-bottom:12px;">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;" id="gloss-cats">
+            <button type="button" class="btn sm" data-gcat="all">{{ t('adv.filter_all') }}</button>
+            {% for ckey, cpair in glossary_categories.items() %}
+            <button type="button" class="btn ghost sm" data-gcat="{{ ckey }}">
+              {{ cpair[1] if locale.startswith('en') else cpair[0] }}
+            </button>
+            {% endfor %}
+          </div>
+          <input id="gloss-search" type="search" class="add-input" style="width:220px;"
+                 placeholder="{{ t('settings.gloss_search_ph') }}">
+        </div>
+        <div class="table-wrapper" tabindex="0" role="region" aria-label="{{ t('settings.glossary_title') }}"
+             style="max-height:420px;overflow-y:auto;border:1px solid var(--line-soft);border-radius:10px;">
+          <table class="grid" id="gloss-table">
+            <thead>
+              <tr>
+                <th>{{ t('settings.term') }}</th>
+                <th>{{ t('settings.meaning') }}</th>
+                <th class="num">{{ t('settings.show') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for g in glossary %}
+              <tr data-gcat="{{ g.category }}" data-gtext="{{ (g.term_zh ~ ' ' ~ g.term_en ~ ' ' ~ g.body_zh ~ ' ' ~ g.body_en)|lower }}">
+                {% if locale.startswith('en') %}
+                <td>
+                  <b>{{ g.term_en }}</b>
+                  <div><span class="gloss-cat">{{ g.category_label }}</span> <span class="tiny muted">{{ g.term_zh }}</span></div>
+                </td>
+                <td class="tiny">{{ g.body_en }}</td>
+                {% else %}
+                <td>
+                  <b>{{ g.term_zh }}</b>
+                  <div><span class="gloss-cat">{{ g.category_label }}</span> <span class="tiny muted">{{ g.term_en }}</span></div>
+                </td>
+                <td class="tiny">{{ g.body_zh }}</td>
+                {% endif %}
+                <td class="num">
+                  <button type="button" class="btn sm {{ 'ghost' if g.suppressed else 'subtle' }}" data-gloss-toggle="{{ g.key }}">
+                    {{ t('settings.hidden') if g.suppressed else t('settings.showing') }}
+                  </button>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    {# 9. 关于与更新 #}
+    <section class="settings-section" id="about" data-pane="about">
+      <div class="card">
+        <div class="card-head">
+          <h2 class="kp-title-row">{{ icon('info', 17) }} <span>{{ t('settings.about_version') }}</span></h2>
+          <span class="meta">{{ about.platform }} · {{ about.mode }}</span>
+        </div>
+        <div class="card-body">
+          <div class="setting-row">
+            <div class="setting-label">
+              <span>{{ t('settings.about_current') }}</span>
+              <small>v{{ about.current }} · Python {{ about.python }}</small>
+            </div>
+            <div class="setting-input">
+              <button class="btn ghost" id="check-update">
+                {{ icon('refresh', 14) }}
+                <span>{{ t('settings.check_update') }}</span>
+              </button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-label">
+              <span>{{ t('settings.auto_check') }}</span>
+              <small>{{ t('settings.auto_check_hint') }}</small>
+            </div>
+            <div class="setting-input">
+              <label class="switch">
+                <input type="checkbox" data-key="update.auto_check"
+                       {% if values.get('update.auto_check', True) %}checked{% endif %}>
+                <span></span>
+              </label>
+            </div>
+          </div>
+
+          <div id="update-result" class="update-result hidden"></div>
+
+          <div class="row-actions">
+            <button class="btn" data-save>
+              {{ icon('check-circle', 15) }}
+              <span>{{ t('action.save') }}</span>
+            </button>
+            <a class="btn ghost" href="{{ about.releases_url }}" target="_blank" rel="noopener">
+              <span>{{ t('settings.releases') }}</span>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2 class="kp-title-row">{{ icon('database', 17) }} <span>{{ t('settings.paths') }}</span></h2>
+        </div>
+        <div class="card-body">
+          <div class="table-wrapper" tabindex="0" role="region" aria-label="{{ t('settings.paths') }}">
+            <table class="grid">
+              <tbody>
+                <tr><td>{{ t('settings.data_dir') }}</td><td class="mono tiny">{{ about.home }}</td></tr>
+                <tr><td>{{ t('settings.db_file') }}</td><td class="mono tiny">{{ about.db_path }}</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="hint" style="margin-top:12px;">{{ t('settings.paths_hint') }}</p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:0;">
+        <div class="card-head">
+          <h2 class="kp-title-row">{{ icon('shield', 17) }} <span>{{ t('settings.license') }}</span></h2>
+        </div>
+        <div class="card-body">
+          <p class="hint" style="margin:0;">{{ t('settings.license_body') }}</p>
+        </div>
+      </div>
+    </section>
+  </div>
 </div>
 {% endblock %}
 
@@ -572,7 +789,13 @@
 <script>
 window.I18N = Object.assign(window.I18N || {}, {
   sending: {{ t('settings.sending') | tojson }},
-  csNeedCode: {{ t('settings.cs_need_code') | tojson }}
+  csNeedCode: {{ t('settings.cs_need_code') | tojson }},
+  marketRequired: {{ t('settings.market_required') | tojson }},
+  desktopSavedOk: {{ t('desktop.saved_ok') | tojson }},
+  confirmDelSrc: {{ t('settings.confirm_del_src') | tojson }},
+  checkingUpdate: {{ t('settings.checking_update') | tojson }},
+  updateInstallBtn: {{ t('settings.update_install') | tojson }},
+  updateManualLink: {{ t('settings.update_manual') | tojson }}
 });
 </script>
 <script>
@@ -583,7 +806,36 @@ window.I18N = Object.assign(window.I18N || {}, {
     flash.className = 'notice ' + (kind || '');
     flash.textContent = msg;
     flash.classList.remove('hidden');
+    if (window.showToast) window.showToast(msg);
     setTimeout(function () { flash.classList.add('hidden'); }, 4000);
+  }
+
+  /* ---- 左侧锚点导航高亮联动 ---- */
+  var navLinks = document.querySelectorAll('.kp-snav-link[data-snav]');
+  function highlightNav(id) {
+    if (!id) return;
+    navLinks.forEach(function (a) {
+      a.classList.toggle('active', a.getAttribute('data-snav') === id);
+    });
+  }
+  navLinks.forEach(function (a) {
+    a.addEventListener('click', function () {
+      highlightNav(a.getAttribute('data-snav'));
+    });
+  });
+  if (location.hash) {
+    highlightNav(location.hash.slice(1));
+  }
+  window.addEventListener('hashchange', function () {
+    if (location.hash) highlightNav(location.hash.slice(1));
+  });
+  if ('IntersectionObserver' in window) {
+    var obs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) highlightNav(entry.target.id);
+      });
+    }, { rootMargin: '-18% 0px -68% 0px', threshold: 0 });
+    document.querySelectorAll('.settings-section[id]').forEach(function (sec) { obs.observe(sec); });
   }
 
   function collect(scope) {
@@ -611,6 +863,10 @@ window.I18N = Object.assign(window.I18N || {}, {
     btn.addEventListener('click', function () {
       var pane = btn.closest('[data-pane]');
       var items = collect(pane);
+      if ('scan.markets' in items && (!items['scan.markets'] || !items['scan.markets'].length)) {
+        say(window.I18N.marketRequired || 'At least one market is required.', 'err');
+        return;
+      }
       fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -624,6 +880,70 @@ window.I18N = Object.assign(window.I18N || {}, {
         });
     });
   });
+
+  /* ---- 桌面端常驻与隐私保护保存 ---- */
+  var saveDesktopBtn = document.getElementById('save-desktop-btn');
+  var dtClose = document.getElementById('dt-close-to-tray');
+  var dtAuto = document.getElementById('dt-autostart');
+  var dtPriv = document.getElementById('dt-privacy');
+  var dtMsg = document.getElementById('desktop-save-msg');
+
+  function syncPrivacyDom(on) {
+    document.documentElement.dataset.privacy = on ? 'on' : 'off';
+    var topToggle = document.getElementById('toggle-privacy');
+    if (topToggle) {
+      topToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+      topToggle.classList.toggle('active', on);
+    }
+  }
+
+  function saveDesktopSettings() {
+    var closeToTray = !!(dtClose && dtClose.checked);
+    var autostart = !!(dtAuto && dtAuto.checked);
+    var privacy = !!(dtPriv && dtPriv.checked);
+    if (saveDesktopBtn) saveDesktopBtn.disabled = true;
+
+    Promise.all([
+      fetch('/api/desktop/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          close_to_tray: closeToTray,
+          autostart: autostart,
+          privacy: privacy
+        })
+      }).then(function (r) { return r.json(); }).catch(function () { return { ok: false }; }),
+      fetch('/api/ui/privacy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: privacy })
+      }).then(function (r) { return r.json(); }).catch(function () { return { ok: false }; })
+    ]).then(function (results) {
+      var r1 = results[0] || {};
+      var r2 = results[1] || {};
+      if (r1.ok || r2.ok) {
+        syncPrivacyDom(privacy);
+        if (dtMsg) {
+          dtMsg.textContent = window.I18N.desktopSavedOk;
+          setTimeout(function () { dtMsg.textContent = ''; }, 3200);
+        }
+        say(window.I18N.desktopSavedOk, 'ok');
+      } else {
+        say(window.I18N.saveFailed + (r1.error || r2.error || ''), 'err');
+      }
+    }).finally(function () {
+      if (saveDesktopBtn) saveDesktopBtn.disabled = false;
+    });
+  }
+
+  if (saveDesktopBtn) {
+    saveDesktopBtn.addEventListener('click', saveDesktopSettings);
+  }
+  if (dtPriv) {
+    dtPriv.addEventListener('change', function () {
+      syncPrivacyDom(dtPriv.checked);
+    });
+  }
 
   var provider = document.getElementById('engine-provider');
   function syncEngine() {
@@ -674,7 +994,7 @@ window.I18N = Object.assign(window.I18N || {}, {
     btn.addEventListener('click', function () {
       var key = btn.getAttribute('data-ch-test');
       btn.disabled = true;
-      var original = btn.textContent;
+      var originalHTML = btn.innerHTML;
       btn.textContent = (window.I18N && window.I18N.sending) || '…';
       fetch('/api/notify/test', {
         method: 'POST',
@@ -690,7 +1010,7 @@ window.I18N = Object.assign(window.I18N || {}, {
             say(window.I18N.sendFailed + detail, 'err');
           }
         })
-        .finally(function () { btn.disabled = false; btn.textContent = original; });
+        .finally(function () { btn.disabled = false; btn.innerHTML = originalHTML; });
     });
   });
 
@@ -845,7 +1165,7 @@ window.I18N = Object.assign(window.I18N || {}, {
 
   document.querySelectorAll('[data-src-del]').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      askConfirm('删除这个自定义数据源？').then(function (yes) {
+      askConfirm(window.I18N.confirmDelSrc).then(function (yes) {
         if (!yes) return;
         fetch('/api/datasources/custom/' + btn.getAttribute('data-src-del') + '/delete',
               { method: 'POST' })
@@ -863,7 +1183,7 @@ window.I18N = Object.assign(window.I18N || {}, {
     updateBox.classList.remove('hidden');
     if (!res.ok) {
       updateBox.className = 'update-result err';
-      updateBox.textContent = res.error || '检查失败';
+      updateBox.textContent = res.error || window.I18N.saveFailed;
       return;
     }
     if (res.available) {
@@ -871,35 +1191,28 @@ window.I18N = Object.assign(window.I18N || {}, {
       var asset = latest.asset;
       updateBox.className = 'update-result warn';
       updateBox.innerHTML =
-        '<b>有新版本 v' + latest.version + '</b>' +
-        '<p>当前 v' + res.current + '。' +
-          (asset
-            ? '可以直接下载并打开安装包，剩下只需把它拖进 Applications。'
-            : '这个版本没有为当前平台提供安装包，请到 Releases 页面下载。') +
-        '</p>' +
+        '<b>v' + latest.version + '</b>' +
+        '<p>v' + res.current + ' → v' + latest.version + '</p>' +
         (latest.notes ? '<pre class="prompt-body">' + latest.notes.replace(/</g, '&lt;') + '</pre>' : '') +
-        (asset ? '<button class="btn sm" id="do-install">下载并安装</button>' : '');
+        (asset ? '<button class="btn sm" id="do-install">' + window.I18N.updateInstallBtn + '</button>' : '');
       var installBtn = document.getElementById('do-install');
       if (installBtn) {
         installBtn.addEventListener('click', function () {
           installBtn.disabled = true;
-          installBtn.textContent = '下载中…';
           fetch('/api/update/install', { method: 'POST' })
             .then(function (r) { return r.json(); })
             .then(function (out) {
               if (!out.ok) {
                 updateBox.className = 'update-result err';
-                updateBox.textContent = out.error || '安装失败';
+                updateBox.textContent = out.error || window.I18N.saveFailed;
                 if (out.url) {
                   updateBox.insertAdjacentHTML('beforeend',
-                    '<p><a href="' + out.url + '" target="_blank" rel="noopener">去 Releases 手动下载</a></p>');
+                    '<p><a href="' + out.url + '" target="_blank" rel="noopener">' + window.I18N.updateManualLink + '</a></p>');
                 }
                 return;
               }
               updateBox.className = 'update-result ok';
-              updateBox.textContent = out.up_to_date
-                ? '已经是最高版本了。'
-                : (out.next || '安装包已打开。');
+              updateBox.textContent = out.next || 'OK';
             })
             .catch(function (e) { updateBox.textContent = String(e); });
         });
@@ -907,22 +1220,21 @@ window.I18N = Object.assign(window.I18N || {}, {
       return;
     }
     updateBox.className = 'update-result ok';
-    updateBox.textContent = '已是最新版本 v' + res.current +
-      (res.reason ? '（' + res.reason + '）' : '') + '。';
+    updateBox.textContent = 'v' + res.current + (res.reason ? ' (' + res.reason + ')' : '');
   }
 
   if (checkBtn) {
     checkBtn.addEventListener('click', function () {
       checkBtn.disabled = true;
-      var original = checkBtn.textContent;
-      checkBtn.textContent = '检查中…';
+      var originalHTML = checkBtn.innerHTML;
+      checkBtn.textContent = window.I18N.checkingUpdate;
       fetch('/api/update?force=true')
         .then(function (r) { return r.json(); })
         .then(renderUpdate)
         .catch(function (e) {
           if (updateBox) { updateBox.classList.remove('hidden'); updateBox.textContent = String(e); }
         })
-        .finally(function () { checkBtn.disabled = false; checkBtn.textContent = original; });
+        .finally(function () { checkBtn.disabled = false; checkBtn.innerHTML = originalHTML; });
     });
   }
 
@@ -933,9 +1245,9 @@ window.I18N = Object.assign(window.I18N || {}, {
       var key = btn.getAttribute('data-copy-prompt');
       var text = PROMPTS[key] || '';
       var done = function () {
-        var original = btn.textContent;
-        btn.textContent = '已复制';
-        setTimeout(function () { btn.textContent = original; }, 1600);
+        var originalHTML = btn.innerHTML;
+        btn.textContent = {{ t('settings.wb_copy_done') | tojson }};
+        setTimeout(function () { btn.innerHTML = originalHTML; }, 1600);
       };
       if (navigator.clipboard) {
         navigator.clipboard.writeText(text).then(done);
@@ -948,6 +1260,41 @@ window.I18N = Object.assign(window.I18N || {}, {
         document.body.removeChild(area);
         done();
       }
+    });
+  });
+
+  /* ---- 术语库分类筛选与无刷新切换 ---- */
+  var activeCat = 'all';
+  var gSearch = document.getElementById('gloss-search');
+  function filterGlossary() {
+    var q = ((gSearch && gSearch.value) || '').trim().toLowerCase();
+    document.querySelectorAll('#gloss-table tbody tr').forEach(function (tr) {
+      var catOk = activeCat === 'all' || tr.getAttribute('data-gcat') === activeCat;
+      var txtOk = !q || (tr.getAttribute('data-gtext') || '').indexOf(q) !== -1;
+      tr.classList.toggle('hidden', !(catOk && txtOk));
+    });
+  }
+  document.querySelectorAll('#gloss-cats [data-gcat]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      activeCat = b.getAttribute('data-gcat');
+      document.querySelectorAll('#gloss-cats [data-gcat]').forEach(function (x) {
+        x.classList.toggle('ghost', x !== b);
+      });
+      filterGlossary();
+    });
+  });
+  if (gSearch) gSearch.addEventListener('input', filterGlossary);
+  document.querySelectorAll('[data-gloss-toggle]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var key = btn.getAttribute('data-gloss-toggle');
+      fetch('/glossary/' + encodeURIComponent(key) + '/toggle?ajax=1', {
+        method: 'POST', headers: { Accept: 'application/json' }
+      }).then(function () {
+        var isHidden = btn.classList.contains('ghost');
+        btn.classList.toggle('ghost', !isHidden);
+        btn.classList.toggle('subtle', isHidden);
+        btn.textContent = isHidden ? {{ t('settings.showing') | tojson }} : {{ t('settings.hidden') | tojson }};
+      });
     });
   });
 })();

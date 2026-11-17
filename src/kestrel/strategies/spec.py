@@ -23,10 +23,12 @@ OPS = {">", ">=", "<", "<=", "between", "is_true", "is_false", "cross_above", "c
 # Indicators a rule may reference. Keeping the list closed means a typo in a
 # user rule fails loudly at save time instead of silently never triggering.
 FIELDS = {
-    "last", "sma5", "sma10", "sma20", "sma60", "ema12", "ema26", "macd",
-    "rsi14", "atr14", "atr_pct", "vol_ratio", "high20", "low20", "high60",
-    "dist_sma20", "dist_sma60", "dist_high20", "range_pos20",
-    "ret5", "ret20", "ret60", "close_pos", "slope20", "ma_stack", "trend_up",
+    "last", "open", "sma5", "sma10", "sma20", "sma60", "ema12", "ema26",
+    "macd", "macd_signal", "macd_hist", "rsi14", "atr14", "atr_pct", "vcp_ratio",
+    "vol_ratio", "vol_today_ratio", "high20", "low20", "high60", "low60",
+    "dist_sma20", "dist_sma60", "dist_high20", "range_pos20", "range_pos60",
+    "ret5", "ret20", "ret60", "gap_pct", "bull_candle", "close_pos",
+    "slope20", "ma_stack", "trend_up",
 }
 
 
@@ -131,17 +133,17 @@ class Rule:
     stop_field: str | None = None
     target_field: str | None = None
 
-    def evaluate(self, ind: dict) -> StrategyResult | None:
+    def evaluate(self, ind: dict, prev: dict | None = None) -> StrategyResult | None:
         if not ind:
             return None
         for cond in self.conditions:
-            if not cond.test(ind):
+            if not cond.test(ind, prev):
                 return None
 
         score = self.base_score
         hits: list[str] = []
         for cond, add in self.bonuses:
-            if cond.test(ind):
+            if cond.test(ind, prev):
                 score += add
                 hits.append(f"{cond.left}{cond.op}{cond.right or ''}")
 

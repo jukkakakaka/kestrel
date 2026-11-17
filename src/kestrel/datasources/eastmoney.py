@@ -18,7 +18,7 @@ from kestrel.datasources.base import DataSourceError, Quote
 BASE = "https://push2.eastmoney.com/api/qt/stock/get"
 FIELDS = "f43,f44,f45,f46,f47,f48,f57,f58,f59,f60,f170"
 
-MARKET_PREFIX = {"CN": ("1", "0"), "HK": ("116",), "US": ("105", "106")}
+MARKET_PREFIX = {"CN": ("1", "0"), "HK": ("116",), "US": ("105", "106", "107")}
 
 
 def _secids(market: str, code: str) -> list[str]:

@@ -1,0 +1,539 @@
+{# Kestrel 业务页面专属线性 SVG 图标宏与零特异度页面微组件样式 #}
+
+{% macro icon(name, size=16, cls='') -%}
+<svg class="kp-ico {{ cls }}" width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24"
+     fill="none" stroke="currentColor" stroke-width="1.8"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  {%- if name == 'radar' -%}
+  <circle cx="12" cy="12" r="9"/>
+  <path d="M12 12 18.36 5.64"/>
+  <circle cx="12" cy="12" r="4.5" stroke-dasharray="3 2.5"/>
+  <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/>
+  {%- elif name == 'refresh' -%}
+  <path d="M21 12a9 9 0 0 0-15.5-6.36L3 8"/>
+  <path d="M3 3v5h5"/>
+  <path d="M3 12a9 9 0 0 0 15.5 6.36L21 16"/>
+  <path d="M16 16h5v5"/>
+  {%- elif name == 'plus' -%}
+  <path d="M12 5v14M5 12h14"/>
+  {%- elif name == 'wallet' -%}
+  <rect x="3" y="6" width="18" height="13" rx="2.5"/>
+  <path d="M3 10h18"/>
+  <path d="M16 14.5h2"/>
+  <path d="M6.5 6V4.8A1.8 1.8 0 0 1 8.3 3h7.4a1.8 1.8 0 0 1 1.8 1.8V6"/>
+  {%- elif name == 'coins' -%}
+  <ellipse cx="10" cy="7" rx="6" ry="3"/>
+  <path d="M4 7v5c0 1.66 2.69 3 6 3s6-1.34 6-3V7"/>
+  <path d="M16 10.5c2.3.45 4 1.52 4 2.8v4c0 1.66-2.69 3-6 3-2.6 0-4.82-.83-5.65-2"/>
+  {%- elif name == 'briefcase' -%}
+  <rect x="3" y="7" width="18" height="13" rx="2.5"/>
+  <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+  <path d="M3 12.5h18"/>
+  {%- elif name == 'trend-up' -%}
+  <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/>
+  <polyline points="16 7 22 7 22 13"/>
+  {%- elif name == 'trend-down' -%}
+  <polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/>
+  <polyline points="16 17 22 17 22 11"/>
+  {%- elif name == 'activity' -%}
+  <polyline points="22 12 18 12 15 20 9 4 6 12 2 12"/>
+  {%- elif name == 'shield' -%}
+  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+  {%- elif name == 'shield-check' -%}
+  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+  <path d="m9 12 2 2 4-4"/>
+  {%- elif name == 'target' -%}
+  <circle cx="12" cy="12" r="9"/>
+  <circle cx="12" cy="12" r="5"/>
+  <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>
+  {%- elif name == 'lock' -%}
+  <rect x="5" y="11" width="14" height="10" rx="2"/>
+  <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+  {%- elif name == 'clock' -%}
+  <circle cx="12" cy="12" r="9"/>
+  <polyline points="12 7 12 12 15.5 14"/>
+  {%- elif name == 'upload' -%}
+  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+  <polyline points="17 8 12 3 7 8"/>
+  <line x1="12" y1="3" x2="12" y2="15"/>
+  {%- elif name == 'download' -%}
+  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+  <polyline points="7 10 12 15 17 10"/>
+  <line x1="12" y1="15" x2="12" y2="3"/>
+  {%- elif name == 'calculator' -%}
+  <rect x="4" y="2.5" width="16" height="19" rx="2.5"/>
+  <line x1="8" y1="6.5" x2="16" y2="6.5"/>
+  <circle cx="8.5" cy="11.5" r=".9" fill="currentColor" stroke="none"/>
+  <circle cx="12" cy="11.5" r=".9" fill="currentColor" stroke="none"/>
+  <circle cx="15.5" cy="11.5" r=".9" fill="currentColor" stroke="none"/>
+  <circle cx="8.5" cy="15.5" r=".9" fill="currentColor" stroke="none"/>
+  <circle cx="12" cy="15.5" r=".9" fill="currentColor" stroke="none"/>
+  <line x1="15.5" y1="14.5" x2="15.5" y2="17.5"/>
+  {%- elif name == 'flask' -%}
+  <path d="M9 3h6"/>
+  <path d="M10 3v5.4a2 2 0 0 1-.45 1.27L4.8 15.6A2.5 2.5 0 0 0 6.75 20h10.5a2.5 2.5 0 0 0 1.95-4.4l-4.75-5.93A2 2 0 0 1 14 8.4V3"/>
+  <path d="M7.2 14.5h9.6"/>
+  {%- elif name == 'sparkles' -%}
+  <path d="m12 3 1.9 4.8L18.7 9.7l-4.8 1.9L12 16.4l-1.9-4.8-4.8-1.9 4.8-1.9L12 3z"/>
+  <path d="M19 15v4M17 17h4"/>
+  <path d="M5 17v2M4 18h2"/>
+  {%- elif name == 'check-circle' -%}
+  <circle cx="12" cy="12" r="9"/>
+  <path d="m8.5 12.2 2.4 2.4 4.8-4.8"/>
+  {%- elif name == 'alert' -%}
+  <path d="m10.3 3.9-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3.1l-8-14a2 2 0 0 0-3.4 0z"/>
+  <line x1="12" y1="9" x2="12" y2="13.5"/>
+  <circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/>
+  {%- elif name == 'info' -%}
+  <circle cx="12" cy="12" r="9"/>
+  <line x1="12" y1="16" x2="12" y2="11.5"/>
+  <circle cx="12" cy="8.2" r=".9" fill="currentColor" stroke="none"/>
+  {%- elif name == 'external' -%}
+  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+  <polyline points="15 3 21 3 21 9"/>
+  <line x1="10" y1="14" x2="21" y2="3"/>
+  {%- elif name in ('sliders', 'Sliders') -%}
+  <line x1="4" y1="6" x2="20" y2="6"/>
+  <line x1="4" y1="12" x2="20" y2="12"/>
+  <line x1="4" y1="18" x2="20" y2="18"/>
+  <circle cx="9" cy="6" r="2.2" fill="var(--surface)" stroke="currentColor"/>
+  <circle cx="15" cy="12" r="2.2" fill="var(--surface)" stroke="currentColor"/>
+  <circle cx="10" cy="18" r="2.2" fill="var(--surface)" stroke="currentColor"/>
+  {%- elif name == 'desktop' -%}
+  <rect x="2.5" y="3.5" width="19" height="13" rx="2"/>
+  <line x1="8" y1="20.5" x2="16" y2="20.5"/>
+  <line x1="12" y1="16.5" x2="12" y2="20.5"/>
+  {%- elif name == 'globe' -%}
+  <circle cx="12" cy="12" r="9"/>
+  <line x1="3" y1="12" x2="21" y2="12"/>
+  <path d="M12 3a14.5 14.5 0 0 1 0 18 14.5 14.5 0 0 1 0-18z"/>
+  {%- elif name == 'cpu' -%}
+  <rect x="6" y="6" width="12" height="12" rx="2"/>
+  <rect x="9.5" y="9.5" width="5" height="5" rx=".8"/>
+  <path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>
+  {%- elif name == 'key' -%}
+  <circle cx="8" cy="15" r="4.5"/>
+  <path d="m11.3 11.7 9.2-9.2"/>
+  <path d="m17 6 2.5 2.5M14.5 8.5 17 11"/>
+  {%- elif name == 'bell' -%}
+  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>
+  <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+  {%- elif name == 'database' -%}
+  <ellipse cx="12" cy="5.5" rx="8" ry="3"/>
+  <path d="M4 5.5v13c0 1.66 3.58 3 8 3s8-1.34 8-3v-13"/>
+  <path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/>
+  {%- elif name == 'book' -%}
+  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+  {%- elif name == 'eye-off' -%}
+  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-8-10-8a18.45 18.45 0 0 1 5.06-5.94"/>
+  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19"/>
+  <line x1="2" y1="2" x2="22" y2="22"/>
+  {%- elif name == 'copy' -%}
+  <rect x="9" y="9" width="12" height="12" rx="2"/>
+  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+  {%- elif name == 'trash' -%}
+  <polyline points="3 6 5 6 21 6"/>
+  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+  {%- elif name == 'edit' -%}
+  <path d="M12 20h9"/>
+  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+  {%- elif name == 'arrow-left' -%}
+  <line x1="19" y1="12" x2="5" y2="12"/>
+  <polyline points="12 19 5 12 12 5"/>
+  {%- elif name == 'arrow-right' -%}
+  <line x1="5" y1="12" x2="19" y2="12"/>
+  <polyline points="12 5 19 12 12 19"/>
+  {%- elif name == 'layers' -%}
+  <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+  <polyline points="2 17 12 22 22 17"/>
+  <polyline points="2 12 12 17 22 12"/>
+  {%- elif name == 'chart' -%}
+  <line x1="18" y1="20" x2="18" y2="10"/>
+  <line x1="12" y1="20" x2="12" y2="4"/>
+  <line x1="6" y1="20" x2="6" y2="14"/>
+  {%- elif name == 'search' -%}
+  <circle cx="11" cy="11" r="7"/>
+  <line x1="20" y1="20" x2="16.2" y2="16.2"/>
+  {%- else -%}
+  <circle cx="12" cy="12" r="8"/>
+  {%- endif -%}
+</svg>
+{%- endmacro %}
+
+{% macro empty_art(name='radar', tone='brand') -%}
+<div class="kp-empty-art kp-tone-{{ tone }}">{{ icon(name, 26) }}</div>
+{%- endmacro %}
+
+{% macro page_ui() -%}
+<style id="kp-page-ui">
+  .kp-ico { flex: 0 0 auto; display: inline-block; vertical-align: -0.16em; }
+  :where(.stat-grid) {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  @media (max-width: 920px) { :where(.stat-grid) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 520px) { :where(.stat-grid) { grid-template-columns: 1fr; } }
+  @container main (max-width: 820px) { :where(.stat-grid) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @container main (max-width: 480px) { :where(.stat-grid) { grid-template-columns: 1fr; } }
+
+  :where(.stat-card) {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 15px 18px;
+    box-shadow: var(--shadow-1);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  :where(.stat-label) {
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  :where(.stat-value) {
+    font-size: 21px;
+    font-weight: 680;
+    letter-spacing: -0.02em;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  :where(.stat-sub) {
+    font-size: 11.5px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .kp-stat-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+  }
+  .kp-icon-badge {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    background: var(--brand-soft);
+    color: var(--brand-2);
+  }
+  .kp-icon-badge.tone-up { background: var(--up-soft); color: var(--up); }
+  .kp-icon-badge.tone-down { background: var(--down-soft); color: var(--down); }
+  .kp-icon-badge.tone-warn { background: var(--warn-soft); color: var(--warn); }
+  .kp-icon-badge.tone-neutral { background: var(--bg-soft); color: var(--ink-2); }
+
+  .kp-title-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .kp-title-row .kp-ico { color: var(--brand-2); }
+
+  .kp-empty-art {
+    width: 54px;
+    height: 54px;
+    margin: 0 auto 12px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--brand-soft);
+    color: var(--brand-2);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--brand-soft) 45%, transparent);
+  }
+  .kp-empty-art.kp-tone-down {
+    background: var(--down-soft);
+    color: var(--down);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--down-soft) 45%, transparent);
+  }
+  .kp-empty-art.kp-tone-warn {
+    background: var(--warn-soft);
+    color: var(--warn);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--warn-soft) 45%, transparent);
+  }
+
+  :where(.filter-bar) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  :where(.seg-group) {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px;
+    border-radius: 10px;
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    gap: 2px;
+  }
+  :where(.seg-btn) {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 11px;
+    border-radius: 7px;
+    font-size: 12.5px;
+    font-weight: 550;
+    color: var(--ink-2);
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background .14s, color .14s, box-shadow .14s;
+  }
+  :where(.seg-btn:hover) { color: var(--ink); text-decoration: none; }
+  :where(.seg-btn.active) {
+    background: var(--surface);
+    color: var(--brand-2);
+    box-shadow: var(--shadow-1);
+    font-weight: 600;
+  }
+
+  :where(.settings-layout) {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 900px) { :where(.settings-layout) { grid-template-columns: 1fr; } }
+  @container main (max-width: 820px) { :where(.settings-layout) { grid-template-columns: 1fr; } }
+
+  :where(.settings-nav) {
+    position: sticky;
+    top: 76px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    box-shadow: var(--shadow-1);
+  }
+  @media (max-width: 900px) {
+    :where(.settings-nav) {
+      position: static;
+      flex-direction: row;
+      overflow-x: auto;
+      padding: 6px;
+    }
+  }
+  @container main (max-width: 820px) {
+    :where(.settings-nav) {
+      position: static;
+      flex-direction: row;
+      overflow-x: auto;
+      padding: 6px;
+    }
+  }
+  .kp-snav-link {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 11px;
+    border-radius: 9px;
+    font-size: 13px;
+    font-weight: 550;
+    color: var(--ink-2);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background .12s, color .12s;
+  }
+  .kp-snav-link:hover {
+    background: var(--bg-soft);
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .kp-snav-link.active {
+    background: var(--brand-soft);
+    color: var(--brand-2);
+    font-weight: 600;
+  }
+  :where(.settings-section) {
+    scroll-margin-top: 78px;
+  }
+  :where(.switch-row) {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  :where(.switch-row:last-child) { border-bottom: none; }
+
+  .kp-mini-table td, .kp-mini-table th { padding: 10px 14px; }
+  .kp-price-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(122px, 1fr));
+    gap: 1px;
+    background: var(--line-soft);
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    overflow: hidden;
+  }
+  .kp-price-strip > div {
+    background: var(--surface);
+    padding: 11px 13px;
+    min-width: 0;
+  }
+  .kp-price-strip .k {
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 3px;
+  }
+  .kp-price-strip .v {
+    font-size: 13.5px;
+    font-weight: 620;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .kp-todo-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    margin-bottom: 10px;
+    box-shadow: var(--shadow-1);
+    flex-wrap: wrap;
+  }
+  .kp-todo-card.is-urgent {
+    border-left: 3px solid var(--up);
+  }
+  .kp-todo-card.is-normal {
+    border-left: 3px solid var(--brand-2);
+  }
+
+  /* 四关量化证伪流水线胶囊条 */
+  .kp-gate-strip {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    padding: 12px 18px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  @media (max-width: 820px) { .kp-gate-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @container main (max-width: 760px) { .kp-gate-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .kp-gate-pill {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 8px 11px;
+    border-radius: 9px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    min-width: 0;
+  }
+  .kp-gate-pill.st-passed { border-color: color-mix(in srgb, var(--down) 38%, var(--line)); background: color-mix(in srgb, var(--down-soft) 45%, var(--surface)); }
+  .kp-gate-pill.st-warn { border-color: var(--warn-line); background: color-mix(in srgb, var(--warn-soft) 55%, var(--surface)); }
+  .kp-gate-pill.st-failed { border-color: color-mix(in srgb, var(--up) 35%, var(--line)); background: color-mix(in srgb, var(--up-soft) 45%, var(--surface)); }
+  .kp-gate-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink-2);
+  }
+  .kp-gate-pill.st-passed .kp-gate-dot { color: var(--down); }
+  .kp-gate-pill.st-warn .kp-gate-dot { color: var(--warn); }
+  .kp-gate-pill.st-failed .kp-gate-dot { color: var(--up); }
+  .kp-gate-pill.st-pending .kp-gate-dot { color: var(--muted); }
+  .kp-gate-val {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    font-weight: 620;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* 3x3 参数高原稳健性热力矩阵 */
+  .kp-heatmap {
+    display: grid;
+    grid-template-columns: auto repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    align-items: stretch;
+    margin-top: 10px;
+  }
+  .kp-hm-axis {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 6px;
+    text-align: center;
+  }
+  .kp-hm-cell {
+    border-radius: 9px;
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    text-align: center;
+    position: relative;
+  }
+  .kp-hm-cell.pos-strong {
+    background: color-mix(in srgb, var(--up-soft) 85%, var(--surface));
+    border-color: color-mix(in srgb, var(--up) 45%, var(--line));
+  }
+  .kp-hm-cell.pos-mild {
+    background: color-mix(in srgb, var(--up-soft) 45%, var(--surface));
+    border-color: color-mix(in srgb, var(--up) 25%, var(--line));
+  }
+  .kp-hm-cell.neg-cell {
+    background: color-mix(in srgb, var(--down-soft) 55%, var(--surface));
+    border-color: color-mix(in srgb, var(--down) 30%, var(--line));
+  }
+  .kp-hm-cell.is-center {
+    box-shadow: 0 0 0 2px var(--brand-2);
+  }
+  .kp-hm-r {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 13.5px;
+    font-weight: 700;
+  }
+  .kp-hm-meta {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+  }
+</style>
+{%- endmacro %}

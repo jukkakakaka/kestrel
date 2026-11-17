@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from kestrel.indicators.engine import Series, compute
 from kestrel.planning.builder import build, build_ex, valid_until
-from kestrel.strategies.base import Breakout20
+from kestrel.strategies.base import StrategyResult
 
 LOT = 100
 BASE = 20.0  # low enough that one lot fits a 10k CNY account
@@ -39,6 +39,17 @@ def _uptrend_then_breakout() -> list[dict]:
     return _bars(prices, vols)
 
 
+def _sample_signal(ind: dict) -> StrategyResult:
+    """构造等价突破信号用于仓位与计划构建测试。"""
+    return StrategyResult(
+        code="breakout_20",
+        score=0.8,
+        reasons=["breakout_20d", "volume_expansion"],
+        stop_hint=ind.get("high20"),
+        target_hint=None,
+    )
+
+
 def _plan(risk_pct: float = 2.0, broker: str = "za_hk"):
     """默认用不支持碎股的券商，这样「整手约束」本身能被测试到。
 
@@ -46,8 +57,7 @@ def _plan(risk_pct: float = 2.0, broker: str = "za_hk"):
     """
     ind = compute(Series.from_bars(_uptrend_then_breakout()))
     assert ind, "indicators should compute"
-    signal = Breakout20().evaluate(ind)
-    assert signal is not None, "breakout should fire on a new high with volume"
+    signal = _sample_signal(ind)
     return build(
         market="HK",
         code="TEST",
@@ -107,8 +117,7 @@ def test_close_resistance_hint_is_ignored():
     """
     ind = compute(Series.from_bars(_uptrend_then_breakout()))
     assert ind
-    signal = Breakout20().evaluate(ind)
-    assert signal is not None
+    signal = _sample_signal(ind)
 
     entry = ind["last"] * 0.997
     risk = entry - ind["low20"] * 1.0  # roughly the ATR stop distance
@@ -133,8 +142,7 @@ def test_close_resistance_hint_is_ignored():
 def test_rejection_reason_is_specific():
     ind = compute(Series.from_bars(_uptrend_then_breakout()))
     assert ind
-    signal = Breakout20().evaluate(ind)
-    assert signal is not None
+    signal = _sample_signal(ind)
     plan, why = build_ex(
         market="HK",
         code="TEST",

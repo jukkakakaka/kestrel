@@ -1,7 +1,7 @@
-"""Turn a strategy signal into an executable trade plan.
+"""将策略信号转换为可执行的含费交易计划。
 
-The position size is always computed locally from the risk budget. External agents
-may adjust stop/targets/confidence, never the size.
+仓位股数完全由本地风控预算和可用现金决定，任何外部大模型或助手只能提供观点，
+绝不允许绕过此模块擅自篡改仓位大小或取消止损。
 """
 
 from __future__ import annotations
@@ -9,14 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+from kestrel.core.money import currency_for, from_cny, round_tick
+from kestrel.core.quantity import display, tradable_buy_qty, tradable_step
 from kestrel.fees.calculator import round_trip
 from kestrel.strategies.base import StrategyResult
 
-FX = {"CNY": Decimal("1"), "HKD": Decimal("0.92"), "USD": Decimal("7.1")}
-CURRENCY = {"CN": "CNY", "HK": "HKD", "US": "USD"}
-TZ = {"CN": "Asia/Shanghai", "HK": "Asia/Hong_Kong", "US": "America/New_York"}
-
-# Minimum reward-to-risk a plan must offer before it is worth showing.
+# 最低风险回报比门槛：低于 1.5:1 的计划在扣除成本与正常胜率后长期期望为负
 MIN_R = Decimal("1.5")
 
 
@@ -33,7 +31,7 @@ class Plan:
     stop: Decimal
     target1: Decimal
     target2: Decimal | None
-    qty: int
+    qty: Decimal | int
     lot_size: int
     risk_amount: Decimal
     est_fees: Decimal
@@ -44,6 +42,7 @@ class Plan:
     invalidation: list[str] = field(default_factory=list)
     explain_zh: str = ""
     explain_en: str = ""
+    sizing_breakdown: dict = field(default_factory=dict)
 
 
 def _round(value: Decimal, digits: str = "0.001") -> Decimal:
@@ -51,12 +50,7 @@ def _round(value: Decimal, digits: str = "0.001") -> Decimal:
 
 
 def valid_until(market: str, horizon: str = "short") -> str:
-    """When the plan stops being actionable.
-
-    Daily swing plans die at the next close. A weekly or monthly plan that
-    expired the same evening would be unusable, so the lifetime travels with the
-    horizon instead of being hard-coded to one session.
-    """
+    """计算计划失效时间（UTC ISO），与交易周期同步缩放。"""
     from datetime import datetime, timedelta
 
     from kestrel.services import timeframe as tf
@@ -85,43 +79,49 @@ def build_ex(
     lot_size: int,
     broker: str | None,
     horizon: str = "short",
+    available_cash_cny: float | None = None,
 ) -> tuple[Plan | None, str | None]:
-    """Build a plan, or explain why the setup is not worth taking.
-
-    The reason matters: "one lot already exceeds the risk budget" is a capital
-    problem the user can fix, while "reward too small" is the setup's fault.
-    Treating them the same made the scan report look like it was broken.
-    """
+    """生成完整计划或返回精准拒绝原因。"""
     last = Decimal(str(ind.get("last") or 0))
     atr = Decimal(str(ind.get("atr14") or 0))
     if last <= 0:
         return None, "no_price"
 
-    currency = CURRENCY.get(market.upper(), "CNY")
-    fx = FX.get(currency, Decimal("1"))
-    capital_local = Decimal(str(capital_cny)) / fx
+    mkt = market.upper()
+    currency = currency_for(mkt)
+    capital_local = from_cny(Decimal(str(capital_cny)), currency)
 
-    entry_low = _round(last * Decimal("0.997"))
-    entry_high = _round(last * Decimal("1.003"))
+    # 入场区间随波动率适度自适应（0.3%~0.8%），避免次日正常开盘即脱离区间
+    atr_pct_raw = ind.get("atr_pct")
+    band = Decimal("0.003")
+    if atr_pct_raw:
+        band = min(
+            Decimal("0.008"),
+            max(Decimal("0.003"), Decimal(str(atr_pct_raw)) / Decimal("100") * Decimal("0.18")),
+        )
+    entry_low = round_tick(last * (Decimal("1") - band), mkt, code)
+    entry_high = round_tick(last * (Decimal("1") + band), mkt, code)
+    if entry_high < entry_low:
+        entry_high = entry_low
 
-    # 止损：以 2 倍 ATR 为基准，策略给的更近的止损位优先采用。
-    # 早先这里写成了「hint 比 ATR 更远也用它」，于是 trend_pullback 的 low20
-    # 会把 4% 的 ATR 止损拉成 10% 的宽止损——和注释、和「取更近的」都相反。
+    # 止损：以 2 倍 ATR 为基准，策略给出更近的止损参考位时优先采用
     atr_stop = last - atr * Decimal("2")
-    stop = atr_stop if atr > 0 else last * Decimal("0.97")
+    stop_raw = atr_stop if atr > 0 else last * Decimal("0.97")
     hint = signal.stop_hint
     if hint:
         hint_d = Decimal(str(hint))
         if Decimal("0") < hint_d < last:
-            stop = max(stop, hint_d)
-    stop = min(stop, entry_low * Decimal("0.99"))
+            stop_raw = max(stop_raw, hint_d)
+    stop_raw = min(stop_raw, entry_low * Decimal("0.99"))
+    stop = round_tick(stop_raw, mkt, code)
+    if stop >= entry_low:
+        stop = round_tick(entry_low * Decimal("0.985"), mkt, code)
 
     risk_per_share = entry_low - stop
     if risk_per_share <= 0:
         return None, "bad_stop"
     stop_pct = risk_per_share / entry_low
-    # The band widens with the bar size: two weekly ATRs is a normal stop, two
-    # monthly ATRs can be 25% and would otherwise be rejected as "too wide".
+
     from kestrel.services import timeframe as tf
 
     floor, ceiling = tf.get(horizon).stop_band
@@ -133,46 +133,78 @@ def build_ex(
     risk_budget = capital_local * Decimal(str(risk_pct)) / Decimal("100")
     raw_qty = risk_budget / risk_per_share
     lot = max(1, int(lot_size))
-    # 能买碎股的券商不必凑整手：一手就超预算才是真正的问题，而不是「市场规则」。
-    # A 股永远是 100 股一手；港股看券商（星财富 / 富途可买碎股）；美股支持
-    # 小数股的套餐按 0.0001 股步进。
-    from kestrel.core.quantity import floor_step, tradable_step
+    step = tradable_step(mkt, lot, broker, code=code)
 
-    step = tradable_step(market, lot, broker)
-    qty = floor_step(raw_qty, step)
+    qty = tradable_buy_qty(raw_qty, mkt, lot, broker, code=code, entry_price=entry_low)
     if qty <= 0:
         return None, "lot_too_big"
 
-    # Never let one position exceed 35% of capital.
-    cap_qty = floor_step((capital_local * Decimal("0.35")) / entry_low, step)
+    # 单票持仓上限 35%
+    cap_qty = tradable_buy_qty(
+        (capital_local * Decimal("0.35")) / entry_low,
+        mkt,
+        lot,
+        broker,
+        code=code,
+        entry_price=entry_low,
+    )
     if cap_qty <= 0:
         return None, "lot_too_big"
+    cap_applied = qty > cap_qty
     qty = min(qty, cap_qty)
 
-    cost = entry_low * qty
-    fees = round_trip(market, cost, Decimal(qty), broker)
-    breakeven = entry_low + (fees / qty)
+    # 可用现金硬约束（预留约 0.5% 手续费与小数波动冗余）
+    cash_capped = False
+    if available_cash_cny is not None:
+        cash_local = from_cny(Decimal(str(max(0.0, available_cash_cny))), currency)
+        cash_qty = tradable_buy_qty(
+            (cash_local * Decimal("0.992")) / entry_low,
+            mkt,
+            lot,
+            broker,
+            code=code,
+            entry_price=entry_low,
+        )
+        if cash_qty <= 0:
+            return None, "cash_insufficient"
+        if qty > cash_qty:
+            qty = cash_qty
+            cash_capped = True
 
-    target1 = entry_low + risk_per_share * Decimal("2")
-    target2 = entry_low + risk_per_share * Decimal("3")
+    cost = entry_low * qty
+    fees = round_trip(mkt, cost, Decimal(qty), broker)
+    breakeven = round_tick(entry_low + (fees / qty), mkt, code)
+
+    target1 = round_tick(entry_low + risk_per_share * Decimal("2"), mkt, code)
+    target2 = round_tick(entry_low + risk_per_share * Decimal("3"), mkt, code)
     if signal.target_hint:
-        hint_t = Decimal(str(signal.target_hint))
-        # A hint is only worth taking when it still pays for the risk. The 20-day
-        # high sits just above a pullback entry more often than not, and using it
-        # blindly produced plans with a 0.9:1 reward-to-risk.
+        hint_t = round_tick(Decimal(str(signal.target_hint)), mkt, code)
         hint_r = (hint_t - entry_low) / risk_per_share if risk_per_share > 0 else Decimal("0")
         if hint_t > entry_high and hint_r >= MIN_R:
             target1 = hint_t
-            target2 = entry_low + (hint_t - entry_low) * Decimal("1.5")
+            target2 = round_tick(entry_low + (hint_t - entry_low) * Decimal("1.5"), mkt, code)
 
     r_multiple = float((target1 - entry_low) / risk_per_share)
     if r_multiple < 1.5:
-        # Below 1.5:1 the fees and the odds both stop working. No plan beats a bad plan.
         return None, "low_reward"
     confidence = round(min(0.95, 0.35 + signal.score * 0.6), 3)
 
+    breakdown = {
+        "capital_cny": round(float(capital_cny), 2),
+        "currency": currency,
+        "capital_local": round(float(capital_local), 2),
+        "risk_pct": float(risk_pct),
+        "risk_budget_local": round(float(risk_budget), 2),
+        "risk_per_share": round(float(risk_per_share), 4),
+        "raw_qty": round(float(raw_qty), 4),
+        "step": display(step),
+        "cap_applied": cap_applied,
+        "cash_capped": cash_capped,
+        "final_qty": display(qty),
+    }
+
     plan = Plan(
-        market=market.upper(),
+        market=mkt,
         code=code,
         name=name,
         currency=currency,
@@ -180,26 +212,27 @@ def build_ex(
         score=round(signal.score, 3),
         entry_low=entry_low,
         entry_high=entry_high,
-        stop=_round(stop),
-        target1=_round(target1),
-        target2=_round(target2),
+        stop=stop,
+        target1=target1,
+        target2=target2,
         qty=qty,
         lot_size=lot,
         risk_amount=_round(risk_per_share * qty, "0.01"),
         est_fees=_round(fees, "0.01"),
-        breakeven=_round(breakeven),
+        breakeven=breakeven,
         r_multiple=round(r_multiple, 2),
         confidence=confidence,
-        valid_until=valid_until(market, horizon),
+        valid_until=valid_until(mkt, horizon),
         invalidation=["close_below_stop", "expired"],
-        explain_zh=_explain_zh(market, name, signal, entry_low, stop, target1, qty, risk_pct),
-        explain_en=_explain_en(market, name, signal, entry_low, stop, target1, qty, risk_pct),
+        explain_zh=_explain_zh(mkt, name, signal, entry_low, stop, target1, qty, risk_pct),
+        explain_en=_explain_en(mkt, name, signal, entry_low, stop, target1, qty, risk_pct),
+        sizing_breakdown=breakdown,
     )
     return plan, None
 
 
 def build(**kwargs) -> Plan | None:
-    """Plan-only wrapper for callers that do not need the rejection reason."""
+    """只返回 Plan 的简化封装。"""
     plan, _reason = build_ex(**kwargs)
     return plan
 
@@ -220,9 +253,6 @@ def _fmt(value: Decimal, places: int = 3) -> str:
 
 
 def _fmt_shares(qty: Decimal) -> str:
-    """股数按人读的方式写：100，不是 100.000；0.5 就写 0.5。"""
-    from kestrel.core.quantity import display
-
     return display(qty)
 
 
@@ -231,10 +261,10 @@ def _explain_zh(market, name, signal, entry, stop, target, qty, risk_pct) -> str
     risk = (entry - stop) / entry * 100
     return (
         f"为什么是它：{reasons}。\n"
-        f"怎么买：在 {_fmt(entry)} 附近买入 {_fmt_shares(qty)} 股。\n"
+        f"怎么买：挂限价单在 {_fmt(entry)} 附近买入 {_fmt_shares(qty)} 股。\n"
         f"错了怎么办：跌破 {_fmt(stop)} 就走，这一笔亏损控制在 {risk:.1f}% 左右，"
         f"约占总资金的 {risk_pct:.1f}%。\n"
-        f"目标：先看 {_fmt(target)}，到了至少卖一半。"
+        f"目标：先看 {_fmt(target)}，到了按规则分批止盈。"
     )
 
 
@@ -243,8 +273,8 @@ def _explain_en(market, name, signal, entry, stop, target, qty, risk_pct) -> str
     risk = (entry - stop) / entry * 100
     return (
         f"Why: {reasons}.\n"
-        f"How: buy {_fmt_shares(qty)} shares near {_fmt(entry)}.\n"
+        f"How: place a limit order for {_fmt_shares(qty)} shares near {_fmt(entry)}.\n"
         f"If wrong: exit below {_fmt(stop)}, risking about {risk:.1f}% of the position "
         f"({risk_pct:.1f}% of capital).\n"
-        f"Target: {_fmt(target)}; take at least half there."
+        f"Target: {_fmt(target)}; scale out systematically there."
     )

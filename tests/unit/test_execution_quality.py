@@ -119,3 +119,38 @@ def test_best_and_worst_are_named(home):
     report = execution.quality_report()
     assert report["worst"]["code"] == "MSFT"
     assert report["best"]["code"] == "AAPL"
+
+
+def test_partial_sell_does_not_inflate_samples_or_miscount_partial_fills(home):
+    """分批卖出同一笔按建议买入的持仓时，不应把同一建议拆成两笔误判成部分建仓。"""
+    rec_id = _plan(entry="100", stop="95", qty=100)
+    _buy(rec_id, "100", qty=100)
+    execution.record(
+        execution.Fill(market="US", code="AAPL", side="sell", qty=40, price=Decimal("108"))
+    )
+    report = execution.quality_report()
+    assert len(report["samples"]) == 1
+    assert report["partial_fills"] == 0
+    assert report["execution_drag_cny"] is not None
+
+
+def test_preview_fill_and_pre_trade_check_contract(home):
+    """成交实时预演与 OrderIntent 风控预检正确核算风险、保本与手数。"""
+    rec_id = _plan(entry="100", stop="95", qty=100)
+    prev = execution.preview_fill_vs_plan(
+        market="US", code="AAPL", side="buy", qty="100", price="102", rec_id=rec_id
+    )
+    assert prev["ok"] is True
+    assert prev["plan"]["in_zone"] is False
+    assert prev["plan"]["deviation_r"] == pytest.approx(0.4)
+    assert prev["breakeven"] > 102.0
+
+    intent = execution.OrderIntent(
+        market="US", code="AAPL", side="buy", qty=Decimal("10"), limit_price=Decimal("102")
+    )
+    chk = execution.adapter("manual").pre_check(intent)
+    assert chk.ok is True
+    assert isinstance(chk.warnings, list)
+    ticket = execution.adapter("manual").submit_order(intent)
+    assert ticket.ok is True
+    assert len(execution.adapter("manual").open_orders()) == 1

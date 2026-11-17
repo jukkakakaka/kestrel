@@ -18,23 +18,32 @@ SOURCES = [
     {
         "key": "eastmoney",
         "label": "东方财富",
+        "label_en": "Eastmoney",
         "markets": "A 股 / 港股 / 美股",
+        "markets_en": "CN / HK / US",
         "kind": "quote+history",
         "note": "JSON、UTF-8、字段最全，主源。",
+        "note_en": "JSON, UTF-8, richest fields — primary source.",
     },
     {
         "key": "tencent",
         "label": "腾讯行情",
+        "label_en": "Tencent Finance",
         "markets": "A 股 / 港股 / 美股",
+        "markets_en": "CN / HK / US",
         "kind": "quote",
         "note": "GBK 文本，速度快，作备份。",
+        "note_en": "Fast quote feed used as primary fallback.",
     },
     {
         "key": "sina",
         "label": "新浪行情",
+        "label_en": "Sina Finance",
         "markets": "A 股 / 港股 / 美股",
+        "markets_en": "CN / HK / US",
         "kind": "quote",
         "note": "需要 Referer，作第三备份。",
+        "note_en": "Tertiary quote fallback with Referer header.",
     },
 ]
 
@@ -52,10 +61,15 @@ def is_enabled(key: str) -> bool:
     return bool(value)
 
 
-def list_sources() -> list[dict]:
+def list_sources(locale: str = "zh-CN") -> list[dict]:
+    en = str(locale).lower().startswith("en")
     out = []
     for item in SOURCES:
         row = dict(item)
+        if en:
+            row["label"] = item["label_en"]
+            row["markets"] = item["markets_en"]
+            row["note"] = item["note_en"]
         row["enabled"] = is_enabled(item["key"])
         out.append(row)
     return out
@@ -94,14 +108,13 @@ def build():
     return QuoteChain(providers=providers)
 
 
-def list_all() -> list[dict]:
+def list_all(locale: str = "zh-CN") -> list[dict]:
     """Built-ins plus user-defined sources, for the settings table."""
     from kestrel.datasources.custom import load_custom
 
+    en = str(locale).lower().startswith("en")
     out = []
-    for item in SOURCES:
-        row = dict(item)
-        row["enabled"] = is_enabled(item["key"])
+    for row in list_sources(locale):
         row["builtin"] = True
         out.append(row)
     for cfg in load_custom():
@@ -109,7 +122,7 @@ def list_all() -> list[dict]:
             {
                 "key": cfg.get("key"),
                 "label": cfg.get("label"),
-                "markets": cfg.get("markets") or "全部",
+                "markets": cfg.get("markets") or ("All" if en else "全部"),
                 "kind": "custom",
                 "note": cfg.get("url", ""),
                 "enabled": True,

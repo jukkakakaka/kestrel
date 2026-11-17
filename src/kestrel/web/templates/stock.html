@@ -1,66 +1,164 @@
 {% extends "base.html" %}
+{% from "_page_icons.html" import icon, empty_art, page_ui %}
 {% block title %}{{ sym.name if sym else code }} · {{ t('app.name') }}{% endblock %}
 
 {% block content %}
+{{ page_ui() }}
 {% if not sym %}
-<div class="card"><div class="empty"><strong>{{ t('stock.missing_title') }}</strong>{{ market }} {{ code }}</div></div>
+<section class="card">
+  <div class="empty">
+    {{ empty_art('search', 'warn') }}
+    <strong>{{ t('stock.missing_title') }}</strong>
+    <p class="mono">{{ market }} · {{ code }}</p>
+    <div class="row-actions" style="justify-content:center;margin-top:14px;">
+      <a class="btn ghost sm" href="/market">{{ icon('arrow-left', 14) }} <span>{{ t('action.back') }}</span></a>
+    </div>
+  </div>
+</section>
 {% else %}
 
 <div class="page-head">
   <div>
-    <h1>
+    <h1 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
       <span class="tag tag-{{ sym.market|lower }}">{{ sym.market }}</span>
-      {{ sym.name }} <span class="mono muted" style="font-size:15px;">{{ sym.code }}</span>
+      <span>{{ sym.name }}</span>
+      <span class="mono muted" style="font-size:15px;font-weight:500;">{{ sym.code }}</span>
     </h1>
     <div class="sub">
-      {{ status.name }} · {{ status.label }} · 当地 {{ status.local_time }}
+      {{ status.name }} · {{ status.label }} · {{ t('market.local_time') }} {{ status.local_time }}
       {% if sym.exchange %} · {{ sym.exchange }}{% endif %}
     </div>
   </div>
   <div class="page-actions">
-    <a class="btn ghost" href="{{ (quote.source if quote else 'eastmoney') | src_url(sym.market, sym.code) }}"
-       target="_blank" rel="noopener">{{ t('stock.external') }} ↗</a>
-    <a class="btn ghost" href="/market">{{ t('action.back') }}</a>
+    <button type="button" class="btn sm"
+            data-ask-copilot="{{ t('adv.ask_stock_q', name=sym.name, code=sym.code) }}"
+            data-symbol="{{ sym.market }}:{{ sym.code }}">
+      {{ icon('sparkles', 14) }}
+      <span>{{ t('copilot.ask_short') }}</span>
+    </button>
+    <button type="button" class="btn ghost sm"
+            data-open-fill
+            data-side="buy"
+            data-market="{{ sym.market }}"
+            data-code="{{ sym.code }}"
+            data-price="{{ '%.3f'|format(quote.price / 1000000) if quote and quote.price else '' }}">
+      {{ icon('plus', 14) }}
+      <span>{{ t('journal.add_fill') }}</span>
+    </button>
+    <a class="btn ghost sm" href="{{ (quote.source if quote else 'eastmoney') | src_url(sym.market, sym.code) }}"
+       target="_blank" rel="noopener">
+      <span>{{ t('stock.external') }}</span>
+      {{ icon('external', 13) }}
+    </a>
+    <a class="btn ghost sm" href="/market">
+      {{ icon('arrow-left', 14) }}
+      <span>{{ t('action.back') }}</span>
+    </a>
   </div>
 </div>
 
 {% if quote %}
-<div class="kpi">
-  <div class="k"><div class="v mono {% if quote.change_pct is not none %}{{ 'up' if quote.change_pct >= 0 else 'down' }}{% endif %}">{{ quote.price | money(3) }}</div><div class="l">{{ t('stock.price') }}</div></div>
-  <div class="k"><div class="v mono {% if quote.change_pct is not none %}{{ 'up' if quote.change_pct >= 0 else 'down' }}{% endif %}">{{ quote.change_pct | pct }}</div><div class="l">{{ t('stock.change') }}</div></div>
+<section class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('stock.price') }}</span>
+      <span class="kp-icon-badge">{{ icon('activity', 16) }}</span>
+    </div>
+    <div class="stat-value {% if quote.change_pct is not none %}{{ 'up' if quote.change_pct >= 0 else 'down' }}{% endif %}">
+      {{ quote.price | money(3) }}
+    </div>
+    <div class="stat-sub"><span>{{ sym.currency or sym.market }}</span></div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('stock.change') }}</span>
+      <span class="kp-icon-badge {{ 'tone-up' if (quote.change_pct or 0) >= 0 else 'tone-down' }}">
+        {{ icon('trend-up' if (quote.change_pct or 0) >= 0 else 'trend-down', 16) }}
+      </span>
+    </div>
+    <div class="stat-value {% if quote.change_pct is not none %}{{ 'up' if quote.change_pct >= 0 else 'down' }}{% endif %}">
+      {{ quote.change_pct | pct }}
+    </div>
+    <div class="stat-sub"><span>{{ status.label }}</span></div>
+  </div>
+
   {% if ind %}
-  <div class="k"><div class="v mono">{{ '%0.1f'|format(ind.rsi14) }}</div><div class="l">{{ t('stock.rsi') }}</div></div>
-  <div class="k"><div class="v mono">{{ '%0.2f'|format(ind.atr_pct) }}%</div><div class="l">{{ t('stock.atr') }}</div></div>
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('stock.rsi') }}</span>
+      <span class="kp-icon-badge tone-neutral">{{ icon('chart', 16) }}</span>
+    </div>
+    <div class="stat-value">{{ '%0.1f'|format(ind.rsi14) }}</div>
+    <div class="stat-sub"><span>MA20 {{ '%+.1f'|format(ind.dist_sma20 * 100) }}%</span></div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('stock.atr') }}</span>
+      <span class="kp-icon-badge tone-warn">{{ icon('shield', 16) }}</span>
+    </div>
+    <div class="stat-value">{{ '%0.2f'|format(ind.atr_pct) }}%</div>
+    <div class="stat-sub"><span>{{ t('stock.vol_ratio') }} {{ '%.2f'|format(ind.vol_ratio) }}×</span></div>
+  </div>
   {% endif %}
-</div>
+</section>
 {% endif %}
 
 <section class="card">
   <div class="card-head">
-    <h2>{{ t('stock.chart') }}</h2>
-    <span class="meta">{{ t('stock.chart_meta') }}</span>
+    <h2 class="kp-title-row">{{ icon('chart', 17) }} <span>{{ t('stock.chart') }}</span></h2>
+    <span class="meta">MA20 / MA60 · {{ t('stock.chart_meta') }}</span>
   </div>
   <div class="card-body">
     {% if chart and chart.bars %}
-    <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" width="100%" height="240" style="display:block;">
-      <defs>
-        <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="var(--brand-2)" stop-opacity=".18"/>
-          <stop offset="100%" stop-color="var(--brand-2)" stop-opacity="0"/>
-        </linearGradient>
-      </defs>
-      <polygon points="{{ chart.area }}" fill="url(#fill)"/>
-      <polyline points="{{ chart.line }}" fill="none" stroke="var(--brand-2)" stroke-width="1.8"/>
+    <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" width="100%" height="260" style="display:block;">
+      {# 计划价位辅助虚线（目标 / 入场区间 / 止损） #}
+      {% set line_labels = {
+        'target1': t('stock.line_target1'),
+        'entry_high': t('stock.line_entry_high'),
+        'entry_low': t('stock.line_entry_low'),
+        'stop': t('stock.line_stop')
+      } %}
+      {% for ln in chart.lines or [] %}
+      {% set stroke_col = 'var(--up)' if ln.kind == 'target' else ('var(--down)' if ln.kind == 'stop' else 'var(--brand-2)') %}
+      {% set label_y = (ln.y + 12) if ln.key == 'entry_low' else (ln.y - 4) %}
+      <line x1="12" y1="{{ ln.y }}" x2="{{ chart.width - 12 }}" y2="{{ ln.y }}"
+            stroke="{{ stroke_col }}"
+            stroke-width="1.2" stroke-dasharray="4 4" opacity=".78"/>
+      <text x="{{ chart.width - 16 }}" y="{{ label_y }}" text-anchor="end" font-size="10.5"
+            fill="{{ stroke_col }}"
+            style="paint-order:stroke;stroke:var(--surface);stroke-width:3.5px;stroke-linejoin:round;font-family:var(--mono);font-weight:600;">
+        {{ line_labels.get(ln.key, ln.key) }} {{ '%.2f'|format(ln.value) }}
+      </text>
+      {% endfor %}
+
+      {# K 线影线与蜡烛实体 #}
       {% for b in chart.bars %}
       <line x1="{{ b.x }}" y1="{{ b.high }}" x2="{{ b.x }}" y2="{{ b.low }}"
-            stroke="{{ 'var(--up)' if b.up else 'var(--down)' }}" stroke-width="1" opacity=".55"/>
+            stroke="{{ 'var(--up)' if b.up else 'var(--down)' }}" stroke-width="1.1"/>
+      <rect x="{{ b.x - (chart.candle_w / 2) }}" y="{{ b.body_y }}"
+            width="{{ chart.candle_w }}" height="{{ b.body_h }}"
+            fill="{{ 'var(--up)' if b.up else 'var(--down)' }}" rx="0.8"/>
       {% endfor %}
+
+      {% if chart.ma20 %}
+      <polyline points="{{ chart.ma20 }}" fill="none" stroke="var(--brand-2)" stroke-width="1.5" opacity=".9"/>
+      {% endif %}
+      {% if chart.ma60 %}
+      <polyline points="{{ chart.ma60 }}" fill="none" stroke="var(--warn)" stroke-width="1.5" opacity=".85"/>
+      {% endif %}
     </svg>
-    <div class="hint" style="margin-top:8px;">
-      {{ t('stock.range') }}：{{ chart.min | round(2) }} – {{ chart.max | round(2) }}
+    <div class="hint" style="margin-top:10px;display:flex;gap:14px;flex-wrap:wrap;">
+      <span>{{ t('stock.range') }}：{{ chart.min | round(2) }} – {{ chart.max | round(2) }}</span>
+      <span style="color:var(--brand-2);">━ MA20</span>
+      <span style="color:var(--warn);">━ MA60</span>
     </div>
     {% else %}
-    <div class="empty">{{ t('stock.no_bars') }}</div>
+    <div class="empty">
+      {{ empty_art('chart') }}
+      <p>{{ t('stock.no_bars') }}</p>
+    </div>
     {% endif %}
   </div>
 </section>
@@ -68,18 +166,18 @@
 {% if rec %}
 <section class="card">
   <div class="card-head">
-    <h2>{{ t('stock.advice') }}</h2>
-    <a class="btn sm ghost" href="/advice">{{ t('stock.goto_advice') }}</a>
+    <h2 class="kp-title-row">{{ icon('radar', 17) }} <span>{{ t('stock.advice') }}</span></h2>
+    <a class="btn sm ghost" href="/advice">{{ t('stock.goto_advice') }} {{ icon('arrow-right', 13) }}</a>
   </div>
   <div class="card-body">
     <p style="font-size:13.5px;margin-bottom:12px;">{{ rec.headline }}</p>
-    <div class="advice-figs" style="border:1px solid var(--line);border-radius:10px;">
-      <div><span class="k">{{ t('adv.entry') }}</span><span class="v">{{ rec.entry_low | cur(rec.currency) }}</span></div>
-      <div><span class="k">{{ t('adv.stop') }}</span><span class="v down">{{ rec.stop | cur(rec.currency) }}</span></div>
-      <div><span class="k">{{ t('adv.target') }}</span><span class="v up">{{ rec.target1 | cur(rec.currency) }}</span></div>
-      <div><span class="k">{{ t('adv.qty') }}</span><span class="v">{{ rec.qty }}</span></div>
-      <div><span class="k">{{ t('adv.rr') }}</span><span class="v">{{ '%.1f'|format(rec.r_multiple) }}:1</span></div>
-      <div><span class="k">{{ t('adv.risk') }}</span><span class="v down">{{ rec.risk_amount | cur(rec.currency) }}</span></div>
+    <div class="kp-price-strip">
+      <div><span class="k">{{ icon('activity', 12) }} {{ t('adv.entry') }}</span><span class="v mono">{{ rec.entry_low | cur(rec.currency) }}</span></div>
+      <div><span class="k">{{ icon('shield', 12) }} {{ t('adv.stop') }}</span><span class="v mono down">{{ rec.stop | cur(rec.currency) }}</span></div>
+      <div><span class="k">{{ icon('target', 12) }} {{ t('adv.target') }}</span><span class="v mono up">{{ rec.target1 | cur(rec.currency) }}</span></div>
+      <div><span class="k">{{ t('adv.qty') }}</span><span class="v mono" data-priv="qty">{{ rec.qty }}</span></div>
+      <div><span class="k">{{ t('adv.rr') }}</span><span class="v mono">{{ '%.1f'|format(rec.r_multiple) }}:1</span></div>
+      <div><span class="k">{{ t('adv.risk') }}</span><span class="v mono down" data-priv="money">{{ rec.risk_amount | cur(rec.currency) }}</span></div>
     </div>
   </div>
 </section>
@@ -87,46 +185,67 @@
 
 {% if trade %}
 <section class="card">
-  <div class="card-head"><h2>{{ t('stock.position') }}</h2></div>
-  <div class="card-body">
-    <table class="grid">
-      <thead><tr><th>{{ t('j.qty_short') }}</th><th class="num">{{ t('j.entry') }}</th>
-        <th class="num">{{ t('adv.stop') }}</th><th class="num">{{ t('scan.target') }}</th>
-        <th class="num">{{ t('stock.open_pnl') }}</th><th>{{ t('stock.bought_at') }}</th><th></th></tr></thead>
-      <tbody>
-        <tr>
-          <td class="mono">{{ trade.qty }}</td>
-          <td class="num mono">{{ trade.entry_price | money(3) }}</td>
-          <td class="num mono down">{{ trade.stop_price | money(3) if trade.stop_price else '—' }}</td>
-          <td class="num mono up">{{ trade.target_price | money(3) if trade.target_price else '—' }}</td>
-          <td class="num mono">
-            {% if quote and quote.price %}
-              {% set pnl = (quote.price - trade.entry_price) / 1e6 * trade.qty %}
-              <span class="{{ 'up' if pnl >= 0 else 'down' }}">{{ '%+.0f'|format(pnl) }}</span>
-            {% else %}—{% endif %}
-          </td>
-          <td class="mono">{{ (trade.filled_at or trade.opened_at)[:10] }}</td>
-          <td><a class="btn sm ghost" href="/journal">{{ t('stock.go_close') }}</a></td>
-        </tr>
-      </tbody>
-    </table>
+  <div class="card-head">
+    <h2 class="kp-title-row">{{ icon('briefcase', 17) }} <span>{{ t('stock.position') }}</span></h2>
+  </div>
+  <div class="card-body tight">
+    <div class="table-wrapper" tabindex="0" role="region" aria-label="{{ t('stock.position') }}">
+      <table class="grid">
+        <thead>
+          <tr>
+            <th>{{ t('j.qty_short') }}</th>
+            <th class="num">{{ t('j.entry') }}</th>
+            <th class="num">{{ t('adv.stop') }}</th>
+            <th class="num">{{ t('scan.target') }}</th>
+            <th class="num">{{ t('stock.open_pnl') }}</th>
+            <th>{{ t('stock.bought_at') }}</th>
+            <th class="num"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono" data-priv="qty">{{ trade.qty }}</td>
+            <td class="num mono">{{ trade.entry_price | money(3) }}</td>
+            <td class="num mono down">{{ trade.stop_price | money(3) if trade.stop_price else '—' }}</td>
+            <td class="num mono up">{{ trade.target_price | money(3) if trade.target_price else '—' }}</td>
+            <td class="num mono">
+              {% if quote and quote.price %}
+                {% set diff = (quote.price - trade.entry_price) / 1000000 * trade.qty %}
+                <span class="{{ 'up' if diff >= 0 else 'down' }}" data-priv="money">{{ '%+.0f'|format(diff) }}</span>
+              {% else %}—{% endif %}
+            </td>
+            <td class="mono muted tiny">{{ (trade.filled_at or trade.opened_at)[:10] }}</td>
+            <td class="num">
+              <button type="button" class="btn sm ghost"
+                      data-open-fill
+                      data-side="sell"
+                      data-trade-id="{{ trade.id }}"
+                      data-market="{{ trade.market }}"
+                      data-code="{{ trade.code }}"
+                      data-qty="{{ trade.qty }}"
+                      data-price="{{ '%.3f'|format(quote.price / 1000000) if quote and quote.price else '' }}">{{ t('stock.go_close') }}</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </section>
 {% endif %}
 
 {% if ind %}
 <section class="card">
-  <div class="card-head"><h2>{{ t('stock.indicators') }}</h2></div>
+  <div class="card-head">
+    <h2 class="kp-title-row">{{ icon('sliders', 17) }} <span>{{ t('stock.indicators') }}</span></h2>
+  </div>
   <div class="card-body">
-    <div class="grid g4">
-      <div class="field"><label>MA20</label><div class="mono">{{ '%0.2f'|format(ind.sma20) }}</div></div>
-      <div class="field"><label>MA60</label><div class="mono">{{ '%0.2f'|format(ind.sma60) }}</div></div>
-      <div class="field"><label>RSI14</label><div class="mono">{{ '%0.1f'|format(ind.rsi14) }}</div></div>
-      <div class="field"><label>ATR%</label><div class="mono">{{ '%0.2f'|format(ind.atr_pct) }}%</div></div>
-      <div class="field"><label>{{ t('stock.high20') }}</label><div class="mono">{{ '%0.2f'|format(ind.high20) }}</div></div>
-      <div class="field"><label>{{ t('stock.low20') }}</label><div class="mono">{{ '%0.2f'|format(ind.low20) }}</div></div>
-      <div class="field"><label>{{ t('stock.dist_ma20') }}</label><div class="mono">{{ '%0.2f'|format(ind.dist_sma20) }}%</div></div>
-      <div class="field"><label>{{ t('stock.vol_ratio') }}</label><div class="mono">{{ '%0.2f'|format(ind.vol_ratio) }}</div></div>
+    <div class="kp-price-strip">
+      <div><span class="k">{{ t('stock.high20') }}</span><span class="v mono">{{ '%.2f'|format(ind.high20) }}</span></div>
+      <div><span class="k">{{ t('stock.low20') }}</span><span class="v mono">{{ '%.2f'|format(ind.low20) }}</span></div>
+      <div><span class="k">MA20</span><span class="v mono">{{ '%.2f'|format(ind.sma20) }}</span></div>
+      <div><span class="k">MA60</span><span class="v mono">{{ '%.2f'|format(ind.sma60) }}</span></div>
+      <div><span class="k">{{ t('stock.dist_ma20') }}</span><span class="v mono">{{ '%+.1f'|format(ind.dist_sma20 * 100) }}%</span></div>
+      <div><span class="k">{{ t('stock.vol_ratio') }}</span><span class="v mono">{{ '%.2f'|format(ind.vol_ratio) }}×</span></div>
     </div>
   </div>
 </section>

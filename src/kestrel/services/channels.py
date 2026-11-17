@@ -14,49 +14,59 @@ from kestrel.db.engine import connect
 SCHEMA: dict[str, dict[str, Any]] = {
     "workbuddy": {
         "label": "WorkBuddy（微信 clawbot）",
+        "label_en": "WorkBuddy (WeChat Bridge)",
         "hint": "写文件到 outbox，由 WorkBuddy 定时任务转发到微信。不需要填接口地址。",
+        "hint_en": "Writes to an outbox folder; WorkBuddy forwards alerts to WeChat without extra endpoints.",
         "fields": [
-            {"key": "outbox", "label": "outbox 目录", "kind": "text",
+            {"key": "outbox", "label": "outbox 目录", "label_en": "Outbox folder", "kind": "text",
              "placeholder": "~/.workbuddy/kestrel-outbox"},
         ],
     },
     "weclawbot": {
         "label": "WeClawBot 网关",
+        "label_en": "WeClawBot Gateway",
         "hint": "自建 WeClawBot-API 的情况填这里：base_url + bot_id + token。",
+        "hint_en": "For self-hosted WeClawBot-API gateways: base_url + bot_id + token.",
         "fields": [
-            {"key": "base_url", "label": "网关地址", "kind": "text",
+            {"key": "base_url", "label": "网关地址", "label_en": "Gateway URL", "kind": "text",
              "placeholder": "http://127.0.0.1:8848"},
-            {"key": "bot_id", "label": "bot id", "kind": "text", "placeholder": "bot1"},
-            {"key": "api_token", "label": "Token", "kind": "password", "placeholder": ""},
+            {"key": "bot_id", "label": "bot id", "label_en": "Bot ID", "kind": "text", "placeholder": "bot1"},
+            {"key": "api_token", "label": "Token", "label_en": "API Token", "kind": "password", "placeholder": ""},
         ],
     },
     "ntfy": {
         "label": "ntfy",
+        "label_en": "ntfy",
         "hint": "手机装 ntfy App，订阅一个 topic 就能收到，免费且支持一键回执按钮。",
+        "hint_en": "Free mobile push via the ntfy app with one-tap trade receipt buttons.",
         "fields": [
-            {"key": "server", "label": "服务器", "kind": "text", "placeholder": "https://ntfy.sh"},
-            {"key": "topic", "label": "Topic", "kind": "text", "placeholder": "kestrel-yourname"},
-            {"key": "token", "label": "Token（可选）", "kind": "password", "placeholder": ""},
+            {"key": "server", "label": "服务器", "label_en": "Server URL", "kind": "text", "placeholder": "https://ntfy.sh"},
+            {"key": "topic", "label": "Topic", "label_en": "Topic", "kind": "text", "placeholder": "kestrel-yourname"},
+            {"key": "token", "label": "Token（可选）", "label_en": "Token (optional)", "kind": "password", "placeholder": ""},
         ],
     },
     "webhook": {
         "label": "通用 Webhook",
+        "label_en": "Webhook",
         "hint": "企业微信群机器人、Slack 中转、自建服务都行。",
+        "hint_en": "Works with WeCom bots, Slack relays, or custom JSON webhook receivers.",
         "fields": [
-            {"key": "url", "label": "Webhook 地址", "kind": "text", "placeholder": "https://..."},
-            {"key": "token", "label": "Token（可选）", "kind": "password", "placeholder": ""},
+            {"key": "url", "label": "Webhook 地址", "label_en": "Webhook URL", "kind": "text", "placeholder": "https://..."},
+            {"key": "token", "label": "Token（可选）", "label_en": "Token (optional)", "kind": "password", "placeholder": ""},
         ],
     },
     "smtp": {
         "label": "邮件",
+        "label_en": "Email (SMTP)",
         "hint": "适合每天收盘后收一封汇总。",
+        "hint_en": "Ideal for end-of-day summaries and stop alerts.",
         "fields": [
-            {"key": "host", "label": "SMTP 服务器", "kind": "text", "placeholder": "smtp.gmail.com"},
-            {"key": "port", "label": "端口", "kind": "number", "placeholder": "587"},
-            {"key": "user", "label": "账号", "kind": "text", "placeholder": ""},
-            {"key": "password", "label": "密码 / 授权码", "kind": "password", "placeholder": ""},
-            {"key": "sender", "label": "发件人", "kind": "text", "placeholder": ""},
-            {"key": "to", "label": "收件人", "kind": "text", "placeholder": ""},
+            {"key": "host", "label": "SMTP 服务器", "label_en": "SMTP host", "kind": "text", "placeholder": "smtp.gmail.com"},
+            {"key": "port", "label": "端口", "label_en": "Port", "kind": "number", "placeholder": "587"},
+            {"key": "user", "label": "账号", "label_en": "Username", "kind": "text", "placeholder": ""},
+            {"key": "password", "label": "密码 / 授权码", "label_en": "Password / App token", "kind": "password", "placeholder": ""},
+            {"key": "sender", "label": "发件人", "label_en": "From", "kind": "text", "placeholder": ""},
+            {"key": "to", "label": "收件人", "label_en": "To", "kind": "text", "placeholder": ""},
         ],
     },
 }
@@ -79,17 +89,25 @@ def _rows() -> dict[str, dict]:
     return out
 
 
-def all_channels() -> list[dict]:
+def all_channels(locale: str = "zh-CN") -> list[dict]:
+    en = str(locale).lower().startswith("en")
     stored = _rows()
     out = []
     for key, meta in SCHEMA.items():
         row = stored.get(key, {})
+        fields = [
+            {
+                **f,
+                "label": f.get("label_en", f["label"]) if en else f["label"],
+            }
+            for f in meta["fields"]
+        ]
         out.append(
             {
                 "key": key,
-                "label": meta["label"],
-                "hint": meta["hint"],
-                "fields": meta["fields"],
+                "label": meta.get("label_en", meta["label"]) if en else meta["label"],
+                "hint": meta.get("hint_en", meta["hint"]) if en else meta["hint"],
+                "fields": fields,
                 "enabled": bool(row.get("enabled")),
                 "config": row.get("config") or {},
                 "last_test": row.get("last_test"),

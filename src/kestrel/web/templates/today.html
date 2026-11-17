@@ -1,182 +1,273 @@
 {% extends "base.html" %}
+{% from "_page_icons.html" import icon, empty_art, page_ui %}
 {% block title %}{{ t('today.title') }} · {{ t('app.name') }}{% endblock %}
 
 {% block content %}
+{{ page_ui() }}
+{% set psnap = brief.portfolio if brief.portfolio is defined else portfolio_bar %}
+{% set watch_items = watchlist if watchlist is defined else items %}
+
 <div class="page-head">
   <div>
-    <h1>{{ t('today.title') }}</h1>
-    <div class="sub">
-      {{ brief.headline }}
-      {% if brief.book.count %}
-        · {{ t('today.n_positions', n=brief.book.count) }}
-        {% if brief.book.pnl_pct is not none %}
-          · {{ t('today.floating') }} <b class="{{ 'up' if brief.book.pnl_pct >= 0 else 'down' }}">{{ '%+.2f'|format(brief.book.pnl_pct) }}%</b>
-        {% endif %}
-      {% endif %}
-    </div>
+    <h1>{{ brief.headline }}</h1>
+    <div class="sub">{{ t('today.sub') }}</div>
   </div>
   <div class="page-actions">
-    <a class="btn" href="/advice">{{ t('today.actions') }}</a>
-    <a class="btn ghost" href="/market">{{ t('nav.market') }}</a>
+    <button type="button" class="btn ghost sm" data-open-calibrate="cash">
+      {{ icon('sliders', 15) }}
+      <span>{{ t('cal.btn_short') }}</span>
+    </button>
+    <button type="button" class="btn ghost sm" data-open-fill data-side="buy">
+      {{ icon('plus', 15) }}
+      <span>{{ t('journal.add_fill') }}</span>
+    </button>
+    <button type="button" class="btn sm" data-ask-copilot="{{ t('copilot.q_portfolio') }}">
+      {{ icon('sparkles', 15) }}
+      <span>{{ t('copilot.ask_short') }}</span>
+    </button>
   </div>
 </div>
 
-<div class="mkt-strip">
-  {% for m in markets %}
-  <div class="mkt {% if m.state == 'open' %}open{% endif %}" data-market="{{ m.market }}">
-    <div class="top">
-      <span class="dot-live {% if m.state != 'open' %}off{% endif %}"></span>
-      <span>{{ m.name }}</span>
-      <span class="tag tag-{{ m.market|lower }}">{{ m.market }}</span>
+{# 顶部核心账户与风险概览指标条 #}
+<section class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('cal.total_equity') }}</span>
+      <span class="kp-icon-badge">{{ icon('wallet', 16) }}</span>
     </div>
-    <div class="state">
-      {{ m.label }} · {{ t('market.local_time') }} {{ m.local_time }}
-      {% if m.state != 'open' and m.seconds_to_open %}
-        · {{ t('market.opens_in_minutes', n=(m.seconds_to_open // 60)) if m.seconds_to_open < 3600 else t('market.opens_in_hours', n=(m.seconds_to_open // 3600)) }}
-      {% endif %}
+    <div class="stat-value" data-priv="money">¥{{ psnap.total_equity_cny | num(0) }}</div>
+    <div class="stat-sub">
+      <span>{{ t('cal.initial_cap') }}</span>
+      <span class="mono" data-priv="money">¥{{ psnap.initial_capital_cny | num(0) }}</span>
     </div>
   </div>
+
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('cal.avail_cash') }}</span>
+      <span class="kp-icon-badge tone-neutral">{{ icon('coins', 16) }}</span>
+    </div>
+    <div class="stat-value" data-priv="money">¥{{ psnap.available_cash_cny | num(0) }}</div>
+    <div class="stat-sub">
+      <span>{{ t('cal.exposure_now', pct=psnap.exposure_pct, cap=psnap.exposure_cap_pct) }}</span>
+    </div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('cal.market_val') }}</span>
+      <span class="kp-icon-badge">{{ icon('briefcase', 16) }}</span>
+    </div>
+    <div class="stat-value" data-priv="money">¥{{ psnap.market_value_cny | num(0) }}</div>
+    <div class="stat-sub">
+      <a href="/journal">{{ t('today.n_positions', n=psnap.open_count) }}</a>
+      <span>·</span>
+      <a href="/advice">{{ brief.active_advice }} {{ t('today.active_advice') }}</a>
+    </div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-label kp-stat-top">
+      <span>{{ t('cal.total_return') }}</span>
+      <span class="kp-icon-badge {{ 'tone-up' if psnap.total_return_cny >= 0 else 'tone-down' }}">
+        {{ icon('trend-up' if psnap.total_return_cny >= 0 else 'trend-down', 16) }}
+      </span>
+    </div>
+    <div class="stat-value {{ 'up' if psnap.total_return_cny >= 0 else 'down' }}" data-priv="money">
+      {{ '+' if psnap.total_return_cny >= 0 else '' }}¥{{ psnap.total_return_cny | num(0) }}
+    </div>
+    <div class="stat-sub">
+      <span class="badge {{ 'buy' if psnap.total_return_pct >= 0 else 'ok-badge' }} mono">
+        {{ '%+.2f' % psnap.total_return_pct }}%
+      </span>
+    </div>
+  </div>
+</section>
+
+{% if ui_learning %}
+<div class="notice learn-only">
+  <span class="kp-title-row">
+    {{ icon('book', 15) }}
+    <strong>{{ t('learn.today_banner_title') }}</strong>
+  </span>
+  <span class="tiny muted">{{ t('learn.today_banner_body') }}</span>
+</div>
+{% endif %}
+
+{# 今日待办事项或平稳状态提示 #}
+{% if brief.todos %}
+<section style="margin-bottom:18px;">
+  {% for item in brief.todos %}
+  <article class="kp-todo-card {{ 'is-urgent' if item.kind == 'urgent' else 'is-normal' }}">
+    <span class="kp-icon-badge {{ 'tone-up' if item.kind == 'urgent' else '' }}">
+      {{ icon('alert' if item.kind == 'urgent' else 'radar', 17) }}
+    </span>
+    <span class="badge {{ 'buy' if item.kind == 'urgent' else 'wait' }}">{{ item.tag }}</span>
+    <div class="todo-body" style="flex:1 1 260px;">
+      <b>{{ item.title }}</b>
+      <p>{{ item.body }}</p>
+    </div>
+    <a class="btn sm {{ '' if item.kind == 'urgent' else 'ghost' }}" href="{{ item.action.href }}">
+      <span>{{ item.action.label }}</span>
+      {{ icon('arrow-right', 14) }}
+    </a>
+  </article>
   {% endfor %}
-</div>
+</section>
+{% else %}
+<section class="card">
+  <div class="empty" style="padding:30px 20px;">
+    {{ empty_art('shield-check', 'down') }}
+    <strong>{{ t('today.quiet_title') }}</strong>
+    <p>{{ t('today.quiet_body') }}</p>
+    <div class="row-actions" style="justify-content:center;margin-top:14px;">
+      <a class="btn sm" href="/advice">{{ icon('radar', 14) }} <span>{{ t('today.see_advice') }}</span></a>
+      <a class="btn ghost sm" href="/journal">{{ icon('briefcase', 14) }} <span>{{ t('today.see_journal') }}</span></a>
+    </div>
+  </div>
+</section>
+{% endif %}
 
-<div class="today-grid">
-  <div>
-    <section class="card">
-      <div class="card-head">
-        <h2>{{ t('today.todo') }}</h2>
-        <span class="meta">
-          {% if brief.urgent %}<b class="up">{{ t('today.n_urgent', n=brief.urgent) }}</b>{% else %}{{ t('today.none_urgent') }}{% endif %}
-        </span>
+{# 双栏：持仓盯盘 + 重点自选行情 #}
+<div class="grid g2">
+  <section class="card" style="margin-bottom:0;">
+    <div class="card-head">
+      <h2 class="kp-title-row">{{ icon('briefcase', 17) }} <span>{{ t('today.positions_title') }}</span></h2>
+      <div class="page-actions">
+        <button type="button" class="btn ghost sm" data-open-calibrate="pos">{{ t('cal.sync_pos') }}</button>
+        <a class="meta" href="/journal">{{ t('today.manage_positions') }} →</a>
       </div>
-      <div class="card-body">
-        {% if brief.todos %}
-          {% for item in brief.todos %}
-          <div class="todo">
-            <div class="todo-mark {{ 'warn' if item.kind == 'urgent' else ('do' if item.kind == 'todo' else 'ok') }}">
-              {{ item.icon }}
-            </div>
-            <div class="todo-body">
-              <b>{{ item.title }}</b>
-              {% if item.tag %}<span class="tag" style="margin-left:6px;">{{ item.tag }}</span>{% endif %}
-              <p>{{ item.body }}</p>
-            </div>
-            {% if item.action %}
-            <a class="btn sm {{ 'danger' if item.kind == 'urgent' else 'ghost' }} todo-act"
-               href="{{ item.action.href }}">{{ item.action.label }}</a>
-            {% endif %}
-          </div>
-          {% endfor %}
-        {% else %}
-          <div class="empty">
-            <strong>{{ t('today.quiet_title') }}</strong>
-            {{ t('today.quiet_body') }}
-          </div>
-        {% endif %}
-      </div>
-    </section>
-
+    </div>
     {% if brief.positions %}
-    <section class="card">
-      <div class="card-head">
-        <h2>{{ t('today.positions') }}</h2>
-        <a class="meta" href="/journal">{{ t('today.all') }}</a>
-      </div>
-      <div class="card-body tight">
-        <table class="grid">
-          <thead><tr><th>{{ t('today.col_symbol') }}</th><th class="num">{{ t('today.col_price') }}</th><th class="num">{{ t('today.col_pnl') }}</th>
-            <th class="num">{{ t('today.col_to_stop') }}</th></tr></thead>
+    <div class="card-body tight">
+      <div class="table-wrapper" tabindex="0" role="region" aria-label="{{ t('today.positions_title') }}">
+        <table class="grid kp-mini-table">
+          <thead>
+            <tr>
+              <th>{{ t('today.col_symbol') }}</th>
+              <th class="num">{{ t('j.qty_short') }}</th>
+              <th class="num">{{ t('today.col_price') }}</th>
+              <th class="num">{{ t('today.col_pnl') }}</th>
+              <th></th>
+            </tr>
+          </thead>
           <tbody>
-          {% for p in brief.positions %}
-          <tr>
-            <td><a href="/stock/{{ p.market }}/{{ p.code }}">{{ p.name }}</a>
-              <span class="mono muted tiny">{{ p.code }}</span></td>
-            <td class="num mono">{{ '%.3f'|format(p.price) if p.price else '—' }}</td>
-            <td class="num mono {{ 'up' if (p.pnl or 0) >= 0 else 'down' }}">
-              {% if p.pnl is none %}—{% else %}
-                {{ '%+.0f'|format(p.pnl) }}
-                <div class="tiny">{{ '%+.2f%%'|format(p.pnl_pct) }}</div>
-              {% endif %}
-            </td>
-            <td class="num mono">
-              {% if p.to_stop_pct is none %}—
-              {% else %}<span class="badge {{ 'avoid' if p.state in ('near_stop','stopped') else 'wait' }}">
-                {{ '%+.2f%%'|format(p.to_stop_pct) }}</span>{% endif %}
-            </td>
-          </tr>
-          {% endfor %}
+            {% for p in brief.positions %}
+            <tr>
+              <td>
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                  <span class="tag tag-{{ p.market|lower }}">{{ p.market }}</span>
+                  <a href="/stock/{{ p.market }}/{{ p.code }}"><strong>{{ p.name }}</strong></a>
+                  {% if not p.can_sell_today %}
+                  <span class="badge wait" title="A-Share T+1">{{ icon('lock', 11) }} T+1</span>
+                  {% endif %}
+                  {% if p.state != 'ok' %}
+                  <span class="badge {{ 'buy' if p.state in ('stopped','near_stop') else 'ok-badge' }}">{{ p.state }}</span>
+                  {% endif %}
+                </div>
+                <div class="tiny muted mono">{{ p.code }}</div>
+              </td>
+              <td class="num mono" data-priv="qty">{{ p.qty }}</td>
+              <td class="num mono">{{ '%.3f'|format(p.price) if p.price else '—' }}</td>
+              <td class="num mono">
+                {% if p.pnl is not none %}
+                <span class="{{ 'up' if p.pnl >= 0 else 'down' }}" data-priv="money">
+                  {{ '%+.0f'|format(p.pnl) }} {{ p.currency }}
+                </span>
+                {% else %}—{% endif %}
+                {% if p.r_now is not none %}
+                <div class="tiny muted">{{ '%+.1f'|format(p.r_now) }}R</div>
+                {% endif %}
+              </td>
+              <td class="num">
+                {% if p.can_sell_today %}
+                <button type="button" class="btn ghost sm"
+                        data-open-fill
+                        data-side="sell"
+                        data-trade-id="{{ p.trade_id }}"
+                        data-market="{{ p.market }}"
+                        data-code="{{ p.code }}"
+                        data-qty="{{ p.qty }}"
+                        data-price="{{ '%.3f'|format(p.price) if p.price else p.entry }}">{{ t('j.sell_btn') }}</button>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
           </tbody>
         </table>
       </div>
-    </section>
-    {% endif %}
-  </div>
-
-  <div>
-    <section class="card">
-      <div class="card-head"><h2>{{ t('today.watchlist') }}</h2>
-        <span class="meta">{{ t('today.n_names', n=watch_count) }}</span>
+    </div>
+    {% else %}
+    <div class="empty">
+      {{ empty_art('briefcase') }}
+      <strong>{{ t('today.no_positions') }}</strong>
+      <div class="row-actions" style="justify-content:center;margin-top:12px;">
+        <button type="button" class="btn ghost sm" data-open-calibrate="pos">
+          {{ icon('plus', 14) }}
+          <span>{{ t('cal.add_existing') }}</span>
+        </button>
       </div>
-      {% if items %}
-      <div class="card-body tight">
-        <table class="grid">
-          <thead><tr><th>{{ t('today.col_code') }}</th><th class="num">{{ t('today.col_price') }}</th><th class="num">{{ t('today.col_change') }}</th></tr></thead>
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="card" style="margin-bottom:0;">
+    <div class="card-head">
+      <h2 class="kp-title-row">{{ icon('activity', 17) }} <span>{{ t('today.watchlist_title') }}</span></h2>
+      <a class="meta" href="/market">{{ t('today.all_quotes') }} →</a>
+    </div>
+    {% if markets is defined and markets %}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 18px;border-bottom:1px solid var(--line-soft);background:var(--surface-2);">
+      {% for m in markets %}
+      <span class="tiny" style="display:inline-flex;align-items:center;gap:5px;">
+        <span class="dot-live {% if m.state != 'open' %}off{% endif %}"></span>
+        <b>{{ m.market }}</b>
+        <span class="muted">{{ m.label }}</span>
+      </span>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if watch_items %}
+    <div class="card-body tight">
+      <div class="table-wrapper" tabindex="0" role="region" aria-label="{{ t('today.watchlist_title') }}">
+        <table class="grid kp-mini-table">
+          <thead>
+            <tr>
+              <th>{{ t('today.col_symbol') }}</th>
+              <th class="num">{{ t('today.col_price') }}</th>
+              <th class="num">{{ t('today.col_change') }}</th>
+            </tr>
+          </thead>
           <tbody>
-          {% for it in items %}
-          <tr>
-            <td><a href="/stock/{{ it.market }}/{{ it.code }}">{{ it.name }}</a>
-              <div class="tiny muted mono">{{ it.code }}</div></td>
-            <td class="num mono">{% if it.price %}{{ it.price | quote(it.market, display_currency) }}{% else %}—{% endif %}</td>
-            <td class="num mono {% if it.change_pct is not none %}{{ 'up' if it.change_pct >= 0 else 'down' }}{% endif %}">
-              {% if it.change_pct is not none %}{{ it.change_pct | pct }}{% else %}—{% endif %}
-            </td>
-          </tr>
-          {% endfor %}
+            {% for w in watch_items %}
+            <tr>
+              <td>
+                <span class="tag tag-{{ w.market|lower }}">{{ w.market }}</span>
+                <a href="/stock/{{ w.market }}/{{ w.code }}"><strong>{{ w.name }}</strong></a>
+                <span class="tiny muted mono">{{ w.code }}</span>
+              </td>
+              <td class="num mono">
+                {% if w.price %}{{ w.price | quote(w.market, display_currency) }}{% else %}—{% endif %}
+              </td>
+              <td class="num mono {% if w.change_pct is not none %}{{ 'up' if w.change_pct >= 0 else 'down' }}{% endif %}">
+                {% if w.change_pct is not none %}{{ w.change_pct | pct }}{% else %}—{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
           </tbody>
         </table>
-        {% if watch_count > items|length %}
-        <p class="tiny muted" style="margin-top:10px;">
-          <a href="/market">{{ t('today.more') }}</a>
-        </p>
-        {% endif %}
       </div>
-      {% else %}
-      <div class="empty">
-        <strong>{{ t('today.no_watch_title') }}</strong>
-        {{ t('today.no_watch_body') }} <span class="mono">00700</span> {{ t('today.or') }} <span class="mono">AAPL</span>。
+    </div>
+    {% else %}
+    <div class="empty">
+      {{ empty_art('activity') }}
+      <strong>{{ t('market.empty_title') }}</strong>
+      <p>{{ t('today.no_watchlist') }}</p>
+      <div class="row-actions" style="justify-content:center;margin-top:12px;">
+        <a class="btn ghost sm" href="/market">{{ icon('plus', 14) }} <span>{{ t('today.more') }}</span></a>
       </div>
-      {% endif %}
-    </section>
-
-    <section class="card">
-      <div class="card-head"><h2>{{ t('today.steps') }}</h2></div>
-      <div class="card-body">
-        <div class="step-list">
-          <div class="step">
-            <h4>{{ t('today.step1_title') }}</h4>
-            <p>{{ t('today.step1_body') }}</p>
-          </div>
-          <div class="step">
-            <h4>{{ t('today.step2_title') }}</h4>
-            <p>{{ t('today.step2_body') }}</p>
-          </div>
-          <div class="step">
-            <h4>{{ t('today.step3_title') }}</h4>
-            <p>{{ t('today.step3_body') }}</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    {% if not brief.positions and not brief.active_advice %}
-    <section class="card">
-      <div class="card-head"><h2>{{ t('today.why_title') }}</h2></div>
-      <div class="card-body">
-        <p class="hint" style="margin:0;">
-          {{ t('today.why_body') }}
-        </p>
-      </div>
-    </section>
+    </div>
     {% endif %}
-  </div>
+  </section>
 </div>
 {% endblock %}

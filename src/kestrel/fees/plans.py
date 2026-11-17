@@ -1,9 +1,4 @@
-"""Broker fee plans that the user can edit from the UI.
-
-The built-in table lives in ``calculator.PLANS``; this module copies it into the
-database on first use so the numbers become data instead of code. Editing a plan
-in the UI must change what the calculator charges, otherwise the screen is a lie.
-"""
+"""支持在界面中自定义与编辑的券商费用套餐服务。"""
 
 from __future__ import annotations
 
@@ -11,29 +6,20 @@ import logging
 from decimal import Decimal
 
 from kestrel.db.engine import connect
-from kestrel.fees.calculator import PLANS, BrokerPlan
+from kestrel.fees.calculator import _BUILTIN_PLANS, PLANS, BrokerPlan
 
 log = logging.getLogger(__name__)
 
-FIELDS = (
-    "commission_rate",
-    "commission_min",
-    "platform_fixed",
-    "platform_per_share",
-    "platform_min",
-    "fractional_min",
-)
-
 
 def seed() -> int:
-    """Copy built-ins into the database once. Existing rows are left alone."""
+    """将内置券商套餐写入数据库（仅补齐尚未存在的套餐）。"""
     conn = connect()
     added = 0
     try:
         existing = {
             r["key"] for r in conn.execute("SELECT key FROM broker_plan").fetchall()
         }
-        for key, plan in PLANS.items():
+        for key, plan in _BUILTIN_PLANS.items():
             if key in existing:
                 continue
             currency = "HKD" if plan.market == "HK" else "CNY" if plan.market == "CN" else "USD"
@@ -86,7 +72,18 @@ def list_plans(market: str | None = None) -> list[dict]:
         conn.close()
 
 
+def _num_from(payload: dict, *keys: str) -> float:
+    for key in keys:
+        if key in payload and payload[key] not in (None, ""):
+            try:
+                return max(0.0, float(payload[key]))
+            except (TypeError, ValueError):
+                raise ValueError(f"{key} 必须是数字") from None
+    return 0.0
+
+
 def upsert(payload: dict) -> str:
+    """新建或更新券商套餐，并立即同步刷新内存中的费率字典。"""
     label = str(payload.get("label") or "").strip()
     market = str(payload.get("market") or "").strip().upper()
     if not label:
@@ -100,13 +97,16 @@ def upsert(payload: dict) -> str:
         key = f"custom_{market.lower()}_{slug or 'plan'}"
 
     currency = {"HK": "HKD", "US": "USD", "CN": "CNY"}[market]
-    values = []
-    for name in FIELDS:
-        try:
-            values.append(max(0.0, float(payload.get(name) or 0)))
-        except (TypeError, ValueError):
-            raise ValueError(f"{name} 必须是数字") from None
-    # A-share round lots are 100 shares by rule; a broker option cannot change it.
+    # 兼容前端键名（commission / platform）与接口语义键名（commission_rate / platform_fixed）
+    commission = _num_from(payload, "commission", "commission_rate")
+    commission_min = _num_from(payload, "commission_min")
+    platform = _num_from(payload, "platform", "platform_fixed")
+    platform_min = _num_from(payload, "platform_min")
+    platform_per_share = _num_from(payload, "platform_per_share")
+    per_order_min = _num_from(payload, "per_order_min")
+    fractional_min = _num_from(payload, "fractional_min")
+
+    # A 股固定整手，不允许通过券商开关修改
     odd_lot = bool(payload.get("odd_lot_buy")) and market == "HK"
     fractional = bool(payload.get("fractional_us")) and market == "US"
 
@@ -129,52 +129,62 @@ def upsert(payload: dict) -> str:
                 odd_lot_buy=excluded.odd_lot_buy,
                 fractional_us=excluded.fractional_us,
                 fractional_min=excluded.fractional_min,
+                enabled=1,
                 notes=excluded.notes, updated_at=datetime('now')
             """,
             (
-                key, label, market, currency, *values,
+                key,
+                label,
+                market,
+                currency,
+                commission,
+                commission_min,
+                platform,
+                platform_min,
+                platform_per_share,
+                per_order_min,
                 str(payload.get("notes") or ""),
-                int(odd_lot), int(fractional),
-                float(values[-1]),
+                int(odd_lot),
+                int(fractional),
+                fractional_min,
             ),
         )
         conn.commit()
     finally:
         conn.close()
+    hydrate()
     return key
 
 
 def delete(key: str) -> bool:
+    """删除自定义套餐，或停用内置套餐，并立即刷新内存费率字典。"""
     conn = connect()
     try:
         row = conn.execute("SELECT builtin FROM broker_plan WHERE key=?", (key,)).fetchone()
         if row is None:
             return False
         if row["builtin"]:
-            # never delete a built-in; disable it instead
             conn.execute("UPDATE broker_plan SET enabled=0 WHERE key=?", (key,))
         else:
             conn.execute("DELETE FROM broker_plan WHERE key=?", (key,))
         conn.commit()
-        return True
     finally:
         conn.close()
+    hydrate()
+    return True
 
 
 def hydrate() -> int:
-    """Load every enabled plan into the fee engine's registry.
-
-    The calculator must stay database-free (it is called inside plan building),
-    so edited plans are pushed into its in-memory table at startup.
-    """
+    """从数据库全量同步所有已启用的券商套餐到内存费率引擎。"""
     from kestrel.fees import calculator
 
     seed()
-    count = 0
-    for row in list_plans():
+    rows = list_plans()
+    refreshed: dict[str, BrokerPlan] = {}
+    for row in rows:
         if not row["enabled"]:
             continue
-        calculator.PLANS[row["key"]] = BrokerPlan(
+        refreshed[row["key"]] = BrokerPlan(
             code=row["key"],
             name=row["label"],
             market=row["market"],
@@ -187,21 +197,21 @@ def hydrate() -> int:
             fractional_us=bool(row.get("fractional_us")),
             fractional_min=Decimal(str(row.get("fractional_min") or 0)),
         )
-        count += 1
-    return count
+    calculator.PLANS.clear()
+    calculator.PLANS.update(refreshed)
+    return len(refreshed)
 
 
 def as_broker_plan(key: str) -> BrokerPlan | None:
-    """Load a plan in the shape the fee engine expects, honouring UI edits."""
+    """读取单条套餐配置，优先使用数据库中的最新编辑。"""
     conn = connect()
     try:
         row = conn.execute("SELECT * FROM broker_plan WHERE key=?", (key,)).fetchone()
     finally:
         conn.close()
     if row is None:
-        return PLANS.get(key)
-    # sqlite3.Row 没有 .get()，缺失的列只能按 KeyError 处理——旧库升级时
-    # 迁移还没跑完也可能走到这里。
+        return PLANS.get(key) or _BUILTIN_PLANS.get(key)
+
     def _value(name: str, default=0):
         try:
             return row[name]

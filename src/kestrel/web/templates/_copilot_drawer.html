@@ -1,0 +1,155 @@
+{# 右侧可开关的专业炒股 Agent 助手侧边栏：强门禁 + 实时账本/持仓/指标上下文 + 严格话题边界 #}
+<aside id="copilot-drawer" class="copilot-drawer" aria-label="{{ t('copilot.title') }}">
+  <div class="copilot-head">
+    <div class="copilot-title-wrap">
+      <span class="copilot-badge-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m12 3 1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3Z"/>
+          <path d="m19 15 .9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15Z"/>
+        </svg>
+      </span>
+      <div class="copilot-title">
+        <strong>
+          <span>{{ t('copilot.title') }}</span>
+          <span class="copilot-scope-badge">{{ t('copilot.scope_tag') }}</span>
+        </strong>
+        <span class="tiny muted mono" id="cp-model-label">
+          {% if copilot_state.configured %}{{ copilot_state.model }}{% else %}{{ t('copilot.not_configured_short') }}{% endif %}
+        </span>
+      </div>
+    </div>
+
+    <div class="copilot-head-actions">
+      <button type="button" class="wb-icon-btn sm" id="cp-toggle-cfg" aria-label="{{ t('copilot.api_settings') }}" title="{{ t('copilot.api_settings') }}">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
+          <line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>
+          <line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>
+          <line x1="1" y1="14" x2="7" y2="14"/>
+          <line x1="9" y1="8" x2="15" y2="8"/>
+          <line x1="17" y1="16" x2="23" y2="16"/>
+        </svg>
+      </button>
+      <button type="button" class="wb-icon-btn sm" id="cp-clear" aria-label="{{ t('copilot.clear') }}" title="{{ t('copilot.clear') }}">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6h16Z"/>
+        </svg>
+      </button>
+      <button type="button" class="wb-icon-btn sm" id="cp-close" aria-label="{{ t('journal.close') }}" title="{{ t('journal.close') }}">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M18 6 6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="copilot-ctx-strip">
+    <span class="cp-ctx-item">
+      <span class="muted">{{ t('copilot.ctx_equity') }}</span>
+      <strong class="mono" id="cp-ctx-eq" data-priv="money">¥{{ portfolio_bar.total_equity_cny | num(0) }}</strong>
+    </span>
+    <span class="cp-ctx-item">
+      <span class="muted">{{ t('copilot.ctx_cash') }}</span>
+      <strong class="mono" id="cp-ctx-cash" data-priv="money">¥{{ portfolio_bar.available_cash_cny | num(0) }}</strong>
+    </span>
+    <span class="cp-ctx-item cp-ctx-badge">{{ t('copilot.ctx_pos', n=portfolio_bar.open_count) }}</span>
+  </div>
+
+  <div id="cp-setup" class="copilot-body {% if copilot_state.configured %}hidden{% endif %}">
+    <div class="copilot-setup-box">
+      <div class="cp-setup-head">
+        <span class="cp-setup-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+            <circle cx="12" cy="12" r="3.5"/>
+          </svg>
+        </span>
+        <div>
+          <strong>{{ t('copilot.setup_title') }}</strong>
+          <p class="tiny muted">{{ t('copilot.setup_desc') }}</p>
+        </div>
+      </div>
+
+      <div class="copilot-presets">
+        {% for p in copilot_presets %}
+        <button type="button" class="copilot-chip cp-preset"
+                data-url="{{ p.base_url }}" data-model="{{ p.model }}">
+          {{ p.name }}
+        </button>
+        {% endfor %}
+      </div>
+
+      <div class="field">
+        <label for="cp-base-url">{{ t('copilot.base_url') }}</label>
+        <input id="cp-base-url" type="url" value="{{ copilot_state.base_url }}" placeholder="https://api.deepseek.com/v1">
+      </div>
+      <div class="field">
+        <label for="cp-model-name">{{ t('copilot.model_name') }}</label>
+        <input id="cp-model-name" value="{{ copilot_state.model }}" placeholder="deepseek-chat / gpt-4o-mini">
+      </div>
+      <div class="field">
+        <label for="cp-api-key">{{ t('copilot.api_key') }}</label>
+        <input id="cp-api-key" type="password" placeholder="{{ copilot_state.api_key_masked or 'sk-...' }}">
+        <span class="help">{{ t('copilot.key_hint') }}</span>
+      </div>
+      <div class="tiny" id="cp-cfg-msg" style="min-height:16px;"></div>
+      <div class="cp-setup-actions">
+        <button type="button" class="btn sm" id="cp-save-cfg" style="flex:1;">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20 6 9 17l-5-5"/>
+          </svg>
+          <span>{{ t('copilot.save_cfg') }}</span>
+        </button>
+        {% if copilot_state.configured %}
+        <button type="button" class="btn ghost sm" id="cp-cancel-cfg">{{ t('cancel') }}</button>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div id="cp-chat-wrap" class="copilot-chat-wrap {% if not copilot_state.configured %}hidden{% endif %}">
+    <div id="cp-messages" class="copilot-body">
+      <div class="copilot-msg assistant">
+        {{ t('copilot.welcome_msg') }}
+      </div>
+    </div>
+
+    <div class="copilot-chips" id="cp-chips">
+      <button type="button" class="copilot-chip cp-ask" data-q="{{ t('copilot.q_portfolio') }}">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/>
+        </svg>
+        <span>{{ t('copilot.q_portfolio_short') }}</span>
+      </button>
+      <button type="button" class="copilot-chip cp-ask" data-q="{{ t('copilot.q_advice') }}">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"/><path d="m9 12 2 2 4-4"/>
+        </svg>
+        <span>{{ t('copilot.q_advice_short') }}</span>
+      </button>
+      <button type="button" class="copilot-chip cp-ask" data-q="{{ t('copilot.q_rules') }}">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 17l5.5-5.5 4 4L21 7"/><path d="M15 7h6v6"/>
+        </svg>
+        <span>{{ t('copilot.q_rules_short') }}</span>
+      </button>
+      <button type="button" class="copilot-chip cp-ask" data-q="{{ t('copilot.q_calibrate') }}">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/>
+        </svg>
+        <span>{{ t('copilot.q_calibrate_short') }}</span>
+      </button>
+    </div>
+
+    <div class="copilot-input-row">
+      <textarea id="cp-input" rows="2" placeholder="{{ t('copilot.input_ph') }}"></textarea>
+      <button type="button" class="btn sm cp-send-btn" id="cp-send" aria-label="{{ t('copilot.send') }}">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="m22 2-7 20-4-9-9-4 20-7Z"/>
+          <path d="M22 2 11 13"/>
+        </svg>
+        <span class="cp-send-text">{{ t('copilot.send') }}</span>
+      </button>
+    </div>
+  </div>
+</aside>
