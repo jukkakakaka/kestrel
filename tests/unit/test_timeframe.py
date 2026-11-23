@@ -163,3 +163,22 @@ def test_forming_bar_is_dropped_until_the_session_closes():
 
     closed = [{"date": "2000-01-03", "open": 1, "high": 1, "low": 1, "close": 1}]
     assert drop_forming(closed, "CN") == closed
+
+
+def test_live_weekly_and_monthly_signals_require_period_close():
+    from kestrel.services import timeframe
+
+    def rows(*days):
+        return [
+            {"date": day, "open": 9, "high": 11, "low": 8, "close": 10, "volume": 100}
+            for day in days
+        ]
+
+    weekly = rows("2026-11-20", "2026-11-23", "2026-11-24")
+    assert [bar["date"] for bar in timeframe.prepare_closed(weekly, "medium", "US")] == ["2026-11-20"]
+    holiday_week = rows("2026-04-01", "2026-04-02")
+    assert timeframe.prepare_closed(holiday_week, "medium", "US")[-1]["date"] == "2026-04-02"
+
+    monthly = rows("2026-10-29", "2026-10-30", "2026-11-23")
+    assert [bar["date"] for bar in timeframe.prepare_closed(monthly, "long", "US")] == ["2026-10-30"]
+    assert timeframe.prepare_closed(monthly, "short", "US") == monthly

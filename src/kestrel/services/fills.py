@@ -188,7 +188,7 @@ def suggest_levels(
     daily = bars_service.drop_forming(daily, market)
     if daily and bars_service.is_stale(daily, market):
         return {"ok": False, "reason": "Recent bars are stale." if en else "近期行情过期，无法估算止损。"}
-    folded = timeframe.prepare(daily, cfg.code)
+    folded = timeframe.prepare_closed(daily, cfg.code, market)
     if len(folded) < cfg.min_bars:
         return {
             "ok": False,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,3 +151,18 @@ def aggregate(bars: list[dict], bar: str) -> list[dict]:
 def prepare(bars: list[dict], code: str | None) -> list[dict]:
     """按交易周期聚合日线。"""
     return aggregate(bars, get(code).bar)
+
+
+def prepare_closed(bars: list[dict], code: str | None, market: str) -> list[dict]:
+    """Live weekly and monthly signals use periods whose final session has closed."""
+    from kestrel.services.calendar import is_trading_day
+
+    basis = get(code).bar
+    folded = aggregate(bars, basis)
+    if basis == "D" or not folded:
+        return folded
+    last = date.fromisoformat(str(folded[-1]["date"])[:10])
+    following = last + timedelta(days=1)
+    while not is_trading_day(market, following):
+        following += timedelta(days=1)
+    return folded[:-1] if _bucket(last, basis) == _bucket(following, basis) else folded

@@ -291,7 +291,7 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
         skipped: list[dict] = []
         for sym in symbols:
             rows = bars_map.get(sym["id"]) or []
-            folded = timeframe.prepare(rows, horizon.code)
+            folded = timeframe.prepare_closed(rows, horizon.code, sym["market"])
             stale = bars_service.is_stale(rows, sym["market"]) if rows else False
             if stale or len(folded) < horizon.min_bars:
                 skipped.append(
@@ -518,7 +518,7 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
                 "code": horizon.code,
                 "label": horizon.zh,
                 "requested": requested_horizon,
-                "auto": advice is not None,
+                "auto": requested_horizon == timeframe.AUTO,
                 "reason": (advice or {}).get("primary_reason") or "",
             },
             "exposure": {

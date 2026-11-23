@@ -119,7 +119,7 @@ def build_brief(markets: list[str], limit: int = 40, history: int | None = None)
             )
             if bars_service.is_stale(daily, row["market"]):
                 continue
-            bars = timeframe.prepare(daily, cfg.code)
+            bars = timeframe.prepare_closed(daily, cfg.code, row["market"])
             if len(bars) < cfg.min_bars:
                 continue
             ind = compute(Series.from_bars(bars))
@@ -136,6 +136,7 @@ def build_brief(markets: list[str], limit: int = 40, history: int | None = None)
                     "sector": row["sector"] or "",
                     "price": round(last, 3),
                     "last_date": str(bars[-1]["date"]),
+                    "daily_as_of": str(daily[-1]["date"]),
                     "ret5": _round(ind.get("ret5")),
                     "ret20": _round(ind.get("ret20")),
                     "ret60": _round(ind.get("ret60")),
@@ -541,7 +542,7 @@ def _finish(brief: dict, raw_reply: dict, provider: str, model: str, started) ->
 
     fresh = {
         (c["market"], c["code"]) for c in brief["candidates"]
-        if str(c.get("last_date") or "")[:10] == last_closed_session(c["market"])
+        if str(c.get("daily_as_of") or c.get("last_date") or "")[:10] == last_closed_session(c["market"])
     }
     for raw in picks[: MAX_PICKS * 2]:
         if not isinstance(raw, dict):

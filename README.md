@@ -160,7 +160,7 @@ uv run kestrel serve                 # local browser mode: http://127.0.0.1:8000
 
 ## Data and research limits
 
-The scanner checks daily data before producing new plans. It uses Eastmoney daily history with Yahoo Finance as a fallback for supported tickers. The backtest fingerprint covers the full OHLCV input, parameters and resulting trades. Historical data can be revised. Current symbol universes can omit delisted names, and the simulation uses assumed opens and slippage. It cannot establish actual fill availability, queue priority, or future returns.
+The scanner checks daily data before producing new plans and uses closed weekly and monthly periods for those horizons. It uses Eastmoney daily history with Yahoo Finance as a fallback for supported tickers. The backtest fingerprint covers the full OHLCV input, parameters and resulting trades. Historical data can be revised. Current symbol universes can omit delisted names, and the simulation uses assumed opens and slippage. It cannot establish actual fill availability, queue priority, or future returns.
 
 ## Project Layout
 
