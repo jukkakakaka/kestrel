@@ -111,7 +111,7 @@
 
 **macOS 桌面客户端**（macOS 11+，Apple Silicon 与 Intel）
 
-从 [Releases](https://github.com/jukkakakaka/kestrel/releases) 下载 `Kestrel-*.dmg`，拖入「应用程序」。安装包采用自签名（ad-hoc），首次打开前清除隔离标记即可：
+从 [Releases](https://github.com/jukkakakaka/kestrel/releases) 下载对应的安装包，Apple Silicon 选 `*-macos-arm64.dmg`，Intel 选 `*-macos-x86_64.dmg`。将 Kestrel 拖入「应用程序」。安装包采用自签名（ad-hoc），首次打开前清除隔离标记即可：
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Kestrel.app
@@ -137,7 +137,7 @@ uv run kestrel serve                 # 纯本地 Web 服务：http://127.0.0.1:8
 
 **Windows & Docker**
 
-- **Windows**：在 GitHub Actions *Build desktop app* 工作流 Artifacts 下载 `Kestrel-windows.zip`（Windows 10/11 免装 Python），解压运行 `Kestrel.exe`（支持系统托盘与开机自启）。
+- **Windows**：在 [Releases](https://github.com/jukkakakaka/kestrel/releases) 下载 `Kestrel-windows.zip`（Windows 10/11 免装 Python），解压运行 `Kestrel.exe`（支持系统托盘与开机自启）。
 - **Docker**：`docker compose up`（监听 `http://127.0.0.1:8000`，数据持久化于命名卷）。
 
 **100% 本地数据主权**：SQLite 微单位账本保存在 `~/Library/Application Support/Kestrel`（macOS）、`%APPDATA%\Kestrel`（Windows）或 `./data`（源码运行）。无云端账号，无遥测上报。

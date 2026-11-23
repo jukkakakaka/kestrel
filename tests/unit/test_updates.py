@@ -102,3 +102,14 @@ async def test_install_in_a_container_refuses_and_explains(monkeypatch):
 async def test_download_rejects_an_asset_without_a_url():
     result = await updates.download({"name": "x.dmg"})
     assert result["ok"] is False
+
+
+@pytest.mark.parametrize(("machine", "suffix"), [("arm64", "arm64"), ("x86_64", "x86_64")])
+def test_macos_update_picks_the_matching_architecture(monkeypatch, machine, suffix):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(updates.platform, "machine", lambda: machine)
+    arm = "Kestrel-0.4.0-macos-arm64.dmg"
+    intel = "Kestrel-0.4.0-macos-x86_64.dmg"
+    assert _release([arm, intel]).asset_for_platform()["name"].endswith(suffix + ".dmg")
+    opposite = intel if machine == "arm64" else arm
+    assert _release([opposite]).asset_for_platform() is None

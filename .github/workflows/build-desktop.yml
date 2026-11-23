@@ -10,9 +10,16 @@ permissions:
 
 jobs:
   macos:
-    name: macOS
-    # macos-14 已从公开 runner 池里退役；latest 指向当前可用的 macOS 镜像。
-    runs-on: macos-latest
+    name: macOS (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -21,23 +28,28 @@ jobs:
           enable-cache: true
 
       - name: Build, sign and smoke-test the bundle
-        run: ./packaging/macos/build.sh --dmg
+        run: |
+          test "$(uname -m)" = "${{ matrix.arch }}"
+          ./packaging/macos/build.sh --dmg
+          for image in dist/Kestrel-*.dmg; do
+            mv "$image" "${image%.dmg}-macos-${{ matrix.arch }}.dmg"
+          done
 
       - name: Zip the app for people who prefer that
-        run: cd dist && ditto -c -k --keepParent Kestrel.app Kestrel-macos.zip
+        run: cd dist && ditto -c -k --keepParent Kestrel.app Kestrel-macos-${{ matrix.arch }}.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Kestrel-macos
+          name: Kestrel-macos-${{ matrix.arch }}
           path: |
             dist/Kestrel-*.dmg
-            dist/Kestrel-macos.zip
+            dist/Kestrel-macos-${{ matrix.arch }}.zip
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
         if: startsWith(github.ref, 'refs/tags/v')
         with:
-          name: release-assets
+          name: release-assets-macos-${{ matrix.arch }}
           path: dist/Kestrel-*.dmg
           if-no-files-found: error
 
@@ -145,12 +157,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: release-assets
-          path: dist
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: release-assets-windows
+          pattern: release-assets-*
+          merge-multiple: true
           path: dist
 
       - uses: softprops/action-gh-release@v2
@@ -168,7 +176,7 @@ jobs:
 
             ### macOS
 
-            1. 下载 `Kestrel-*.dmg`，把 **Kestrel** 拖进 Applications。
+            1. Apple Silicon 下载 `*-macos-arm64.dmg`，Intel 下载 `*-macos-x86_64.dmg`。把 **Kestrel** 拖进 Applications。
             2. 安装包是自签名（ad-hoc），第一次打开前需要去掉隔离标记：
 
                ```bash

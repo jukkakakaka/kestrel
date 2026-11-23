@@ -109,7 +109,7 @@ In both AI modes, **position sizing and hard risk checks stay 100% in local Pyth
 
 **macOS Desktop App** (macOS 11+, Apple Silicon & Intel)
 
-Download `Kestrel-*.dmg` from [Releases](https://github.com/jukkakakaka/kestrel/releases) and drag **Kestrel** into Applications. Clear the ad-hoc quarantine attribute once before first launch:
+Download `*-macos-arm64.dmg` for Apple Silicon or `*-macos-x86_64.dmg` for Intel from [Releases](https://github.com/jukkakakaka/kestrel/releases) and drag **Kestrel** into Applications. Clear the ad-hoc quarantine attribute once before first launch:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Kestrel.app
@@ -135,7 +135,7 @@ uv run kestrel serve                 # local browser mode: http://127.0.0.1:8000
 
 **Windows & Docker**
 
-- **Windows**: Download `Kestrel-windows.zip` from the *Build desktop app* GitHub Actions workflow artifacts and run `Kestrel.exe` (includes Windows system tray & Startup autostart support).
+- **Windows**: Download `Kestrel-windows.zip` from [Releases](https://github.com/jukkakakaka/kestrel/releases) and run `Kestrel.exe` (includes Windows system tray & Startup autostart support).
 - **Docker**: `docker compose up` (`http://127.0.0.1:8000`, persistent named volume).
 
 **100% Local Data Ownership**: Integer micro-unit SQLite data stays in `~/Library/Application Support/Kestrel` (macOS), `%APPDATA%\Kestrel` (Windows), or `./data` (source). Zero accounts, zero telemetry.

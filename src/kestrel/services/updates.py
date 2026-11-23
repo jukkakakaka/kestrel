@@ -55,13 +55,21 @@ class Release:
     def asset_for_platform(self) -> dict | None:
         """挑出当前平台该用的那个安装包（防止跨平台 zip 误匹配）。"""
         if sys.platform == "darwin":
+            machine = platform.machine().lower()
+            arch = {"aarch64": "arm64", "amd64": "x86_64"}.get(machine, machine)
+            disks = [asset for asset in self.assets if str(asset.get("name", "")).lower().endswith(".dmg")]
+            qualified = [
+                asset for asset in disks if f"-macos-{arch}." in str(asset.get("name", "")).lower()
+            ]
+            if qualified:
+                return qualified[0]
             for asset in self.assets:
                 name = str(asset.get("name", "")).lower()
-                if name.endswith(".dmg"):
-                    return asset
-            for asset in self.assets:
-                name = str(asset.get("name", "")).lower()
-                if name.endswith(".zip") and any(k in name for k in ("mac", "darwin", "osx")):
+                if "-macos-arm64." in name or "-macos-x86_64." in name:
+                    continue
+                if name.endswith(".dmg") or (
+                    name.endswith(".zip") and any(k in name for k in ("mac", "darwin", "osx"))
+                ):
                     return asset
             return None
 
