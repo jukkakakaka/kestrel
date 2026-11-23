@@ -66,6 +66,8 @@ def test_portfolio_calibration_api_roundtrip(client):
 
 def test_learning_toggle_and_glossary_api_behavior(client):
     """学习模式开启返回 75+ 词条与自动匹配表；关闭时 glossary API 返回停用且无打扰。"""
+    assert client.get("/api/glossary").json()["enabled"] is False
+    assert client.post("/api/ui/learning", json={"enabled": True}).json()["enabled"]
     on_data = client.get("/api/glossary").json()
     assert on_data["enabled"] is True
     assert len(on_data["items"]) >= 70
@@ -90,6 +92,10 @@ def test_learning_toggle_and_glossary_api_behavior(client):
 
     home_html = client.get("/").text
     assert 'data-learning="0"' in home_html
+    assert client.post("/api/settings", json={"items": {"ui.glossary": False}}).json()["ok"]
+    assert client.post("/api/ui/learning", json={"enabled": True}).json()["enabled"]
+    assert 'data-learning="1"' in client.get("/sim").text
+    assert client.get("/api/glossary").json()["enabled"] is False
 
 
 def test_copilot_endpoints_and_scope_guard(client, monkeypatch):

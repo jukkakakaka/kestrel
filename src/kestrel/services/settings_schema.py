@@ -36,7 +36,7 @@ SECTIONS: list[Section] = [
               help_zh="一笔最多亏本金的百分之几，建议 1–2", help_en="Percent of capital at risk per trade"),
         Field("risk.max_total_exposure_pct", "总仓位上限（%）", "Max exposure (%)", "number",
               step="5", help_zh="所有持仓加起来不超过本金的比例", help_en="Total exposure ceiling"),
-        Field("ui.learning_mode", "学习模式", "Learning mode", "switch",
+        Field("ui.learning", "学习模式", "Learning mode", "switch",
               help_zh="在每条建议下面展开「是什么 / 为什么 / 错了怎样」",
               help_en="Expand plain-language explanations under each plan"),
         Field("ui.glossary", "术语解释", "Glossary", "switch",
@@ -91,7 +91,7 @@ SECTIONS: list[Section] = [
 SECTION_MAP = {s.code: s for s in SECTIONS}
 
 EXTRA_DEFAULTS: dict[str, Any] = {
-    "ui.learning_mode": True,
+    "ui.learning": False,
     "ui.glossary": True,
     "scan.min_score": 0.55,
 }

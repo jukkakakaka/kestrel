@@ -58,10 +58,10 @@ def _plan(entry="100", stop="95", qty=100, market="US", code="AAPL",
         conn.close()
 
 
-def _buy(rec_id: int, price: str, qty: int = 100) -> None:
+def _buy(rec_id: int, price: str, qty: int = 100, code: str = "AAPL") -> None:
     result = execution.record(
         execution.Fill(
-            market="US", code="AAPL", side="buy", qty=qty,
+            market="US", code=code, side="buy", qty=qty,
             price=Decimal(price), rec_id=rec_id, name="苹果",
         )
     )
@@ -115,7 +115,7 @@ def test_best_and_worst_are_named(home):
     first = _plan(code="AAPL")
     second = _plan(code="MSFT")
     _buy(first, "99")
-    _buy(second, "102")
+    _buy(second, "102", code="MSFT")
     report = execution.quality_report()
     assert report["worst"]["code"] == "MSFT"
     assert report["best"]["code"] == "AAPL"

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
+import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -17,10 +19,9 @@ from fastapi.staticfiles import StaticFiles
 from kestrel import __version__
 from kestrel.core.clock import iso
 from kestrel.core.money import currency_for, from_micro, to_micro
-from kestrel.core.quantity import db_value, to_qty
 from kestrel.datasources.base import guess_market
 from kestrel.datasources.chain import QuoteChain, default_chain
-from kestrel.db.engine import connect
+from kestrel.db.engine import connect, transaction
 from kestrel.db.migrate import init_db
 from kestrel.i18n import available_locales, load_catalog, locale_label, translate
 from kestrel.settings import settings
@@ -479,14 +480,14 @@ def create_app() -> FastAPI:
 
         conn = connect()
         try:
-            ui_learning = bool(config_service.get(conn, "ui.learning", True))
+            ui_learning = config_service.learning_enabled(conn)
             ui_glossary = bool(config_service.get(conn, "ui.glossary", True))
             ui_privacy = bool(config_service.get(conn, "ui.privacy", False))
             close_to_tray = bool(config_service.get(conn, "desktop.close_to_tray", True))
             autostart_enabled = bool(config_service.get(conn, "desktop.autostart", False))
             portfolio_bar = portfolio_service.snapshot(conn=conn, include_quotes=True, limit_ledger=1)
         except Exception:  # noqa: BLE001
-            ui_learning = True
+            ui_learning = False
             ui_glossary = True
             ui_privacy = False
             close_to_tray = True
@@ -550,6 +551,8 @@ def create_app() -> FastAPI:
         conn = connect()
         try:
             values = config_service.all_values(conn)
+            values["scan.markets"] = config_service.active_markets(conn)
+            values["ui.learning"] = config_service.learning_enabled(conn)
         finally:
             conn.close()
         cap = float(values.get("account.capital") or 50000.0)
@@ -573,31 +576,39 @@ def create_app() -> FastAPI:
 
         try:
             body = await request.json()
-        except Exception:
-            body = {}
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            return JSONResponse({"ok": False, "error": "Invalid onboarding request"}, status_code=400)
+        skip = config_service._coerce_bool(body.get("skip"))
+        try:
+            capital = float(body["capital"]) if "capital" in body else None
+            risk = float(body["risk_pct"]) if "risk_pct" in body else None
+            markets = config_service.market_list(body.get("markets"))
+            horizon = str(body.get("horizon") or timeframe.AUTO).strip().lower()
+            if capital is not None and (not math.isfinite(capital) or not 0 < capital < 1e12):
+                raise ValueError
+            if risk is not None and not 0 < risk <= 100:
+                raise ValueError
+            if "markets" in body and not markets or horizon not in (timeframe.AUTO, *timeframe.ORDER):
+                raise ValueError
+        except (TypeError, ValueError, OverflowError):
+            return JSONResponse({"ok": False, "error": translate(_locale(request), "welcome.settings_invalid")}, status_code=400)
+
         conn = connect()
         try:
-            if not (body or {}).get("skip"):
-                capital = body.get("capital")
-                if capital:
-                    config_service.put(conn, "account.capital", float(capital))
-                risk = body.get("risk_pct")
-                if risk:
-                    config_service.put(conn, "risk.per_trade_pct", float(risk))
-                markets = [
-                    str(m).upper() for m in (body.get("markets") or [])
-                    if str(m).upper() in ("CN", "HK", "US")
-                ]
+            conn.execute("BEGIN IMMEDIATE")
+            if not skip:
+                if capital is not None:
+                    config_service.put(conn, "account.capital", capital)
+                if risk is not None:
+                    config_service.put(conn, "risk.per_trade_pct", risk)
                 if markets:
                     config_service.put(conn, "scan.markets", markets)
                     config_service.put(conn, "ui.markets_configured", True)
-                horizon = str(body.get("horizon") or "auto")
-                if horizon == timeframe.AUTO or timeframe.is_valid(horizon):
-                    config_service.put(conn, "trade.horizon", horizon)
+                config_service.put(conn, "trade.horizon", horizon)
                 if "learning" in body:
-                    learn_on = bool(body.get("learning"))
-                    config_service.put(conn, "ui.learning", learn_on)
-                    config_service.put(conn, "ui.glossary", learn_on)
+                    config_service.put(conn, "ui.learning", body["learning"])
                 brokers = body.get("brokers") or {}
                 if isinstance(brokers, dict):
                     for mkt in ("CN", "HK", "US"):
@@ -629,9 +640,7 @@ def create_app() -> FastAPI:
         conn = connect()
         try:
             onboarded = bool(config_service.get(conn, "ui.onboarded", False))
-            enabled = [str(m).upper() for m in config_service.get(
-                conn, "scan.markets", ["CN", "HK", "US"]
-            ) or ["CN", "HK", "US"]]
+            enabled = config_service.active_markets(conn)
         finally:
             conn.close()
         if not onboarded:
@@ -695,9 +704,7 @@ def create_app() -> FastAPI:
 
         conn = connect()
         try:
-            enabled = [str(m).upper() for m in config_service.get(
-                conn, "scan.markets", ["CN", "HK", "US"]
-            ) or ["CN", "HK", "US"]]
+            enabled = config_service.active_markets(conn)
             marks = ",".join("?" * len(enabled)) or "''"
             rows = conn.execute(
                 f"""
@@ -878,36 +885,36 @@ def create_app() -> FastAPI:
             log.warning("analyst ingest failed: %s", exc)
 
         market_filter = str(request.query_params.get("market") or "").upper().strip()
-        filter_markets = [market_filter] if market_filter in ("CN", "HK", "US") else None
-        recs = scan_service.active_recommendations(50, markets=filter_markets)
         conn = connect()
         try:
             last = config_service.get(conn, "scan.last", None)
             auto = bool(config_service.get(conn, "scan.auto_enabled", False))
             interval = int(config_service.get(conn, "scan.interval_minutes", 60) or 60)
-            markets = config_service.get(conn, "scan.markets", ["CN", "HK", "US"]) or ["CN", "HK", "US"]
-            markets_configured = bool(config_service.get(conn, "ui.markets_configured", False))
+            markets = config_service.active_markets(conn)
+            markets_configured = config_service.markets_configured(conn)
             universe = str(config_service.get(conn, "scan.universe", "both"))
             requested = str(config_service.get(conn, "trade.horizon", "auto") or "auto")
             ui = {
-                "learning": bool(config_service.get(conn, "ui.learning", True)),
+                "learning": config_service.learning_enabled(conn),
                 "glossary": bool(config_service.get(conn, "ui.glossary", True)),
             }
             snap = portfolio_service.snapshot(conn=conn, include_quotes=True, limit_ledger=1)
         finally:
             conn.close()
 
-        advice = advisor_service.cached()
-        if advice is None:
-            try:
-                advice = advisor_service.evaluate()
-            except Exception as exc:  # noqa: BLE001
-                log.warning("advisor failed on page load: %s", exc)
-                advice = {}
+        market_filter = market_filter if market_filter in markets else "ALL"
+        filter_markets = [market_filter] if market_filter != "ALL" else markets
+        recs = scan_service.active_recommendations(50, markets=filter_markets)
+        try:
+            advice = advisor_service.evaluate()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("advisor failed on page load: %s", exc)
+            advice = {}
         market_rec = advisor_service.recommend_markets(
-            capital_cny=snap["total_equity_cny"],
+            capital_cny=snap["total_equity_cny"] if markets_configured else snap["initial_capital_cny"],
             configured=markets_configured,
             enabled=markets,
+            horizon_report=advice,
         )
 
         pinned = timeframe.is_valid(requested)
@@ -1006,75 +1013,65 @@ def create_app() -> FastAPI:
 
         return RedirectResponse("/advice", status_code=301)
 
+    def _confirmed_fill(conn, body: dict, *, market: str, code: str, name: str,
+                        rec_id: int | None = None, source: str = "manual") -> dict:
+        from kestrel.services import config as config_service
+        from kestrel.services import execution
+        from kestrel.services import fills as fill_service
+
+        side = str(body.get("side") or "buy").strip().lower()
+        try:
+            price = Decimal(str(body.get("price") or ""))
+            qty = Decimal(str(body.get("qty") or ""))
+            fees = body.get("fees")
+            if fees in (None, "") and all(
+                v.is_finite() and 0 < v < Decimal("1e12") for v in (price, qty)
+            ):
+                broker = config_service.get(conn, f"broker.{market}")
+                fees = fill_service.estimate_fees(market, price, qty, broker, side)
+            return execution.record(execution.Fill(
+                market=market, code=code, name=name, side=side, price=price, qty=qty,
+                fees=fees or 0, rec_id=rec_id, source=source,
+                filled_at=str(body.get("filled_at") or "") or None,
+                trade_id=int(body["trade_id"]) if body.get("trade_id") else None,
+                request_id=str(body.get("request_id") or "") or None,
+                note=str(body.get("note") or ""), stop=body.get("stop"), target=body.get("target"),
+                exit_reason=str(body.get("exit_reason") or ""),
+                rule_break=config_service._coerce_bool(body.get("rule_break")),
+                broker=config_service.get(conn, f"broker.{market}"),
+                confirmed=rec_id is not None or config_service._coerce_bool(body.get("confirmed")),
+            ), conn=conn)
+        except (TypeError, ValueError, ArithmeticError):
+            return {"ok": False, "error": "请输入券商显示的实际成交价格和数量，并检查费用、日期及持仓编号。"}
+
     @app.post("/advice/{rec_id}/decide", response_class=JSONResponse)
     async def advice_decide(rec_id: int, request: Request):
-        from kestrel.services import execution
         from kestrel.services import scan as scan_service
 
         try:
             body = await request.json()
-        except Exception:
-            body = {}
-        decision = str((body or {}).get("decision", "")).strip()
-        note = str((body or {}).get("note", "")).strip()
-        fill = (body or {}).get("fill_price")
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            return JSONResponse({"ok": False, "error": "请求格式不对"}, status_code=400)
+        decision = body.get("decision")
+        if decision != "executed":
+            return {"ok": scan_service.decide(rec_id, decision, str(body.get("note") or ""))}
+
+        conn = connect()
         try:
-            fill_price = float(fill) if fill not in (None, "") else None
-        except (TypeError, ValueError):
-            fill_price = None
-
-        if decision == "executed":
-            from kestrel.services import config as config_service
-            from kestrel.services import fills as fill_service
-
-            conn = connect()
-            try:
-                rec = conn.execute(
-                    "SELECT * FROM recommendation WHERE id=?", (rec_id,)
-                ).fetchone()
-                broker = (
-                    config_service.get(conn, f"broker.{rec['market']}") if rec else None
+            with transaction(conn, immediate=True):
+                rec = conn.execute("SELECT market, code, name FROM recommendation WHERE id=?", (rec_id,)).fetchone()
+                if rec is None:
+                    return {"ok": False, "error": "这条建议不存在"}
+                result = _confirmed_fill(
+                    conn, {**body, "price": body.get("fill_price"), "side": "buy"},
+                    market=rec["market"], code=rec["code"], name=rec["name"],
+                    rec_id=rec_id, source="advice",
                 )
-            finally:
-                conn.close()
-            if rec is None:
-                return {"ok": False, "error": "这条建议不存在"}
-            qty_raw = (body or {}).get("qty")
-            qty = to_qty(qty_raw) if qty_raw not in (None, "") else to_qty(rec["qty"])
-            if qty <= 0:
-                qty = to_qty(rec["qty"])
-            price = Decimal(str(fill_price)) if fill_price else from_micro(rec["entry_low"])
-            fees_raw = (body or {}).get("fees")
-            fees_val = (
-                Decimal(str(fees_raw))
-                if fees_raw not in (None, "")
-                else fill_service.estimate_fees(rec["market"], price, qty, broker, "buy")
-            )
-            result = execution.record(
-                execution.Fill(
-                    market=rec["market"],
-                    code=rec["code"],
-                    side="buy",
-                    qty=qty,
-                    price=price,
-                    fees=fees_val,
-                    rec_id=rec_id,
-                    source="advice",
-                    note=note,
-                    name=rec["name"],
-                    broker=broker,
-                )
-            )
-            if not result.get("ok"):
-                return {"ok": False, "error": result.get("error")}
-            import contextlib
-
-            with contextlib.suppress(Exception):
-                scan_service.decide(rec_id, "executed", note, fill_price)
-            return {"ok": True, "trade": result}
-
-        ok = scan_service.decide(rec_id, decision, note, fill_price)
-        return {"ok": ok}
+                return {"ok": True, "trade": result} if result["ok"] else result
+        finally:
+            conn.close()
 
     @app.post("/api/scan", response_class=JSONResponse)
     async def api_scan(request: Request):
@@ -1141,7 +1138,7 @@ def create_app() -> FastAPI:
             name="receipt.html",
             context=_ctx(request, rec=dict(row) if row else None, code=code,
                          existing=dict(existing) if existing else None,
-                         expired=expired),
+                         expired=expired, receipt_request_id=uuid.uuid4().hex),
         )
 
     def _token_expired(row) -> bool:
@@ -1162,126 +1159,85 @@ def create_app() -> FastAPI:
 
     @app.post("/r/{code}", response_class=HTMLResponse)
     async def receipt_submit(request: Request, code: str):
-        from decimal import Decimal
-
-        from kestrel.core.money import to_micro
-        from kestrel.services import execution
-
         form = await request.form()
-        action = str(form.get("action") or "skipped")
-        fill_raw = str(form.get("fill_price") or "").strip()
-        qty_raw = str(form.get("fill_qty") or "").strip()
+        action = str(form.get("action") or "")
         note = str(form.get("note") or "").strip()
-
-        conn = connect()
-        try:
-            row = conn.execute(
-                """
-                SELECT r.*, t.code AS token_code, t.expires_at AS token_expires,
-                       t.uses, t.max_uses
-                FROM receipt_token t JOIN recommendation r ON r.id = t.rec_id
-                WHERE t.code = ?
-                """,
-                (code,),
-            ).fetchone()
-        finally:
-            conn.close()
-        if row is None:
-            return templates.TemplateResponse(
-                request=request, name="receipt.html",
-                context=_ctx(request, rec=None, code=code, existing=None, expired=False),
-            )
-        if _token_expired(row):
-            return templates.TemplateResponse(
-                request=request, name="receipt.html",
-                context=_ctx(request, rec=dict(row), code=code, existing=None, expired=True),
-            )
-
-        rec = dict(row)
+        request_id = str(form.get("request_id") or "").strip()
+        error = None
         result = None
-        if action in ("executed", "partial"):
-            from kestrel.services import config as config_service
-            from kestrel.services import fills as fill_service
-
-            try:
-                fill_price = Decimal(fill_raw) if fill_raw else Decimal(rec["entry_low"]) / Decimal(
-                    1_000_000
-                )
-            except Exception:  # noqa: BLE001
-                fill_price = None
-            qty = to_qty(qty_raw) if qty_raw else to_qty(rec["qty"])
-            if qty <= 0:
-                qty = to_qty(rec["qty"])
-            if fill_price is None or fill_price <= 0:
-                return templates.TemplateResponse(
-                    request=request, name="receipt.html",
-                    context=_ctx(request, rec=rec, code=code, existing=None,
-                                 expired=False, error="成交价填一个数字，比如 402.5"),
-                )
-            conn_b = connect()
-            try:
-                broker = config_service.get(conn_b, f"broker.{rec['market']}")
-            finally:
-                conn_b.close()
-            fees_val = fill_service.estimate_fees(rec["market"], fill_price, qty, broker, "buy")
-            result = execution.record(
-                execution.Fill(
-                    market=rec["market"],
-                    code=rec["code"],
-                    side="buy",
-                    qty=qty,
-                    price=fill_price,
-                    fees=fees_val,
-                    rec_id=rec["id"],
-                    source="link",
-                    note=note,
-                    name=rec["name"],
-                    broker=broker,
-                )
-            )
-            if not result.get("ok"):
-                return templates.TemplateResponse(
-                    request=request, name="receipt.html",
-                    context=_ctx(request, rec=rec, code=code, existing=None,
-                                 expired=False, error=result.get("error")),
-                )
-            pct = result.get("deviation_pct")
-            r_dev = result.get("deviation_r")
-        else:
-            pct = r_dev = None
-
+        done = None
+        expired = False
         conn = connect()
         try:
-            conn.execute(
-                """
-                INSERT INTO receipt
-                    (rec_id, token_code, action, fill_price, fill_qty, filled_at,
-                     deviation_pct, deviation_r, note, source)
-                VALUES (?,?,?,?,?,?,?,?,?, 'link')
-                """,
-                (
-                    rec["id"], code, action,
-                    to_micro(fill_price) if action in ("executed", "partial") and fill_raw else None,
-                    db_value(qty) if qty_raw else rec["qty"],
-                    datetime.now(UTC).isoformat(timespec="seconds"),
-                    pct, r_dev, note or None,
-                ),
-            )
-            conn.execute("UPDATE receipt_token SET uses = uses + 1 WHERE code = ?", (code,))
-            if action == "skipped":
-                conn.execute(
-                    "UPDATE recommendation SET status='skipped', decided_at=?"
-                    " WHERE id=?",
-                    (datetime.now(UTC).isoformat(timespec="seconds"), rec["id"]),
-                )
-            conn.commit()
+            with transaction(conn, immediate=True):
+                row = conn.execute(
+                    """
+                    SELECT r.*, t.code AS token_code, t.expires_at AS token_expires,
+                           t.uses, t.max_uses
+                    FROM receipt_token t JOIN recommendation r ON r.id = t.rec_id
+                    WHERE t.code = ?
+                    """,
+                    (code,),
+                ).fetchone()
+                rec = dict(row) if row else None
+                if rec:
+                    expired = _token_expired(rec)
+                receipt_request = f"receipt:{code}:{request_id}" if request_id else None
+                existing = conn.execute(
+                    "SELECT action FROM receipt WHERE request_id=?",
+                    (receipt_request,),
+                ).fetchone() if receipt_request and rec else None
+                if existing:
+                    done = existing["action"]
+                elif rec and not expired:
+                    if action in ("executed", "partial"):
+                        result = _confirmed_fill(
+                            conn, {
+                                "price": form.get("fill_price"), "qty": form.get("fill_qty"),
+                                "fees": form.get("fees"), "filled_at": form.get("filled_at"),
+                                "request_id": receipt_request, "note": note,
+                            },
+                            market=rec["market"], code=rec["code"], name=rec["name"],
+                            rec_id=rec["id"], source="link",
+                        )
+                        error = result.get("error") if not result["ok"] else None
+                    elif action == "skipped" and rec["status"] == "active":
+                        conn.execute(
+                            "UPDATE recommendation SET status='skipped', decided_at=?, decided_note=? WHERE id=?",
+                            (datetime.now(UTC).isoformat(timespec="seconds"), note, rec["id"]),
+                        )
+                    else:
+                        error = translate(_locale(request), "receipt.action_invalid")
+
+                    if not error:
+                        actual = bool(result and result["ok"])
+                        conn.execute(
+                            """
+                            INSERT INTO receipt
+                                (rec_id, token_code, action, fill_price, fill_qty, filled_at,
+                                 deviation_pct, deviation_r, note, source, request_id)
+                            VALUES (?,?,?,?,?,?,?,?,?, 'link', ?)
+                            """,
+                            (
+                                rec["id"], code, action,
+                                to_micro(form["fill_price"]) if actual else None,
+                                result["qty"] if actual else None,
+                                result["filled_at"] if actual else datetime.now(UTC).isoformat(timespec="seconds"),
+                                result.get("deviation_pct") if actual else None,
+                                result.get("deviation_r") if actual else None,
+                                note or None, receipt_request,
+                            ),
+                        )
+                        conn.execute("UPDATE receipt_token SET uses=uses+1 WHERE code=?", (code,))
+                        done = action
         finally:
             conn.close()
 
         return templates.TemplateResponse(
             request=request, name="receipt.html",
-            context=_ctx(request, rec=rec, code=code, existing=None, done=action,
-                         result=result, expired=False),
+            context=_ctx(request, rec=rec, code=code, existing=None, done=done,
+                         result=result, expired=expired, error=error,
+                         receipt_form=form, receipt_request_id=request_id or uuid.uuid4().hex),
         )
 
     @app.get("/settings", response_class=HTMLResponse)
@@ -1301,6 +1257,8 @@ def create_app() -> FastAPI:
         conn = connect()
         try:
             values = config_service.all_values(conn)
+            values["scan.markets"] = config_service.active_markets(conn)
+            values["ui.learning"] = config_service.learning_enabled(conn)
         finally:
             conn.close()
         broker_options = {
@@ -1497,13 +1455,14 @@ def create_app() -> FastAPI:
             market=market,
             code=code,
             side=str(form.get("side") or "buy"),
-            qty=to_qty(form.get("qty") or 0),
+            qty=str(form.get("qty") or 0),
             price=str(form.get("entry_price") or 0),
             fees=str(form.get("fees") or 0),
             filled_at=str(form.get("filled_at") or "") or None,
             note=str(form.get("note") or ""),
             name=str(form.get("name") or "").strip(),
             source="manual",
+            confirmed=True,
             stop=str(form.get("stop_price") or "") or None,
             target=str(form.get("target_price") or "") or None,
         )
@@ -1531,7 +1490,7 @@ def create_app() -> FastAPI:
             str(form.get("exit_price") or 0),
             str(form.get("review") or ""),
             bool(form.get("rule_break")),
-            qty=to_qty(qty_raw) if qty_raw else None,
+            qty=qty_raw or None,
             exit_reason=str(form.get("exit_reason") or ""),
             fees_override=fees_raw if fees_raw != "" else None,
         )
@@ -2084,9 +2043,7 @@ def create_app() -> FastAPI:
 
         conn = connect()
         try:
-            enabled = [str(m).upper() for m in config_service.get(
-                conn, "scan.markets", ["CN", "HK", "US"]
-            ) or ["CN", "HK", "US"]]
+            enabled = config_service.active_markets(conn)
         finally:
             conn.close()
         return {
@@ -2117,9 +2074,7 @@ def create_app() -> FastAPI:
             body = {}
         conn = connect()
         try:
-            markets = (body or {}).get("markets") or config_service.get(
-                conn, "scan.markets", ["CN", "HK", "US"]
-            )
+            markets = config_service.market_list((body or {}).get("markets")) or config_service.active_markets(conn)
             size = int((body or {}).get("size") or config_service.get(conn, "scan.pool_size", 30))
         finally:
             conn.close()
@@ -2543,7 +2498,7 @@ def create_app() -> FastAPI:
 
         body = await request.json()
         rows = (body or {}).get("rows") or []
-        result = statement.save(rows, locale=_locale(request))
+        result = statement.save(rows, locale=_locale(request), request_id=str((body or {}).get("request_id") or ""))
         return {"ok": True, **result}
 
     @app.post("/api/journal/fill", response_class=JSONResponse)
@@ -2553,13 +2508,14 @@ def create_app() -> FastAPI:
         市场、名称、手续费都可以不填：这里是最后一个能补上它们的地方，
         否则用户会被迫先去行情页查一遍再回来记账。
         """
-        from kestrel.services import config as config_service
-        from kestrel.services import execution
         from kestrel.services import fills as fill_service
 
         try:
             body = await request.json()
         except Exception:
+            return JSONResponse({"ok": False, "error": "请求格式不对"}, status_code=400)
+
+        if not isinstance(body, dict):
             return JSONResponse({"ok": False, "error": "请求格式不对"}, status_code=400)
 
         raw_code = str(body.get("code") or "").strip()
@@ -2570,7 +2526,8 @@ def create_app() -> FastAPI:
             raw_code, str(body.get("market") or "").strip().upper() or None,
             name=str(body.get("name") or ""),
         )
-        if not target.code and raw_code:
+        asked_market = str(body.get("market") or "").strip().upper()
+        if not target.code and not asked_market and "/" not in raw_code:
             # 库里没有（还没加自选）：去解析一次。记账不该要求用户先去加自选，
             # 但解析失败时也不要瞎猜市场——那会把港股写成美股。
             from kestrel.datasources import resolve as resolver
@@ -2593,68 +2550,19 @@ def create_app() -> FastAPI:
                 status_code=400,
             )
 
-        price = body.get("price") or 0
-        qty = to_qty(body.get("qty") or 0)
-        side = str(body.get("side") or "buy")
-        fees = body.get("fees")
+        try:
+            rec_id = int(body["rec_id"]) if body.get("rec_id") else None
+        except (TypeError, ValueError):
+            return JSONResponse({"ok": False, "error": "建议编号无效"}, status_code=400)
         conn = connect()
         try:
-            broker = config_service.get(conn, f"broker.{target.market}")
+            with transaction(conn, immediate=True):
+                return _confirmed_fill(
+                    conn, body, market=target.market, code=target.code, name=target.name,
+                    rec_id=rec_id,
+                )
         finally:
             conn.close()
-        if fees in (None, ""):
-            fees = fill_service.estimate_fees(target.market, price, qty, broker, side)
-
-        # 若明确指定某笔 open 持仓 id 平仓（例如从持仓页点击「卖出」），按精准批次结算。
-        trade_id_raw = body.get("trade_id")
-        if trade_id_raw and str(side).lower().startswith("s"):
-            from kestrel.services import journal
-
-            res = journal.close_trade(
-                int(trade_id_raw),
-                str(price),
-                review=str(body.get("note") or ""),
-                rule_break=bool(body.get("rule_break")),
-                qty=qty if qty > 0 else None,
-                exit_reason=str(body.get("exit_reason") or ""),
-                fees_override=fees,
-                broker=broker,
-            )
-            if res is None:
-                return JSONResponse({"ok": False, "error": "找不到该未平仓持仓"}, status_code=404)
-            if isinstance(res, dict) and res.get("ok") is False:
-                return res
-            return {
-                "ok": True,
-                "side": "sell",
-                "qty": float(qty),
-                "closed_trades": [res["id"]],
-                "message": f"已记录卖出 {target.name} {qty} 股 @ {price}",
-            }
-
-        try:
-            fill = execution.Fill(
-                market=target.market,
-                code=target.code,
-                side=side,
-                qty=qty,
-                price=str(price),
-                fees=str(fees or 0),
-                filled_at=str(body.get("filled_at") or "") or None,
-                rec_id=int(body["rec_id"]) if body.get("rec_id") else None,
-                note=str(body.get("note") or ""),
-                name=target.name,
-                source="manual",
-                stop=body.get("stop"),
-                target=body.get("target"),
-                exit_reason=str(body.get("exit_reason") or ""),
-                rule_break=bool(body.get("rule_break")),
-                broker=broker,
-            )
-        except (TypeError, ValueError) as exc:
-            return JSONResponse({"ok": False, "error": f"数字填错了：{exc}"}, status_code=400)
-        result = execution.record(fill)
-        return result
 
     @app.post("/api/journal/{trade_id}/stop", response_class=JSONResponse)
     async def api_move_stop(trade_id: int, request: Request):
@@ -2718,11 +2626,20 @@ def create_app() -> FastAPI:
         items = (body or {}).get("items") or {}
         if not isinstance(items, dict):
             return JSONResponse({"ok": False, "error": "items must be an object"}, status_code=400)
+        from kestrel.services import timeframe
+
+        if "trade.horizon" in items and items["trade.horizon"] not in (timeframe.AUTO, *timeframe.ORDER):
+            return JSONResponse({"ok": False, "error": translate(_locale(request), "welcome.settings_invalid")}, status_code=400)
+        if "account.capital" in items:
+            try:
+                capital = float(items["account.capital"])
+                if not math.isfinite(capital) or not 0 < capital < 1e12:
+                    raise ValueError
+            except (ValueError, TypeError, OverflowError):
+                return JSONResponse({"ok": False, "error": translate(_locale(request), "welcome.settings_invalid")}, status_code=400)
+            items["account.capital"] = capital
         if "scan.markets" in items:
-            mkts = [
-                str(m).upper() for m in (items.get("scan.markets") or [])
-                if str(m).upper() in ("CN", "HK", "US")
-            ]
+            mkts = config_service.market_list(items["scan.markets"])
             if not mkts:
                 return JSONResponse(
                     {"ok": False, "error": "至少需要保留一个交易市场"},
@@ -2732,9 +2649,9 @@ def create_app() -> FastAPI:
             items["ui.markets_configured"] = True
         conn = connect()
         try:
-            for key, value in items.items():
-                config_service.put(conn, str(key), value)
-            conn.commit()
+            with transaction(conn, immediate=True):
+                for key, value in items.items():
+                    config_service.put(conn, str(key), value)
         finally:
             conn.close()
         if "desktop.autostart" in items:
@@ -2802,11 +2719,10 @@ def create_app() -> FastAPI:
             body = await request.json()
         except Exception:
             body = {}
-        enabled = bool((body or {}).get("enabled", True))
+        enabled = config_service._coerce_bool((body or {}).get("enabled", True))
         conn = connect()
         try:
             config_service.put(conn, "ui.learning", enabled)
-            config_service.put(conn, "ui.glossary", enabled)
             conn.commit()
         finally:
             conn.close()
@@ -2948,10 +2864,16 @@ def create_app() -> FastAPI:
         return _build_desktop_status(request)
 
     @app.get("/api/advisor/recommend", response_class=JSONResponse)
-    async def api_advisor_recommend(request: Request, capital: float | None = None):
+    async def api_advisor_recommend(request: Request, capital: float | None = None, markets: str = ""):
         from kestrel.services import advisor as advisor_service
+        from kestrel.services import config as config_service
 
-        rec = advisor_service.recommend_markets(capital_cny=capital)
+        if capital is not None and (not math.isfinite(capital) or not 0 < capital < 1e12):
+            return JSONResponse({"ok": False, "error": translate(_locale(request), "welcome.settings_invalid")}, status_code=400)
+        enabled = config_service.market_list(markets.split(","))
+        rec = advisor_service.recommend_markets(
+            capital_cny=capital, enabled=enabled or None, configured=True if enabled else None,
+        )
         return {"ok": True, "recommendation": rec, "advisor": advisor_service.cached() or {}}
 
     @app.post("/api/journal/fill/preview", response_class=JSONResponse)
@@ -2962,20 +2884,30 @@ def create_app() -> FastAPI:
             body = await request.json()
         except Exception:
             return JSONResponse({"ok": False, "error": "bad json"}, status_code=400)
-        data = body or {}
-        return execution.preview_fill_vs_plan(
-            market=str(data.get("market") or "US"),
-            code=str(data.get("code") or ""),
-            side=str(data.get("side") or "buy"),
-            qty=data.get("qty") or 0,
-            price=data.get("price") or 0,
-            fees=data.get("fees"),
-            stop=data.get("stop"),
-            target=data.get("target"),
-            rec_id=int(data["rec_id"]) if data.get("rec_id") else None,
-            trade_id=int(data["trade_id"]) if data.get("trade_id") else None,
-            locale=_locale(request),
-        )
+        from kestrel.services.fills import resolve_target
+
+        if not isinstance(body, dict):
+            return JSONResponse({"ok": False, "error": "bad json"}, status_code=400)
+        target = resolve_target(str(body.get("code") or ""), str(body.get("market") or ""))
+        if not target.code:
+            return {"ok": False}
+        try:
+            return execution.preview_fill_vs_plan(
+                market=target.market,
+                code=target.code,
+                side=str(body.get("side") or "buy"),
+                qty=body.get("qty") or 0,
+                price=body.get("price") or 0,
+                fees=body.get("fees"),
+                stop=body.get("stop"),
+                target=body.get("target"),
+                rec_id=int(body["rec_id"]) if body.get("rec_id") else None,
+                trade_id=int(body["trade_id"]) if body.get("trade_id") else None,
+                confirmed=body.get("confirmed") is True,
+                locale=_locale(request),
+            )
+        except (ArithmeticError, TypeError, ValueError):
+            return {"ok": False}
 
     @app.get("/api/copilot/status", response_class=JSONResponse)
     async def api_copilot_status():

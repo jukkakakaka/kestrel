@@ -900,7 +900,7 @@
   "copilot.welcome_msg": "Hello! I'm Kestrel's dedicated stock trading & risk assistant, synced with your live portfolio and setups. Ask me anything about trading rules, signals, sizing, or using Kestrel.",
 
   "fill.exit_reason": "Exit Reason",
-  "fill.fees_auto_ph": "Blank = auto broker estimate",
+  "fill.fees_auto_ph": "Blank estimates broker fees",
   "fill.reason_manual": "Discretionary early exit",
   "fill.reason_sl": "Stopped out on plan",
   "fill.reason_time": "Time stop reached",
@@ -1126,5 +1126,18 @@
   "stock.line_target1": "Target",
   "stock.line_entry_high": "Entry High",
   "stock.line_entry_low": "Entry Low",
-  "stock.line_stop": "Stop"
+  "stock.line_stop": "Stop",
+  "adv.manual_limit": "Find {code} in your broker app, choose a limit buy, and cap the price at {high}. Pass if the price is outside the plan, it has expired, or your broker cannot accept the order. Record the broker fill afterward.",
+  "adv.filled_total": "Filled {qty} shares · Average {price}",
+  "adv.add_fill": "Record another fill",
+  "adv.data_skipped": "Last scan skipped {stale} symbol(s) with stale data, {missing} with no data, and {short} with too little history.",
+  "fill.actual_only": "Enter the price and shares from your broker fill. Record each partial fill separately. Blank fees and date use an estimate and the current time.",
+  "learn.practice": "Practice limit prices, sizing and stops",
+  "learn.exercise_title": "Practice sizing, stops and partial fills",
+  "learn.exercise_prompt": "A practice account holds ¥20,000 and budgets ¥200 of risk for a trade. The limit buy is ¥20 and the stop is ¥19. How many shares fit the budget? If only 100 shares fill at ¥19.90, what goes in the journal?",
+  "learn.exercise_check": "Check your answer",
+  "learn.exercise_answer": "Planned risk is ¥1 per share, so the cap before fees is 200 shares. Real orders also need to fit available cash, costs and lot rules. Record a buy of 100 shares at ¥19.90 and add subsequent fills separately. With the stop at ¥19, price risk is ¥90 plus fees and possible slippage. A price gap can make the loss larger.",
+  "receipt.action_invalid": "Record a confirmed fill. Only active plans can be marked as skipped.",
+  "welcome.settings_invalid": "Check capital, risk, markets and horizon, then try again.",
+  "welcome.h_fast_note": "Daily bars for swings over a few sessions, with higher turnover costs."
 }

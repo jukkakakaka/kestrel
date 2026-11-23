@@ -447,3 +447,17 @@ def test_sim_and_rules_routes_and_journal_equity_curve_regression(isolated_home,
         r_drift_api = client.get("/api/rules/drift")
         assert r_drift_api.status_code == 200
         assert r_drift_api.json()["ok"] is True
+
+
+def test_trade_prefix_is_invariant_and_experiment_hash_covers_middle_prices():
+    bars = _make_bars(110)
+    regime = {"stub_idx": _TriggerAtIndexStrategy({66, 107})}
+    settings = dict(min_bars=60, max_hold=3, registry_override=regime)
+    prefix = backtest.run(bars[:95], "stub_idx", **settings)
+    full = backtest.run(bars, "stub_idx", **settings)
+    assert prefix["trades"] and full["trades"][:len(prefix["trades"])] == prefix["trades"]
+    assert full["bar_returns"][:95-60] == prefix["bar_returns"]
+    altered = [dict(row) for row in bars]
+    altered[10]["volume"] += 1
+    rerun = backtest.run(altered, "stub_idx", **settings)
+    assert rerun["stats"]["determinism_hash"] != full["stats"]["determinism_hash"]

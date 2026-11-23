@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from kestrel.core.money import currency_for, from_cny
+from kestrel.core.quantity import broker_plan
 from kestrel.db.engine import connect
 from kestrel.fees.calculator import round_trip
 from kestrel.indicators.engine import Series, compute
@@ -63,13 +64,13 @@ def _breadth(symbols: list[dict], conn) -> dict:
     per_market_raw: dict[str, dict] = {}
 
     for sym in symbols:
-        rows = bars_service.cached_bars(conn, sym["id"], 200)
-        if len(rows) < 80:
+        mkt = sym["market"]
+        rows = bars_service.drop_forming(bars_service.cached_bars(conn, sym["id"], 200), mkt)
+        if len(rows) < 80 or bars_service.is_stale(rows, mkt):
             continue
         ind = compute(Series.from_bars(rows))
         if not ind or ind.get("sma60") is None:
             continue
-        mkt = str(sym.get("market") or "").upper()
         bucket = per_market_raw.setdefault(
             mkt, {"above": 0, "total": 0, "atrs": [], "rets": []}
         )
@@ -146,14 +147,27 @@ def _symbols(conn, markets: list[str] | None = None) -> list[dict]:
     marks = ",".join("?" * len(clean))
     rows = conn.execute(
         f"""
-        SELECT s.id, s.market, s.code, s.name FROM symbol s
-        LEFT JOIN watchlist w ON w.symbol_id = s.id
-        WHERE s.market IN ({marks}) AND (s.is_pool = 1 OR w.id IS NOT NULL)
-        ORDER BY s.is_pool DESC, s.pool_rank LIMIT 240
+        SELECT id, market, code, name FROM (
+            SELECT s.id, s.market, s.code, s.name,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY s.market ORDER BY s.is_pool DESC, s.pool_rank, s.id
+                   ) AS sample_rank
+            FROM symbol s LEFT JOIN watchlist w ON w.symbol_id = s.id
+            WHERE s.market IN ({marks}) AND (s.is_pool = 1 OR w.id IS NOT NULL)
+        ) WHERE sample_rank <= 80
         """,
         tuple(clean),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def markets_for_capital(capital_cny: float) -> list[str]:
+    """Starting coverage based on the order sizes a small account can typically support."""
+    if capital_cny < 10000:
+        return ["US"]
+    if capital_cny < 150000:
+        return ["CN", "US"]
+    return list(config_service.MARKETS)
 
 
 def recommend_markets(
@@ -162,6 +176,7 @@ def recommend_markets(
     configured: bool | None = None,
     enabled: list[str] | None = None,
     brokers: dict[str, str | None] | None = None,
+    horizon_report: dict | None = None,
 ) -> dict:
     """根据资金规模、整手门槛与税费特征推荐交易市场组合并给出解释。"""
     conn = connect()
@@ -171,29 +186,35 @@ def recommend_markets(
             snap = portfolio_service.snapshot(conn=conn, include_quotes=False)
             capital_cny = float(snap["total_equity_cny"] or cfg.get("account.capital") or 50000)
         if configured is None:
-            configured = bool(cfg.get("ui.markets_configured", False))
+            configured = config_service.markets_configured(conn)
         if enabled is None:
-            enabled = [str(m).upper() for m in (cfg.get("scan.markets") or ["CN", "HK", "US"])]
+            enabled = config_service.active_markets(conn)
         brokers = brokers or {
             mkt: cfg.get(f"broker.{mkt}") for mkt in ("CN", "HK", "US")
         }
     finally:
         conn.close()
 
-    cap = max(100.0, float(capital_cny))
+    cap = float(capital_cny)
+    recommended = markets_for_capital(cap)
+    us_broker = broker_plan(brokers.get("US"), "US")
+    hk_broker = broker_plan(brokers.get("HK"), "HK")
+    us_qty_zh = "支持小数股，最低成交金额按券商规定" if us_broker and us_broker.fractional_us else "按整股买入"
+    us_qty_en = "fractional shares subject to the broker minimum" if us_broker and us_broker.fractional_us else "whole shares"
+    hk_qty_zh = "当前套餐支持碎股买入" if hk_broker and hk_broker.odd_lot_buy else "当前套餐按个股手数买入"
+    hk_qty_en = "current plan supports odd-lot buys" if hk_broker and hk_broker.odd_lot_buy else "current plan uses each stock's board lot"
     cost_cn = _cost_pct(cap, "CN", brokers.get("CN"))
     cost_hk = _cost_pct(cap, "HK", brokers.get("HK"))
     cost_us = _cost_pct(cap, "US", brokers.get("US"))
 
     if cap < 18000:
-        recommended = ["US", "CN"] if cap >= 10000 else ["US"]
         primary_zh = (
-            f"当前资金约 ¥{cap:,.0f}：优先推荐美股（可买 1 股或小数股、无印花税），"
+            f"当前资金约 ¥{cap:,.0f}：优先考虑美股（{us_qty_zh}），"
             + ("搭配 A 股精选低单价标的；港股因每手门槛与最低平台费暂不建议重配。"
                if cap >= 10000 else "避免 A 股/港股一手门槛过高导致频繁被风控拒绝。")
         )
         primary_en = (
-            f"With ~¥{cap:,.0f} capital, US stocks fit best (1-share/fractional sizing, zero stamp duty)"
+            f"With ~¥{cap:,.0f} capital, start by considering US stocks ({us_qty_en})"
             + (" alongside lower-priced A-shares; HK lot minimums and platform fees are heavy here."
                if cap >= 10000 else " to avoid whole-lot rejections on CN/HK.")
         )
@@ -203,16 +224,14 @@ def recommend_markets(
             "HK": "low",
         }
     elif cap < 150000:
-        recommended = ["CN", "US"]
         primary_zh = (
-            f"当前资金约 ¥{cap:,.0f}：推荐「A 股 + 美股」双市场组合，兼具本土 T+1 趋势票与美股科技/ETF，单笔风险预算能覆盖多数整手标的且费用合理。"
+            f"当前资金约 ¥{cap:,.0f}：推荐「A 股 + 美股」双市场组合，兼具本土 T+1 趋势票与美股科技/ETF，实际可买数量取决于股价、止损距离与券商费率。"
         )
         primary_en = (
             f"With ~¥{cap:,.0f} capital, CN + US balances onshore liquidity with single-share/ETF flexibility while keeping fees moderate."
         )
         fit = {"CN": "high", "US": "high", "HK": "medium"}
     else:
-        recommended = ["CN", "HK", "US"]
         primary_zh = (
             f"当前资金约 ¥{cap:,.0f}：资金体量充足，推荐开启「A 股 + 港股 + 美股」三市场扫描，摊薄港股固定平台费并实现跨市场机会分散。"
         )
@@ -228,7 +247,7 @@ def recommend_markets(
             "recommended": "CN" in recommended,
             "est_cost_pct": round(cost_cn, 3),
             "reason_zh": (
-                f"100 股一手（科创板 200 股起），T+1 与涨跌停限制；代表性来回税费约 {cost_cn:.2f}%。"
+                f"主板通常 100 股一手（科创板 200 股起），T+1 与涨跌停限制；代表性来回税费约 {cost_cn:.2f}%。"
                 + ("当前本金对高价 A 股一手压力偏大。" if cap < 15000 else "流动性充沛、交易成本低，适合主战场。")
             ),
             "reason_en": (
@@ -242,11 +261,11 @@ def recommend_markets(
             "recommended": "HK" in recommended,
             "est_cost_pct": round(cost_hk, 3),
             "reason_zh": (
-                f"每手 100–1000 股不等（部分券商支持碎股），买卖双向印花税 0.1%；代表性来回费率约 {cost_hk:.2f}%。"
+                f"每手股数由个股确定（{hk_qty_zh}），买卖双向印花税 0.1%；代表性来回费率约 {cost_hk:.2f}%。"
                 + ("小资金下固定平台费占比较高。" if cap < 50000 else "与 A 股互补性好，适合中大资金配置核心资产。")
             ),
             "reason_en": (
-                f"Varying board lots (odd lots on select brokers) and 0.1% two-way stamp duty; ~{cost_hk:.2f}% round-trip. "
+                f"Varying board lots ({hk_qty_en}) and 0.1% two-way stamp duty; ~{cost_hk:.2f}% round-trip. "
                 + ("Fixed fees bite small orders." if cap < 50000 else "Complements CN holdings for mid-to-large accounts.")
             ),
         },
@@ -256,24 +275,25 @@ def recommend_markets(
             "recommended": "US" in recommended,
             "est_cost_pct": round(cost_us, 3),
             "reason_zh": (
-                f"可买 1 股（支持小数股 0.0001 股），T+0 且无印花税；代表性来回费用约 {cost_us:.2f}%，对各资金规模仓位控制都最精确。"
+                f"{us_qty_zh}；代表性来回费用约 {cost_us:.2f}%。请在券商确认账户交易限制。"
             ),
             "reason_en": (
-                f"1-share or fractional (0.0001) sizing, T+0 and no stamp duty; ~{cost_us:.2f}% round-trip for exact risk sizing."
+                f"{us_qty_en.capitalize()}; ~{cost_us:.2f}% illustrative round-trip fees. Confirm account restrictions with your broker."
             ),
         },
     }
 
-    rec_hor = "medium" if cap < 15000 else ("short" if cap < 150000 else "short")
-    try:
-        cached_eval = cached()
-        if cached_eval and cached_eval.get("horizon") and not cached_eval.get("cold_start"):
-            rec_hor = str(cached_eval["horizon"])
-    except Exception:  # noqa: BLE001
-        pass
-    hor_cfg = timeframe.get(rec_hor)
+    report = horizon_report or evaluate(
+        capital_cny=cap, markets=enabled if configured else recommended, broker_overrides=brokers,
+    )
+    hor_cfg = timeframe.get(report["horizon"])
     reasons_zh = [primary_zh] + [f"{m}：{per_market[m]['reason_zh']}" for m in recommended]
     reasons_en = [primary_en] + [f"{m}: {per_market[m]['reason_en']}" for m in recommended]
+    reasons_zh.append(report["primary_reason"])
+    reasons_en.append(report["primary_reason_en"])
+    if report["cold_start"]:
+        reasons_zh.append("行情样本不足，周期根据资金与估算费用推荐。")
+        reasons_en.append("Limited recent market data. Horizon based on capital and estimated fees.")
 
     return {
         "ok": True,
@@ -294,25 +314,27 @@ def recommend_markets(
     }
 
 
-def evaluate(force: bool = False) -> dict:
-    """结合市场广度、波动率、动态总资产与多市场综合费率，评估推荐交易周期。"""
-    if not force:
-        stored = cached()
-        if stored and stored.get("fresh") and not stored.get("cold_start"):
-            return stored
-
+def evaluate(
+    force: bool = False, *, markets: list[str] | None = None,
+    capital_cny: float | None = None, broker_overrides: dict | None = None,
+) -> dict:
+    """Assess a horizon for the active account, or preview an uncommitted configuration."""
     conn = connect()
     try:
         settings_map = config_service.all_values(conn)
         snap = portfolio_service.snapshot(conn=conn, include_quotes=False)
-        capital = float(snap["total_equity_cny"] or settings_map.get("account.capital") or 50000)
-        markets = [
-            str(m).upper()
-            for m in (settings_map.get("scan.markets") or ["CN", "HK", "US"])
-            if str(m).strip()
-        ] or ["CN", "HK", "US"]
+        capital = float(snap["total_equity_cny"]) if capital_cny is None else capital_cny
+        active = config_service.active_markets(conn)
+        markets = config_service.market_list(markets) or active
         exposure_pct = float(settings_map.get("risk.max_total_exposure_pct", 60) or 60)
         brokers = {mkt: settings_map.get(f"broker.{mkt}") for mkt in markets}
+        costs = [_cost_pct(capital, m, (broker_overrides or brokers).get(m)) for m in markets]
+        cache_key = [capital, markets, costs, exposure_pct, snap["market_value_cny"]]
+        live = capital_cny is None and broker_overrides is None and markets == active
+        if live and not force:
+            stored = cached()
+            if stored and stored.get("fresh") and stored.get("inputs") == cache_key:
+                return stored
         symbols = _symbols(conn, markets)
         regime = _breadth(symbols, conn)
     finally:
@@ -335,7 +357,6 @@ def evaluate(force: bool = False) -> dict:
     cold_start = sample < MIN_SAMPLE
 
     # 1. 不依赖 K 线的资金规模与税费磨损评估（冷启动期也完全生效）
-    costs = [_cost_pct(capital, m, brokers.get(m)) for m in markets]
     valid_costs = [c for c in costs if c > 0]
     cost = (sum(valid_costs) / len(valid_costs)) if valid_costs else 0.55
 
@@ -380,9 +401,9 @@ def evaluate(force: bool = False) -> dict:
             {"fast": -1.5, "short": -1.0, "medium": 0.8},
             _reason(
                 "cost_drag",
-                f"按所选市场综合费率，超短/短线年化交易磨损分别约 {drags['fast']:.1f}% / {drags['short']:.1f}%，"
+                f"以每个持仓窗口换手一次作比较，超短/短线年化费率示意分别约 {drags['fast']:.1f}% / {drags['short']:.1f}%，"
                 f"放宽至中线可压低到 {drags['medium']:.1f}%。",
-                f"Estimated annual fee drag is {drags['fast']:.1f}% (fast) / {drags['short']:.1f}% (daily) vs {drags['medium']:.1f}% on weekly bars.",
+                f"Illustrative annual fee drag at full turnover is {drags['fast']:.1f}% (fast) / {drags['short']:.1f}% (daily) vs {drags['medium']:.1f}% on weekly bars.",
                 1.2,
             ),
         )
@@ -480,6 +501,7 @@ def evaluate(force: bool = False) -> dict:
 
     report = {
         "ok": True,
+        "inputs": cache_key,
         "horizon": best,
         "confidence": round(confidence, 2),
         "cold_start": cold_start,
@@ -501,7 +523,7 @@ def evaluate(force: bool = False) -> dict:
         "blocked": blocked,
         "note": note,
     }
-    if cold_start:
+    if cold_start or not live:
         report["at"] = datetime.now(UTC).isoformat(timespec="seconds")
         report["fresh"] = False
         return report
@@ -545,13 +567,13 @@ def recommend(force: bool = False) -> dict:
     return report
 
 
-def resolve(requested: str | None) -> tuple[str, dict | None]:
+def resolve(requested: str | None, *, markets: list[str] | None = None) -> tuple[str, dict | None]:
     """将 ``trade.horizon`` 配置解析为具体执行的周期编码。"""
     code = str(requested or timeframe.AUTO).strip().lower()
     if timeframe.is_valid(code):
         return code, None
     try:
-        report = recommend()
+        report = evaluate(markets=markets) if markets is not None else recommend()
     except Exception as exc:  # noqa: BLE001
         log.warning("advisor failed, staying on %s: %s", timeframe.DEFAULT, exc)
         return timeframe.DEFAULT, None

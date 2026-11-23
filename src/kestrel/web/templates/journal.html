@@ -326,7 +326,7 @@
       <span class="meta">{{ t('j.expired_line', n=quality.advice_total, a=quality.executed, b=quality.skipped, c=quality.expired) }}</span>
     </div>
     <div class="card-body">
-      <div class="quality-lesson">{{ lesson }}</div>
+      <div class="quality-lesson learn-only {% if not ui_learning %}hidden{% endif %}">{{ lesson }}</div>
 
       <div class="stat-grid">
         <div class="stat-card">
@@ -521,6 +521,7 @@ window.I18N = Object.assign(window.I18N || {}, {
   });
 
   var parsedRows = [];
+  var importRequest = null;
   var parseBtn = document.getElementById('imp-parse');
   var saveBtn = document.getElementById('imp-save');
   var noteEl = document.getElementById('imp-note');
@@ -539,6 +540,8 @@ window.I18N = Object.assign(window.I18N || {}, {
         .then(function (r) { return r.json(); })
         .then(function (res) {
           parsedRows = res.rows || [];
+          importRequest = window.crypto.randomUUID ? window.crypto.randomUUID() :
+            Array.from(window.crypto.getRandomValues(new Uint32Array(4))).join('-');
           tbody.textContent = '';
           if (!parsedRows.length) {
             noteEl.textContent = res.note || window.I18N.parseEmpty;
@@ -578,7 +581,7 @@ window.I18N = Object.assign(window.I18N || {}, {
       fetch('/api/journal/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: parsedRows })
+        body: JSON.stringify({ rows: parsedRows, request_id: importRequest })
       })
         .then(function (r) { return r.json(); })
         .then(function (res) {

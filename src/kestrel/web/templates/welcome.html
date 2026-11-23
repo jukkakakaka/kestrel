@@ -76,7 +76,7 @@
       <div class="card-body">
         <p class="hint" style="margin-bottom:12px;">{{ t('welcome.step2_hint') }}</p>
         <div class="market-picks">
-          {% set rec_mk = market_rec.recommended_markets %}
+          {% set rec_mk = values['scan.markets'] if market_rec.configured else market_rec.recommended_markets %}
           <label class="market-pick">
             <input type="checkbox" name="w-mkt" value="CN" {% if 'CN' in rec_mk %}checked{% endif %}>
             <div class="mp-body">
@@ -112,7 +112,7 @@
         <p class="hint" style="margin-bottom:12px;">{{ t('welcome.step3_hint') }}</p>
         <div class="horizon-picks">
           <label class="market-pick">
-            <input type="radio" name="w-horizon" value="auto" checked>
+            <input type="radio" name="w-horizon" value="auto" {% if values.get('trade.horizon', 'auto') == 'auto' %}checked{% endif %}>
             <div class="mp-body">
               <b>{{ t('horizon.auto') }}</b>
               <small>{{ t('welcome.h_auto_note') }}</small>
@@ -120,10 +120,10 @@
           </label>
           {% for h in horizon_options %}
           <label class="market-pick">
-            <input type="radio" name="w-horizon" value="{{ h.code }}">
+            <input type="radio" name="w-horizon" value="{{ h.code }}" {% if values.get('trade.horizon') == h.code %}checked{% endif %}>
             <div class="mp-body">
               <b>{{ h.label }}</b>
-              <small>{{ h.hint }}</small>
+              <small>{{ t('welcome.h_' + h.code + '_note') }}</small>
             </div>
           </label>
           {% endfor %}
@@ -192,7 +192,15 @@
   var isEn = document.documentElement.lang.startsWith('en');
   var recTpl = {{ t('welcome.rec_summary', mkts='__MKTS__', hor='__HOR__') | tojson }};
   var pickErrMsg = {{ t('welcome.pick_market_err') | tojson }};
-  var latestRec = null;
+  var latestRec = {{ market_rec | tojson }};
+  var manualMarkets = {{ market_rec.configured | tojson }};
+  var marketBoxes = document.querySelectorAll('input[name="w-mkt"]');
+  var sequence = 0;
+
+  function selectedMarkets() {
+    return Array.from(marketBoxes).filter(function (box) { return box.checked; })
+      .map(function (box) { return box.value; });
+  }
 
   document.querySelectorAll('.risk-pick input').forEach(function (inp) {
     inp.addEventListener('change', function () {
@@ -216,45 +224,53 @@
   }
 
   var timer = null;
-  if (capEl) {
-    capEl.addEventListener('input', function () {
-      clearTimeout(timer);
-      timer = setTimeout(function () {
-        var v = parseFloat(capEl.value || 50000);
-        if (isNaN(v) || v <= 0) return;
-        fetch('/api/advisor/recommend?capital=' + encodeURIComponent(v))
-          .then(function (r) { return r.json(); })
-          .then(function (res) {
-            if (!res.ok || !res.recommendation) return;
-            latestRec = res.recommendation;
-            var hor = isEn ? latestRec.recommended_horizon_en : latestRec.recommended_horizon_zh;
-            var mkts = (latestRec.recommended_markets || []).join(' / ');
-            var title = document.getElementById('w-rec-title-text');
-            if (title) title.textContent = recTpl.replace('__MKTS__', mkts).replace('__HOR__', hor);
-            var box = document.getElementById('w-rec-reasons');
-            if (box) {
-              box.textContent = '';
-              (isEn ? latestRec.reasons_en : latestRec.reasons_zh).forEach(function (line) {
-                var d = document.createElement('div');
-                d.textContent = '• ' + line;
-                box.appendChild(d);
-              });
-            }
+  function refreshRecommendation() {
+    clearTimeout(timer);
+    var request = ++sequence;
+    timer = setTimeout(function () {
+      var value = Number(capEl.value);
+      if (!Number.isFinite(value) || value <= 0) return;
+      var params = new URLSearchParams({ capital: value });
+      if (manualMarkets && selectedMarkets().length) params.set('markets', selectedMarkets().join(','));
+      fetch('/api/advisor/recommend?' + params.toString())
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (request !== sequence || !res.ok) return;
+          latestRec = res.recommendation;
+          if (!manualMarkets) applyRecommendation(latestRec);
+          var hor = isEn ? latestRec.recommended_horizon_en : latestRec.recommended_horizon_zh;
+          var mkts = (latestRec.recommended_markets || []).join(' / ');
+          document.getElementById('w-rec-title-text').textContent =
+            recTpl.replace('__MKTS__', mkts).replace('__HOR__', hor);
+          var box = document.getElementById('w-rec-reasons');
+          box.textContent = '';
+          (isEn ? latestRec.reasons_en : latestRec.reasons_zh).forEach(function (line) {
+            var reason = document.createElement('div');
+            reason.textContent = '• ' + line;
+            box.appendChild(reason);
           });
-      }, 320);
-    });
+        })
+        .catch(function () {});
+    }, 280);
   }
-
+  capEl.addEventListener('input', refreshRecommendation);
+  marketBoxes.forEach(function (box) {
+    box.addEventListener('change', function () {
+      manualMarkets = true;
+      refreshRecommendation();
+    });
+  });
   var applyBtn = document.getElementById('w-apply-rec');
   if (applyBtn) {
     applyBtn.addEventListener('click', function () {
-      if (latestRec) applyRecommendation(latestRec);
+      manualMarkets = false;
+      applyRecommendation(latestRec);
+      refreshRecommendation();
     });
   }
 
   function submit(skip) {
-    var mkts = [];
-    document.querySelectorAll('input[name="w-mkt"]:checked').forEach(function (cb) { mkts.push(cb.value); });
+    var mkts = selectedMarkets();
     if (!skip && !mkts.length) {
       document.getElementById('w-err').textContent = pickErrMsg;
       return;
@@ -279,7 +295,11 @@
       body: JSON.stringify(payload)
     })
       .then(function (r) { return r.json(); })
-      .then(function (res) { if (res.ok) location.href = '/'; });
+      .then(function (res) {
+        if (res.ok) location.href = '/';
+        else document.getElementById('w-err').textContent = res.error || pickErrMsg;
+      })
+      .catch(function () { document.getElementById('w-err').textContent = {{ t('welcome.settings_invalid') | tojson }}; });
   }
 
   document.getElementById('w-skip').addEventListener('click', function () { submit(true); });

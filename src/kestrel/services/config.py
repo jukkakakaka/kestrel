@@ -6,6 +6,8 @@ import json
 import sqlite3
 from typing import Any
 
+MARKETS = ("CN", "HK", "US")
+
 DEFAULTS: dict[str, Any] = {
     "account.capital": 50000.0,
     "account.currency": "CNY",
@@ -16,12 +18,12 @@ DEFAULTS: dict[str, Any] = {
     "scan.auto_enabled": False,
     "scan.interval_minutes": 60,
     "trade.horizon": "auto",
-    "scan.markets": ["CN", "HK", "US"],
+    "scan.markets": [],
     "ui.markets_configured": False,
     "scan.min_score": 0.55,
     "scan.universe": "both",
     "scan.pool_size": 30,
-    "ui.learning_mode": True,
+    "ui.learning": False,
     "ui.glossary": True,
     "broker.HK": "fosun_hk",
     "broker.US": "fosun_us",
@@ -47,6 +49,9 @@ DEFAULTS: dict[str, Any] = {
 _BOOL_KEYS: frozenset[str] = frozenset(
     {
         "ui.privacy",
+        "ui.learning",
+        "ui.glossary",
+        "ui.markets_configured",
         "desktop.close_to_tray",
         "desktop.autostart",
     }
@@ -110,3 +115,37 @@ def all_values(conn: sqlite3.Connection) -> dict[str, Any]:
         except json.JSONDecodeError:
             continue
     return merged
+
+
+def market_list(raw) -> list[str]:
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return list(dict.fromkeys(
+        market for item in raw if (market := str(item).strip().upper()) in MARKETS
+    ))
+
+
+def markets_configured(conn) -> bool:
+    row = conn.execute("SELECT 1 FROM config_kv WHERE key='scan.markets'").fetchone()
+    return bool(row and market_list(get(conn, "scan.markets")))
+
+
+def active_markets(conn) -> list[str]:
+    # Preserve explicit market choices in older databases, including before the UI flag existed.
+    if markets_configured(conn):
+        return market_list(get(conn, "scan.markets"))
+    from kestrel.services.advisor import markets_for_capital
+
+    try:
+        capital = float(get(conn, "account.capital"))
+    except (TypeError, ValueError):
+        capital = float(DEFAULTS["account.capital"])
+    return markets_for_capital(capital)
+
+
+def learning_enabled(conn) -> bool:
+    row = conn.execute(
+        "SELECT key FROM config_kv WHERE key IN ('ui.learning', 'ui.learning_mode')"
+        " ORDER BY (key='ui.learning') DESC LIMIT 1"
+    ).fetchone()
+    return _coerce_bool(get(conn, row["key"])) if row else False

@@ -28,7 +28,7 @@
   var exitReasonEl = $('fd-exit-reason');
   var ruleBreakEl = $('fd-rule-break');
 
-  var state = { market: '', code: '', feesTouched: false, timer: null, previewTimer: null, preset: null };
+  var state = { market: '', code: '', feesTouched: false, timer: null, previewTimer: null, preset: null, lookup: 0, preview: 0, saving: false };
 
   function syncSideUi() {
     var isSell = sideEl.value === 'sell';
@@ -127,17 +127,19 @@
   }
 
   function runPreview() {
-    var code = state.code || (codeEl.value || '').trim();
+    var code = (codeEl.value || '').trim();
     var price = priceEl.value;
     var qty = qtyEl.value;
     if (!code || !price || !qty) {
       if (previewEl) previewEl.classList.add('hidden');
       return;
     }
+    var preview = ++state.preview;
     fetch('/api/journal/fill/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        confirmed: true,
         market: state.market || (state.preset && state.preset.market) || '',
         code: code,
         side: sideEl.value,
@@ -151,7 +153,7 @@
       })
     })
       .then(function (r) { return r.json(); })
-      .then(renderPreview)
+      .then(function (res) { if (preview === state.preview && dialog.open) renderPreview(res); })
       .catch(function () {});
   }
 
@@ -161,17 +163,19 @@
       resolvedEl.textContent = i18n('codeHelp');
       return;
     }
+    var lookup = ++state.lookup;
     var params = new URLSearchParams({
       code: code,
       market: (state.preset && state.preset.market) || '',
       price: priceEl.value || '',
       qty: qtyEl.value || '',
-      side: sideEl.value || 'buy'
+      side: sideEl.value || 'buy',
+      horizon: (state.preset && state.preset.horizon) || ''
     });
     fetch('/api/journal/fill/suggest?' + params.toString())
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        if (!res.ok) return;
+        if (!res.ok || lookup !== state.lookup || !dialog.open) return;
         state.market = res.market || '';
         state.code = res.code || '';
         if (!res.market) {
@@ -198,14 +202,10 @@
         if (sideEl.value === 'buy') {
           var lv = res.levels || {};
           if (lv.ok) {
-            if (!levelsLocked()) {
-              stopEl.value = Number(lv.stop).toFixed(3);
-              targetEl.value = Number(lv.target).toFixed(3);
-            }
             levelsEl.className = 'notice';
-            levelsEl.textContent = lv.basis + ' (' + lv.atr_pct + '% / ' + lv.risk_pct + '%)';
+            levelsEl.textContent = lv.basis + ' · ' + Number(lv.stop).toFixed(3) + ' / ' + Number(lv.target).toFixed(3);
             levelsNoteEl.textContent = i18n('levelsNote');
-          } else if (stopEl.value && targetEl.value) {
+          } else if (levelsLocked() || (state.preset && state.preset.recId)) {
             levelsEl.className = 'notice hidden';
             levelsNoteEl.textContent = '';
           } else {
@@ -221,6 +221,8 @@
   }
 
   function debounced() {
+    state.lookup++;
+    state.preview++;
     clearTimeout(state.timer);
     state.timer = setTimeout(suggest, 320);
     clearTimeout(state.previewTimer);
@@ -228,12 +230,25 @@
   }
 
   function open(preset) {
+    if (state.saving) return;
+    clearTimeout(state.timer);
+    clearTimeout(state.previewTimer);
+    state.lookup++;
+    state.preview++;
+    state.requestId = window.crypto.randomUUID ? window.crypto.randomUUID() :
+      Array.from(window.crypto.getRandomValues(new Uint32Array(4))).join('-');
     state.preset = preset || null;
     state.market = (preset && preset.market) || '';
     state.code = (preset && preset.code) || '';
     state.feesTouched = false;
     msgEl.textContent = '';
-    dateEl.value = new Date().toISOString().slice(0, 10);
+    dateEl.value = '';
+    codeEl.readOnly = !!(preset && (preset.recId || preset.tradeId));
+    sideEl.disabled = codeEl.readOnly;
+    levelsEl.classList.add('hidden');
+    levelsNoteEl.textContent = '';
+    resolvedEl.textContent = '';
+    feesHintEl.textContent = '';
     codeEl.value = '';
     qtyEl.value = '';
     priceEl.value = '';
@@ -243,23 +258,19 @@
     targetEl.value = '';
     noteEl.value = '';
     if (ruleBreakEl) ruleBreakEl.checked = false;
-    if (exitReasonEl) exitReasonEl.value = (preset && preset.exitReason) || 'take_profit';
+    if (exitReasonEl) exitReasonEl.value = (preset && preset.exitReason) || 'manual';
     if (previewEl) previewEl.classList.add('hidden');
     sideEl.value = (preset && preset.side) || 'buy';
 
     if (preset) {
       codeEl.value = preset.market && preset.code ? (preset.market + '/' + preset.code) : (preset.code || '');
-      qtyEl.value = preset.qty || '';
-      priceEl.value = preset.price || '';
-      stopEl.value = preset.stop || '';
-      targetEl.value = preset.target || '';
       if (preset.note) noteEl.value = preset.note;
     }
 
     syncSideUi();
     if (typeof dialog.showModal === 'function') dialog.showModal();
     else dialog.setAttribute('open', '');
-    (sideEl.value === 'sell' && priceEl.value ? priceEl : codeEl).focus();
+    (codeEl.readOnly || (preset && preset.code) ? qtyEl : codeEl).focus();
     if (window.KestrelAnnotate) window.KestrelAnnotate(dialog);
     if (preset && preset.code) suggest();
   }
@@ -284,6 +295,7 @@
       price: btn.getAttribute('data-price') || '',
       stop: btn.getAttribute('data-stop') || '',
       target: btn.getAttribute('data-target') || '',
+      horizon: btn.getAttribute('data-horizon') || '',
       recId: btn.getAttribute('data-rec-id') || '',
       tradeId: btn.getAttribute('data-trade-id') || '',
       exitReason: btn.getAttribute('data-exit-reason') || '',
@@ -292,7 +304,12 @@
   });
 
   ['input', 'change'].forEach(function (evt) {
-    codeEl.addEventListener(evt, debounced);
+    codeEl.addEventListener(evt, function () {
+      state.market = '';
+      state.code = '';
+      state.lookup++;
+      debounced();
+    });
     qtyEl.addEventListener(evt, debounced);
     priceEl.addEventListener(evt, debounced);
     stopEl.addEventListener(evt, function () { clearTimeout(state.previewTimer); state.previewTimer = setTimeout(runPreview, 250); });
@@ -314,7 +331,10 @@
   });
 
   $('fd-save').addEventListener('click', function () {
+    if (state.saving) return;
     var payload = {
+      request_id: state.requestId,
+      confirmed: true,
       market: state.market || (state.preset && state.preset.market) || '',
       code: (codeEl.value || '').trim(),
       side: sideEl.value,
@@ -335,6 +355,8 @@
       msgEl.textContent = i18n('requireFill');
       return;
     }
+    state.saving = true;
+    $('fd-save').disabled = true;
     msgEl.textContent = i18n('saving');
     fetch('/api/journal/fill', {
       method: 'POST',
@@ -351,6 +373,10 @@
         if (typeof done === 'function') { done(res); return; }
         location.reload();
       })
-      .catch(function (e) { msgEl.textContent = String(e); });
+      .catch(function (e) { msgEl.textContent = String(e); })
+      .finally(function () {
+        state.saving = false;
+        $('fd-save').disabled = false;
+      });
   });
 })();

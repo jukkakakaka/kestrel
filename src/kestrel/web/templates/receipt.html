@@ -15,7 +15,7 @@
     </div>
   </div>
 </section>
-{% elif expired %}
+{% elif expired and not done %}
 <section class="card" style="max-width:560px;margin:24px auto;">
   <div class="empty">
     {{ empty_art('clock', 'warn') }}
@@ -83,18 +83,27 @@
     </div>
     {% else %}
     <form method="post" action="/r/{{ code }}">
+      <input type="hidden" name="request_id" value="{{ receipt_request_id }}">
       <div class="grid g2">
         <div class="field">
           <label>{{ t('receipt.fill_price') }}</label>
-          <input name="fill_price" type="number" step="0.001" value="{{ '%.3f'|format(rec.entry_low / 1000000) }}">
+          <input name="fill_price" type="number" step="any" min="0.000001" required value="{{ receipt_form.get('fill_price', '') if receipt_form else '' }}">
         </div>
         <div class="field">
           <label>{{ t('receipt.fill_qty') }}</label>
-          <input name="fill_qty" type="text" inputmode="decimal" value="{{ rec.qty }}">
+          <input name="fill_qty" type="text" inputmode="decimal" required value="{{ receipt_form.get('fill_qty', '') if receipt_form else '' }}">
+        </div>
+        <div class="field">
+          <label>{{ t('journal.fees_optional') }}</label>
+          <input name="fees" type="number" min="0" step="any" value="{{ receipt_form.get('fees', '') if receipt_form else '' }}">
+        </div>
+        <div class="field">
+          <label>{{ t('journal.fill_date') }}</label>
+          <input name="filled_at" type="date" value="{{ receipt_form.get('filled_at', '') if receipt_form else '' }}">
         </div>
         <div class="field" style="grid-column:1 / -1;">
           <label>{{ t('journal.note') }}</label>
-          <input name="note" placeholder="{{ t('journal.fd_note_ph') }}">
+          <input name="note" placeholder="{{ t('journal.fd_note_ph') }}" value="{{ receipt_form.get('note', '') if receipt_form else '' }}">
         </div>
       </div>
       <p class="tiny muted" style="margin-top:10px;">{{ t('receipt.fill_hint') }}</p>
@@ -104,7 +113,9 @@
           <span>{{ t('receipt.act_executed') }}</span>
         </button>
         <button class="btn ghost" type="submit" name="action" value="partial">{{ t('receipt.act_partial') }}</button>
-        <button class="btn ghost" type="submit" name="action" value="skipped">{{ t('receipt.act_skipped') }}</button>
+        {% if rec.status == 'active' %}
+        <button class="btn ghost" type="submit" name="action" value="skipped" formnovalidate>{{ t('receipt.act_skipped') }}</button>
+        {% endif %}
       </div>
     </form>
     {% endif %}

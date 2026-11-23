@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from kestrel.datasources.base import guess_market, normalize_code
+from kestrel.datasources.base import normalize_code
 from kestrel.db.engine import connect
 from kestrel.fees.calculator import quote_fees
 from kestrel.indicators.engine import Series, compute
@@ -63,31 +63,39 @@ def resolve_target(code: str, market: str | None = None, name: str = "") -> Reso
     raw = str(code or "").strip()
     asked = str(market or "").strip().upper() or None
 
+    if "/" in raw:
+        prefix, code = raw.split("/", 1)
+        prefix = prefix.upper()
+        if prefix not in ("CN", "HK", "US") or (asked and asked != prefix):
+            return ResolvedFillTarget("", "", raw, "", 1, False)
+        asked, raw = prefix, code.strip()
+    if asked and asked not in ("CN", "HK", "US"):
+        return ResolvedFillTarget("", "", raw, "", 1, False)
+    for suffix, exchange in ((".HK", "HK"), (".SH", "CN"), (".SZ", "CN"), (".BJ", "CN")):
+        if raw.upper().endswith(suffix) and raw[:-len(suffix)].isdigit():
+            if asked and asked != exchange:
+                return ResolvedFillTarget("", "", raw, "", 1, False)
+            asked, raw = exchange, raw[:-len(suffix)]
+            break
+
     conn = connect()
     try:
         query = raw or name
         if query:
-            # 代码优先，其次名称，最后别名。三者都能命中「用户心里那只票」。
+            market = asked or (_looks_like(query) or [""])[0]
+            ticker = normalize_code(market, query)
             row = conn.execute(
-                "SELECT market, code, name, currency, lot_size FROM symbol"
-                " WHERE code=? OR name=? OR name LIKE ?"
-                " ORDER BY (code=?) DESC, (market=?) DESC, (market=?) DESC LIMIT 1",
-                (
-                    normalize_code(asked, query) if asked else query,
-                    query,
-                    f"%{query}%",
-                    query,
-                    asked or "",
-                    "HK",
-                ),
+                """
+                SELECT s.market, s.code, s.name, s.currency, s.lot_size FROM symbol s
+                WHERE (? IS NULL OR s.market=?) AND (
+                    s.code=? OR s.name=? COLLATE NOCASE OR EXISTS (
+                        SELECT 1 FROM symbol_alias a WHERE a.symbol_id=s.id AND a.alias=? COLLATE NOCASE
+                    )
+                )
+                ORDER BY (s.code=?) DESC, (s.market=?) DESC, s.id LIMIT 1
+                """,
+                (asked, asked, ticker, query, query, ticker, market),
             ).fetchone()
-            if row is None:
-                row = conn.execute(
-                    "SELECT s.market, s.code, s.name, s.currency, s.lot_size FROM symbol s"
-                    " JOIN symbol_alias a ON a.symbol_id = s.id WHERE a.alias=?"
-                    " ORDER BY (s.market=?) DESC LIMIT 1",
-                    (query, asked or ""),
-                ).fetchone()
             if row:
                 return ResolvedFillTarget(
                     market=row["market"], code=row["code"], name=row["name"],
@@ -103,20 +111,15 @@ def resolve_target(code: str, market: str | None = None, name: str = "") -> Reso
             lot_size=1, known=False,
         )
 
-    # 中文输入是名称，不是代码；字母数字混排（如 BRK.B、0700.HK）才算代码。
-    # 库里查不到时宁可说「找不到」，也不要把它当成美股代码写进台账。
-    if not asked and not _looks_like(raw):
-        return ResolvedFillTarget(
-            market="", code="", name=raw, currency="", lot_size=1, known=False,
-        )
-
     candidates = _looks_like(raw)
     if asked:
-        guess = asked
-    elif len(candidates) == 1:
-        guess = candidates[0]
-    else:
-        guess = guess_market(raw)
+        if asked == "CN" and raw.isascii() and raw.isdigit() and len(raw) <= 6:
+            candidates = ["CN"]
+        if asked not in candidates:
+            return ResolvedFillTarget(asked, "", name or raw, "", 1, False)
+    if not candidates:
+        return ResolvedFillTarget("", "", name or raw, "", 1, False)
+    guess = asked or candidates[0]
     code_norm = normalize_code(guess, raw)
     currency = {"CN": "CNY", "HK": "HKD"}.get(guess, "USD")
     lot = 100 if guess in ("CN", "HK") else 1
@@ -182,6 +185,9 @@ def suggest_levels(
     finally:
         conn.close()
 
+    daily = bars_service.drop_forming(daily, market)
+    if daily and bars_service.is_stale(daily, market):
+        return {"ok": False, "reason": "Recent bars are stale." if en else "近期行情过期，无法估算止损。"}
     folded = timeframe.prepare(daily, cfg.code)
     if len(folded) < cfg.min_bars:
         return {

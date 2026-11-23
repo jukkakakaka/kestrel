@@ -422,9 +422,8 @@ def parse(text: str) -> list[dict]:
     return parse_table(text)["rows"]
 
 
-def save(rows: list[dict], locale: str = "zh-CN") -> dict:
+def save(rows: list[dict], locale: str = "zh-CN", request_id: str = "") -> dict:
     """把解析出来的成交行写进台账。"""
-    from kestrel.core.quantity import to_qty
     from kestrel.services import execution
 
     en = str(locale).lower().startswith("en")
@@ -434,11 +433,11 @@ def save(rows: list[dict], locale: str = "zh-CN") -> dict:
     items: list[dict] = []
     saved = 0
     failed = 0
-    for row in rows:
+    for index, row in enumerate(rows):
         try:
             market = str(row.get("market") or "US").upper()
             code = str(row.get("code") or "").strip()
-            qty = to_qty(row.get("qty") or 0)
+            qty = Decimal(str(row.get("qty") or 0))
             price = Decimal(str(row.get("price") or 0))
             if not code or qty <= 0 or price <= 0:
                 failed += 1
@@ -450,13 +449,9 @@ def save(rows: list[dict], locale: str = "zh-CN") -> dict:
                     }
                 )
                 continue
-            side = "buy" if str(row.get("side", "buy")).lower().startswith("b") else "sell"
+            side = str(row.get("side") or "").strip().lower()
             trade_date = str(row.get("trade_date") or "").strip()
-            fill_ts = (
-                (trade_date if "T" in trade_date or " " in trade_date else f"{trade_date}T14:55:00+08:00" if side == "sell" else f"{trade_date}T09:35:00+08:00")
-                if trade_date
-                else None
-            )
+            fill_ts = trade_date or None
             result = execution.record(
                 execution.Fill(
                     market=market,
@@ -467,13 +462,12 @@ def save(rows: list[dict], locale: str = "zh-CN") -> dict:
                     fees=Decimal(str(row.get("fee") or 0)),
                     filled_at=fill_ts,
                     source="import",
+                    confirmed=True,
+                    request_id=f"statement:{request_id}:{index}" if request_id else None,
                     note="由成交单导入",
                     name=str(row.get("name") or code),
                 )
             )
-            # 买单同步历史开仓日期，卖单仅校正平仓日期，避免把被平仓买单的建仓日改写成卖出日。
-            if result.get("ok") and trade_date:
-                _stamp(result, trade_date, side)
             if result.get("ok"):
                 saved += 1
             else:
@@ -484,30 +478,3 @@ def save(rows: list[dict], locale: str = "zh-CN") -> dict:
             failed += 1
             items.append({"code": str(row.get("code") or "?"), "ok": False, "error": str(exc)})
     return {"saved": saved, "failed": failed, "items": items}
-
-
-def _stamp(result: dict, trade_date: str, side: str = "buy") -> None:
-    """把导入的成交日期写回刚记录的买单或卖单，且卖单绝不篡改原始开仓日期。"""
-    from kestrel.db.engine import connect
-
-    buy_id = result.get("trade_id")
-    closed_ids = list(result.get("closed_trades") or [])
-    if not buy_id and not closed_ids:
-        return
-
-    conn = connect()
-    try:
-        if buy_id and side == "buy":
-            conn.execute(
-                "UPDATE trade SET filled_at=?, opened_at=? WHERE id=?",
-                (trade_date, trade_date, buy_id),
-            )
-        if side == "sell":
-            for trade_id in closed_ids:
-                conn.execute(
-                    "UPDATE trade SET closed_at=? WHERE id=?",
-                    (trade_date, trade_id),
-                )
-        conn.commit()
-    finally:
-        conn.close()

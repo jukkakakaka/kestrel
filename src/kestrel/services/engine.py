@@ -177,10 +177,11 @@ def status() -> EngineStatus:
 async def run(markets: list[str] | None = None, trigger: str = "manual") -> dict:
     """Produce advice with whichever engine is configured."""
     current = status()
+    before = _max_rec_id()
     if current.provider == RULES:
         result = await scan.run_scan(trigger=trigger, markets=markets)
         result["engine"] = RULES
-        await _notify_new(result)
+        await _notify_new(result, since=before)
         return result
 
     if current.provider == LLM and not current.configured:
@@ -190,7 +191,6 @@ async def run(markets: list[str] | None = None, trigger: str = "manual") -> dict
             "error": "大模型还没配置：设置 → 分析引擎，填接口地址和模型名。",
         }
 
-    before = _max_rec_id()
     result = await analyst.analyse(markets=markets)
     result["engine"] = current.provider
     await _notify_new(result, since=before)

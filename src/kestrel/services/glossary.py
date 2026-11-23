@@ -698,7 +698,7 @@ def payload_for_ui(locale: str = "zh-CN", *, force: bool = False) -> dict:
     zh = str(locale).lower().startswith("zh")
     conn = connect()
     try:
-        gloss_on = bool(config_service.get(conn, "ui.glossary", True))
+        gloss_on = config_service.learning_enabled(conn) and config_service.get(conn, "ui.glossary")
         if not gloss_on and not force:
             return {"ok": True, "enabled": False, "items": {}, "matchers": []}
         rows = conn.execute("SELECT * FROM glossary WHERE suppressed = 0").fetchall()

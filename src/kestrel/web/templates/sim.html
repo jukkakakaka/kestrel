@@ -70,6 +70,15 @@
   <span class="kp-title-row">{{ icon('info', 15) }} <span>{{ t('sim.what') }}</span></span>
 </div>
 
+<details class="guide-details learn-only {% if not ui_learning %}hidden{% endif %}">
+  <summary>{{ t('learn.exercise_title') }}</summary>
+  <p>{{ t('learn.exercise_prompt') }}</p>
+  <details>
+    <summary>{{ t('learn.exercise_check') }}</summary>
+    <p>{{ t('learn.exercise_answer') }}</p>
+  </details>
+</details>
+
 <div id="edge-note" class="notice warn hidden"></div>
 
 {% if engine.is_ai %}

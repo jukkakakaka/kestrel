@@ -142,10 +142,10 @@ def _exceeds_exposure(cost_cny: Decimal, cap: Decimal, used: Decimal, added: Dec
     return used + added + cost_cny > cap
 
 
-def _resolve_horizon(settings_map: dict) -> tuple[str, dict | None]:
+def _resolve_horizon(settings_map: dict, markets: list[str]) -> tuple[str, dict | None]:
     from kestrel.services import advisor
 
-    return advisor.resolve(settings_map.get("trade.horizon", timeframe.AUTO))
+    return advisor.resolve(settings_map.get("trade.horizon", timeframe.AUTO), markets=markets)
 
 
 async def _load_bars(conn, symbols: list[dict], limit: int = 260) -> dict[int, list[dict]]:
@@ -154,6 +154,7 @@ async def _load_bars(conn, symbols: list[dict], limit: int = 260) -> dict[int, l
     need: list[dict] = []
     for sym in symbols:
         rows = bars_service.cached_bars(conn, sym["id"], limit)
+        rows = bars_service.drop_forming(rows, sym["market"])
         cached[sym["id"]] = rows
         if bars_service.needs_fetch(conn, sym["id"], sym["market"], rows, limit):
             need.append(sym)
@@ -237,20 +238,16 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
     try:
         settings_map = config_service.all_values(conn)
         snap = portfolio_service.snapshot(conn=conn, include_quotes=False)
-        markets = [
-            str(m).upper()
-            for m in (markets or settings_map.get("scan.markets") or ["CN", "HK", "US"])
-            if str(m).strip()
-        ] or ["CN", "HK", "US"]
+        markets = config_service.market_list(markets) or config_service.active_markets(conn)
         min_score = float(settings_map.get("scan.min_score", 0.55))
-        capital = float(snap["total_equity_cny"] or settings_map.get("account.capital") or 50000)
+        capital = max(0.0, float(snap["total_equity_cny"]))
         available_cash = float(snap["available_cash_cny"])
         risk_pct = float(settings_map.get("risk.per_trade_pct", 2.0))
         mode = str(settings_map.get("scan.universe", "both"))
         pool_size = int(settings_map.get("scan.pool_size", 30))
         exposure_pct = float(settings_map.get("risk.max_total_exposure_pct", 60) or 60)
         requested_horizon = str(settings_map.get("trade.horizon", timeframe.AUTO))
-        horizon_code, advice = _resolve_horizon(settings_map)
+        horizon_code, advice = _resolve_horizon(settings_map, markets)
         horizon = timeframe.get(horizon_code)
 
         cur = conn.execute(
@@ -279,9 +276,12 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
         # 如果本次扫描刚把冷启动缓存填满，重新评估一次周期与市场环境状态
         if advice is None or advice.get("cold_start"):
             try:
-                advice = advisor.evaluate(force=True)
+                advice = advisor.evaluate(force=True, markets=markets)
                 if requested_horizon == timeframe.AUTO and timeframe.is_valid(advice.get("horizon")):
-                    horizon = timeframe.get(advice["horizon"])
+                    updated = timeframe.get(advice["horizon"])
+                    if updated.lookback > horizon.lookback:
+                        bars_map = await _load_bars(conn, symbols, limit=updated.lookback)
+                    horizon = updated
             except Exception:  # noqa: BLE001
                 pass
 
@@ -292,13 +292,14 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
         for sym in symbols:
             rows = bars_map.get(sym["id"]) or []
             folded = timeframe.prepare(rows, horizon.code)
-            if len(folded) < horizon.min_bars:
+            stale = bars_service.is_stale(rows, sym["market"]) if rows else False
+            if stale or len(folded) < horizon.min_bars:
                 skipped.append(
                     {
                         "market": sym["market"],
                         "code": sym["code"],
                         "name": sym["name"],
-                        "reason": "no_bars" if not rows else "short_history",
+                        "reason": "stale_bars" if stale else ("short_history" if rows else "no_bars"),
                         "bars": len(folded),
                     }
                 )
@@ -320,6 +321,7 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
         exposure_used = _used_exposure_cny()
         exposure_added = Decimal("0")
         cash_remaining = available_cash
+        conn.execute("BEGIN IMMEDIATE")
 
         for sym in symbols:
             rows = prepared.get(sym["id"]) or []
@@ -401,9 +403,6 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
                     }
                 )
                 continue
-            if sector:
-                sector_count[sector] = sector_count.get(sector, 0) + 1
-
             cost_cny = _plan_cost_cny(plan)
             if _exceeds_exposure(cost_cny, exposure_cap, exposure_used, exposure_added):
                 rejected.append(
@@ -418,6 +417,8 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
                     }
                 )
                 continue
+            if sector:
+                sector_count[sector] = sector_count.get(sector, 0) + 1
             exposure_added += cost_cny
             cash_remaining = max(0.0, cash_remaining - float(cost_cny))
 
@@ -435,7 +436,7 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
             )
             conn.execute(
                 "UPDATE recommendation SET status='superseded'"
-                " WHERE symbol_id=? AND status='active'",
+                " WHERE symbol_id=? AND status='active' AND source='rule'",
                 (sym["id"],),
             )
             cur = conn.execute(
@@ -475,17 +476,15 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
             )
 
         duration = int((time.perf_counter() - started) * 1000)
-        conn.execute(
-            """
-            UPDATE recommendation SET status='superseded'
-            WHERE status='active' AND scan_id <> ?
-              AND symbol_id IN (SELECT id FROM symbol WHERE is_pool=1)
-            """,
-            (scan_id,),
-        )
+        if prepared:
+            conn.executemany(
+                "UPDATE recommendation SET status='superseded'"
+                " WHERE status='active' AND scan_id <> ? AND symbol_id=? AND source='rule'",
+                [(scan_id, symbol_id) for symbol_id in prepared],
+            )
         conn.execute(
             "UPDATE scan_run SET finished_at=?, scanned=?, signals=?, plans=?, status='ok',"
-            " skipped=?, rejected=?, duration_ms=? WHERE id=?",
+            " skipped=?, rejected=?, duration_ms=?, horizon=? WHERE id=?",
             (
                 datetime.now(UTC).isoformat(timespec="seconds"),
                 len(symbols) - len(skipped),
@@ -494,6 +493,7 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
                 json.dumps(skipped),
                 json.dumps(rejected),
                 duration,
+                horizon.code,
                 scan_id,
             ),
         )
@@ -536,6 +536,7 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
         return summary
     except Exception as exc:  # noqa: BLE001
         log.exception("scan failed")
+        conn.rollback()
         try:
             conn.execute(
                 "UPDATE scan_run SET finished_at=?, status='failed', error=? WHERE id=?",
@@ -552,6 +553,7 @@ async def run_scan(trigger: str = "manual", markets: list[str] | None = None) ->
 def active_recommendations(limit: int = 50, markets: list[str] | None = None) -> list[dict]:
     conn = connect()
     try:
+        markets = config_service.active_markets(conn) if markets is None else markets
         where_mkt = ""
         params: list = []
         if markets:
@@ -565,7 +567,7 @@ def active_recommendations(limit: int = 50, markets: list[str] | None = None) ->
             f"""
             SELECT r.*, s.sector AS sector
             FROM recommendation r LEFT JOIN symbol s ON s.id = r.symbol_id
-            WHERE (r.status='active'
+            WHERE ((r.status='active' AND julianday(r.valid_until) > julianday('now'))
                OR (r.status IN ('executed','skipped') AND r.decided_at >= date('now','-2 day')))
                {where_mkt}
             ORDER BY CASE r.status WHEN 'active' THEN 0 ELSE 1 END,
@@ -582,6 +584,7 @@ def active_recommendations(limit: int = 50, markets: list[str] | None = None) ->
 def history(limit: int = 40, markets: list[str] | None = None) -> list[dict]:
     conn = connect()
     try:
+        markets = config_service.active_markets(conn) if markets is None else markets
         where_mkt = ""
         params: list = []
         if markets:
@@ -606,26 +609,27 @@ def history(limit: int = 40, markets: list[str] | None = None) -> list[dict]:
         conn.close()
 
 
-def decide(rec_id: int, decision: str, note: str = "", fill_price: float | None = None) -> bool:
+def decide(rec_id: int, decision: str, note: str = "") -> bool:
     """记录用户对建议的操作决定。"""
-    status = {"executed": "executed", "skipped": "skipped", "snooze": "active"}.get(decision)
-    if status is None:
+    if decision not in ("skipped", "snooze"):
+        return False
+    status = "skipped" if decision == "skipped" else "active"
+    if rec_id <= 0:
         return False
     conn = connect()
     try:
-        conn.execute(
-            "UPDATE recommendation SET status=?, decided_at=?, decided_note=?, fill_price=?"
-            " WHERE id=?",
+        updated = conn.execute(
+            "UPDATE recommendation SET status=?, decided_at=?, decided_note=?"
+            " WHERE id=? AND status='active'",
             (
                 status,
                 datetime.now(UTC).isoformat(timespec="seconds"),
                 note,
-                to_micro(fill_price) if fill_price else None,
                 rec_id,
             ),
         )
         conn.commit()
-        return True
+        return bool(updated.rowcount)
     finally:
         conn.close()
 

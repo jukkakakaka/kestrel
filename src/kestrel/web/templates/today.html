@@ -84,15 +84,14 @@
   </div>
 </section>
 
-{% if ui_learning %}
-<div class="notice learn-only">
+<div class="notice learn-only {% if not ui_learning %}hidden{% endif %}">
   <span class="kp-title-row">
     {{ icon('book', 15) }}
     <strong>{{ t('learn.today_banner_title') }}</strong>
   </span>
   <span class="tiny muted">{{ t('learn.today_banner_body') }}</span>
 </div>
-{% endif %}
+
 
 {# 今日待办事项或平稳状态提示 #}
 {% if brief.todos %}

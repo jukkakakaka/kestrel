@@ -689,7 +689,7 @@
   }
 
   function autoAnnotateTerms(root) {
-    if (document.body.dataset.learning !== '1') return Promise.resolve();
+    if (document.body.dataset.learning !== '1' || document.body.dataset.glossary !== '1') return Promise.resolve();
     var target = root || document.querySelector('main') || document.body;
     if (!target) return Promise.resolve();
 
@@ -782,7 +782,7 @@
   }
 
   function showPop(el) {
-    if (document.body.dataset.learning !== '1') return;
+    if (document.body.dataset.learning !== '1' || document.body.dataset.glossary !== '1') return;
     var term = el.getAttribute('data-term');
     if (!term) return;
     clearTimeout(hideTimer);
@@ -920,6 +920,7 @@
           glossaryLoading = null;
           document.querySelectorAll('.learn-only').forEach(function (el) {
             el.classList.toggle('hidden', !on);
+            if (!on && el.tagName === 'DETAILS') el.open = false;
           });
           if (on) {
             autoAnnotateTerms(document.querySelector('main'));

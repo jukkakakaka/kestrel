@@ -1137,7 +1137,23 @@ html[data-privacy="on"] .priv-toggle-btn .icon-eye-off { display: block; }
 }
 
 @media (max-width: 640px) {
-  .wb-left { max-inline-size: 190px; }
+  .workspace-bar {
+    height: auto;
+    min-height: 56px;
+    padding-block: 8px;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .wb-left {
+    flex-basis: 100%;
+    max-inline-size: none;
+  }
+  .wb-right {
+    flex: 1 1 100%;
+    min-inline-size: 0;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
   .locale-toggle .wb-svg { display: none; }
 }
 

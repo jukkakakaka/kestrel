@@ -20,6 +20,7 @@ import logging
 from datetime import UTC, datetime
 
 from kestrel.db.engine import connect
+from kestrel.services import config as config_service
 from kestrel.services import positions as position_service
 
 log = logging.getLogger(__name__)
@@ -107,11 +108,15 @@ def briefing(locale: str = "zh-CN") -> dict:
     # 2. 有效期内、还没处理的建议
     conn = connect()
     try:
+        markets = config_service.active_markets(conn)
+        marks = ",".join("?" for _ in markets)
         recs = conn.execute(
             "SELECT id, market, code, name, currency, qty, entry_low, entry_high, stop,"
             " target1, valid_until, horizon, source"
-            " FROM recommendation WHERE status='active'"
-            " ORDER BY created_at DESC LIMIT 20"
+            f" FROM recommendation WHERE status='active' AND market IN ({marks})"
+            " AND julianday(valid_until) > julianday('now')"
+            " ORDER BY created_at DESC LIMIT 20",
+            markets,
         ).fetchall()
     finally:
         conn.close()

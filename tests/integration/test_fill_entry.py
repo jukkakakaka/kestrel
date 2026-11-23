@@ -167,3 +167,40 @@ def test_the_suggest_endpoint_fills_in_the_rest(client):
     # 没有缓存 K 线时不给瞎编的止损
     assert body["levels"]["ok"] is False
     assert body["levels"]["reason"]
+
+
+def test_targeted_sell_keeps_actual_date_and_retries_once(client):
+    payload = {"code": "CN/600519", "qty": "60", "price": "1300",
+               "filled_at": "2025-06-04", "confirmed": True}
+    buy = client.post("/api/journal/fill", json=payload).json()
+    assert buy["ok"], buy
+    sell = {**payload, "side": "sell", "trade_id": buy["trade_id"], "qty": "25", "price": "1310",
+            "fees": "1.23", "request_id": "broker-sell-2025-06-05"}
+    assert client.post("/api/journal/fill", json=sell).json()["ok"] is False
+    sell["filled_at"] = "2025-06-05"
+    first = client.post("/api/journal/fill", json=sell).json()
+    assert first["ok"], first
+    assert client.post("/api/journal/fill", json=sell).json() == first
+    assert client.post("/api/journal/fill", json={**sell, "code": "CN/000001"}).json()["ok"] is False
+    conn = connect()
+    try:
+        rows = conn.execute("SELECT status, qty, closed_at FROM trade ORDER BY id").fetchall()
+        assert [tuple(row) for row in rows] == [
+            ("open", 35, None), ("closed", 25, "2025-06-04T16:00:00+00:00"),
+        ]
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("invalid", [
+    {"qty": "NaN"}, {"qty": "1.12345"}, {"price": "Infinity"}, {"price": "-1"},
+    {"filled_at": "yesterday"}, {"fees": "-3"}, {"side": "typo"},
+])
+def test_bad_actual_fill_cannot_write_a_trade(client, invalid):
+    fill = {"code": "US/AAPL", "qty": "1", "price": "200", "confirmed": True, **invalid}
+    assert client.post("/api/journal/fill", json=fill).json()["ok"] is False
+    conn = connect()
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM trade").fetchone()[0] == 0
+    finally:
+        conn.close()

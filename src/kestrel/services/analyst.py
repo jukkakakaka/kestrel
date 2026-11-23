@@ -95,7 +95,7 @@ def build_brief(markets: list[str], limit: int = 40, history: int | None = None)
     try:
         settings = config_service.all_values(conn)
         snap = portfolio_service.snapshot(conn=conn, include_quotes=False)
-        horizon_code, advice = advisor.resolve(settings.get("trade.horizon"))
+        horizon_code, advice = advisor.resolve(settings.get("trade.horizon"), markets=clean_markets)
         cfg = timeframe.get(horizon_code)
         history = history or cfg.lookback
         marks = ",".join("?" * len(clean_markets))
@@ -114,12 +114,12 @@ def build_brief(markets: list[str], limit: int = 40, history: int | None = None)
 
         candidates = []
         for row in rows:
-            bars = timeframe.prepare(
-                bars_service.drop_forming(
-                    bars_service.cached_bars(conn, row["id"], history), row["market"]
-                ),
-                cfg.code,
+            daily = bars_service.drop_forming(
+                bars_service.cached_bars(conn, row["id"], history), row["market"],
             )
+            if bars_service.is_stale(daily, row["market"]):
+                continue
+            bars = timeframe.prepare(daily, cfg.code)
             if len(bars) < cfg.min_bars:
                 continue
             ind = compute(Series.from_bars(bars))
@@ -184,7 +184,7 @@ def build_brief(markets: list[str], limit: int = 40, history: int | None = None)
                 }
             )
 
-    capital_cny = float(snap["total_equity_cny"] or settings.get("account.capital") or 50000)
+    capital_cny = max(0.0, float(snap["total_equity_cny"]))
 
     return {
         "as_of": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -394,7 +394,7 @@ def size_position(
 ) -> tuple[Decimal, float, float]:
     """根据风控预算、券商碎股能力及可用现金算可买股数，绝不采用模型给出的数量。"""
     acct = brief.get("account") or {}
-    capital = Decimal(str(acct.get("capital_cny") or 50000))
+    capital = Decimal(str(acct.get("capital_cny", 50000)))
     risk_pct = Decimal(str(acct.get("risk_per_trade_pct") or 2.0))
     cur = currency_for(pick.market)
     capital_local = from_cny(capital, cur)
@@ -455,7 +455,7 @@ async def analyse(
     conn = connect()
     try:
         cfg = config_service.all_values(conn)
-        markets = markets or cfg.get("scan.markets") or ["CN", "HK", "US"]
+        markets = config_service.market_list(markets) or config_service.active_markets(conn)
     finally:
         conn.close()
 
@@ -537,12 +537,21 @@ def _finish(brief: dict, raw_reply: dict, provider: str, model: str, started) ->
     lots = brief.get("_lots") or {}
     brokers = acct.get("brokers") or {}
 
+    from kestrel.services.calendar import last_closed_session
+
+    fresh = {
+        (c["market"], c["code"]) for c in brief["candidates"]
+        if str(c.get("last_date") or "")[:10] == last_closed_session(c["market"])
+    }
     for raw in picks[: MAX_PICKS * 2]:
         if not isinstance(raw, dict):
             continue
         pick, reason = validate_pick(raw, brief)
         if pick is None:
             rejected.append({"code": raw.get("code"), "reason": reason})
+            continue
+        if (pick.market, pick.code) not in fresh:
+            rejected.append({"code": pick.code, "reason": "行情已过期，重新扫描后再分析"})
             continue
         sector = ""
         for c in brief["candidates"]:
@@ -653,6 +662,7 @@ def _store(accepted: list[dict], brief: dict, label: str) -> int:
     saved = 0
     horizon_code = str((brief.get("horizon") or {}).get("code") or "short")
     try:
+        conn.execute("BEGIN IMMEDIATE")
         for item in accepted:
             pick: Pick = item["pick"]
             qty: Decimal = item["qty"]

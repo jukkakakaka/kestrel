@@ -20,57 +20,22 @@ A local-first stock trading and risk workbench that runs on your own machine: it
 
 ---
 
-## Eight Core Capabilities (v0.4.0)
+## Getting started
 
-1. **Adaptive 3-Column Financial Workbench & Tri-State Theme** — Collapsible 3-group linear SVG rail (`220px ↔ 64px` icon rail / slide-over drawer under `960px`) + `56px` frosted top workspace bar (with `/` quick ticker search) + toggleable `380px` right-side Trading Agent drawer. Powered by CSS Container Queries (`@container main`) for zero-overflow reflow at any window size, paired with **Sun / Moon / System tri-state icon switching** and instant `zh-CN / EN` localization (1,098 parity-checked keys).
-2. **One-Click Monetary Privacy Masking (Eye Button / `Alt+P`)** — Share screens or screenshots safely: toggle `#toggle-privacy` or press `Alt+P` for zero-FOUC CSS masking that turns personal capital, equity, cash, market value, P&L amounts, and share counts into tabular `••••••` / `••••` (and blurs unfocused capital inputs) while keeping public stock prices, `%` changes, and R-multiples legible.
-3. **Native System Tray & Close-to-Tray Background Watch** — Main-thread Cocoa `NSStatusItem` on macOS + `pystray` daemon on Windows/Linux with a 7-item bilingual tray menu. Closing the main window hides it to the tray by default while keeping `APScheduler` stop/target monitoring alive; supports Dock/tray restore, `kestrel desktop --minimized` silent startup, and cross-platform login autostart.
-4. **Dynamic Cash Ledger & Manual Calibration** — Your configured `account.capital` acts as initial capital: confirmed buys debit cash + fees automatically, and FIFO partial/full sells release proceeds while splitting entry fees proportionally. Click the top-bar equity pill anytime to reconcile **Available Cash, Total Equity, Deposits/Withdrawals**, or add/edit/clear **existing stock holdings**.
-5. **Quasi-Live Execution Contract & What-if Attribution** — Enforces real exchange mechanics (`100`-share CN lots, `200+1` STAR/BSE rules, CN `T+1` sell locks, HK board/odd lots, US `0.0001` fractional shares, and tick rounding). Displays round-trip fees, **fee-inclusive break-even**, beginner limit-order instructions, live fill-vs-plan drift previews, and **What-if P&L attribution**.
-6. **4-Gate Quantitative Falsification & Parameter Plateau Heatmap** — Lookahead-safe **next-open execution** (`next_open=True`) with configurable round-trip `fee_bps` and one-way `slippage_bps`, **500-run fixed-seed (`seed=42`) permutation test p-values**, **`3×3` parameter plateau heatmaps** (hold period × ATR stop multiplier), and the **G1 Fee/Slippage Filter → G2 Walk-Forward → G3 Permutation Downgrade Guard → G4 Live Drift Alert** pipeline.
-7. **Multi-Market (CN/HK/US) & Multi-Horizon Advisor** — Trade CN A-shares, HK, and US equities across five horizons (`fast`, `short`, `medium`, `long`, or `auto`). During onboarding or in `auto` mode, Kestrel recommends optimal market combinations and cadence based on capital size, minimum fee/lot drag, and market breadth regimes.
-8. **75+ Hover-to-Learn Terms & Scoped Trading Copilot** — Enable **Learn Mode** to subtly underline 75+ trading concepts naturally across pages, modals, and AI replies for instant hover/click plain-language definitions and AI follow-ups; toggle off for zero underlines and zero banners. The right-side Copilot requires your own OpenAI-compatible API, injects live portfolio + strategy falsification stats (never fabricating unmeasured metrics), and strictly refuses off-topic prompts.
+1. Install the desktop app from [GitHub Releases](https://github.com/jukkakakaka/kestrel/releases/latest). Enter your starting capital in CNY. Select any combination of mainland China, Hong Kong and US markets and choose a trading horizon. The defaults explain how account size, typical order sizes, fees and recent market data inform the recommendation.
+2. Open **Advice** and start a scan. Check the ticker, entry range, share count, stop, target, estimated fees and expiration on each plan. Symbols with daily data behind the last closed session are skipped. A scan can finish without any actionable plan.
+3. Place a limit buy in your broker app after checking the market, currency, quantity and price. Pass if the broker cannot accept the order or the plan conditions no longer hold. Return to Kestrel once the broker confirms a fill.
+4. Choose **Record actual fill** and enter the actual price and quantity. If the plan calls for 100 shares and the broker fills 60 at 402.50, record 60 at 402.50. Add later fills separately from the same plan. The advice card shows total filled shares and the weighted average price. Enter fees and the fill date when available. Blank fields use estimated fees and the current time. Expired plans remain available for recording prior fills in history.
+5. Check **Today** or **Journal** for positions, cash and risk alerts. After a broker confirms a sell, record it against a specific lot or let the journal match the oldest eligible shares first.
 
-## Never bought a stock before? Start here
+**Learn as you go** is off by default. Turn it on for plain-language advice explanations, an example in **Simulation**, and optional glossary hints. The exercise requires neither a data feed nor a broker account. The AI Copilot is available with a compatible model endpoint.
 
-You do not need the theory first. Walk through these four steps once to complete an end-to-end disciplined trade.
-
-**Step 1 — Tell it your starting capital** (1 minute)
-
-First-run onboarding asks for your initial capital, markets, and cadence (with live capital-aware market recommendations).
-
-- **Initial Capital** seeds your dynamic cash ledger and drives risk-based position sizing. Enter an amount you can genuinely afford to put at risk.
-- **Max Risk per Trade** defaults to 2% (e.g., 1,000 max loss at the stop on 50,000 capital; 1%–2% recommended).
-- **Markets**: disabled markets disappear cleanly across the entire app.
-
-> Why start with risk? Share count is never a guess — it is derived from `risk budget ÷ per-share stop distance`. Deciding share count first is the classic beginner mistake.
-
-**Step 2 — Run a scan** (10 seconds)
-
-Open *Advice* → *Start scan*. Qualifying setups appear as 8-metric executable cards:
-
-| On the card | What it means |
+| Plan field | How to use it |
 | :--- | :--- |
-| Entry band | Placing a limit order inside this zone counts as following the plan |
-| Stop | Pre-committed exit price if wrong — sell on a break, never average down |
-| First target | Planned level to lock in partial profits |
-| Shares | Exact tradable quantity respecting your cash, risk cap, and exchange lot rules |
-| Est. fees & Break-even | Round-trip broker/exchange fees and true fee-inclusive break-even price |
-| Net R:R & Risk amount | Reward-to-risk ratio (plans below `1.5` are rejected) and worst-case loss |
-
-When nothing qualifies, Kestrel **explicitly tells you to sit on your hands today** and explains why (score below threshold / one board lot exceeds risk budget / stop band too wide).
-
-**Step 3 — Place the limit order in your broker app, then log the real fill**
-
-Click *Log actual fill* (or `+ Log Fill` in the top bar) and enter the **exact price and quantity filled**. If the plan said 100 shares at 400–404 and you got 60 at 402.5, record 60 at 402.5 — the modal previews slippage impact in real time and updates your cash ledger.
-
-**Step 4 — Glance at Today (or let the system tray watch in the background)**
-
-The `/` home page lists prioritized actions only:
-- Position below or near stop → **exit now** (with explicit `T+1` lock badges on same-day CN buys)
-- Position at `+1R` / `+2R` → **ratchet stop up to break-even or +1R**
-- Advice expiring soon → **act or skip**
-- Nothing urgent → **nothing to do today**
+| Entry range and shares | Check currency, broker lot rules and available cash before entering a limit order |
+| Stop and target | Use them to plan exits. Gaps, halts and liquidity can move the actual fill beyond these levels |
+| Estimated round-trip fees and break-even | Check how much price movement it takes to recover costs. Use actual broker fees when recording fills |
+| Risk and reward-to-risk | Compare the estimated loss at the stop with the potential gain at the target, using the actual fill for your journal |
 
 ## Selling is the main event
 
@@ -123,7 +88,7 @@ Most retail tools show cherry-picked backtests. Kestrel treats statistical falsi
 
 | Horizon | Bar Size | Typical Hold | Plan Expiry | Valid Stop Band |
 | :--- | :--- | :--- | :--- | :--- |
-| Fast (`fast`) | 2-day folded | 1–5 sessions | Next session close | 1.5%–12% |
+| Fast (`fast`) | Daily bars | 1–5 sessions | Next session close | 1.2%–8% |
 | Swing (`short`) | Daily | Days to 2 weeks | Next session close | 1.5%–15% |
 | Position (`medium`) | Weekly | Weeks to 2 months | 10 days | 3%–18% |
 | Long (`long` · Beta) | Monthly | Months | 45 days | 5%–30% |
@@ -193,6 +158,10 @@ uv run kestrel serve                 # local browser mode: http://127.0.0.1:8000
 
 <img src="docs/screenshots/welcome.en.png" width="900" alt="Four-step onboarding: initial capital, smart market recommendations, horizon, and optional Copilot API">
 
+## Data and research limits
+
+The live screen checks recent daily data before producing new plans. The backtest fingerprint covers the full OHLCV input, parameters and resulting trades. Historical data can be revised. Current symbol universes can omit delisted names, and the simulation uses assumed opens and slippage. It cannot establish actual fill availability, queue priority, or future returns.
+
 ## Project Layout
 
 ```
@@ -226,6 +195,8 @@ scripts/            check.sh gatekeeper, check_locales.py parity check, 1440×90
 | [docs/engines.md](docs/engines.md) | Rules / LLM / WorkBuddy engines, shared risk checks, and G1–G4 falsification pipeline |
 | [docs/fee-model.md](docs/fee-model.md) | Exchange levies and customizable broker fee schedules |
 | [docs/notifications.md](docs/notifications.md) | Alert channels, mobile signed receipts, and WorkBuddy cron jobs |
+
+See the [open-source review](docs/review.md) for the design references, changes and remaining gaps.
 
 ## Development
 

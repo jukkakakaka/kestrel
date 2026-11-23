@@ -12,8 +12,10 @@
   <div class="page-actions">
     <div class="seg-group" role="group" aria-label="{{ t('adv.scope') }}">
       {% for m_code, m_label in [('ALL', t('adv.filter_all')), ('CN', t('market.cn')), ('HK', t('market.hk')), ('US', t('market.us'))] %}
+      {% if m_code == 'ALL' or m_code in markets %}
       <a class="seg-btn {{ 'active' if market_filter == m_code else '' }}"
          href="{{ '/advice' if m_code == 'ALL' else '/advice?market=' + m_code }}">{{ m_label }}</a>
+      {% endif %}
       {% endfor %}
     </div>
     <button class="btn ghost" id="refresh-btn">
@@ -144,6 +146,19 @@
   </div>
 </section>
 
+{% if last and last.skipped %}
+  {% set reasons = namespace(stale=0, missing=0, short=0) %}
+  {% for item in last.skipped if item.market in markets %}
+    {% if item.reason == 'stale_bars' %}{% set reasons.stale = reasons.stale + 1 %}
+    {% elif item.reason == 'no_bars' %}{% set reasons.missing = reasons.missing + 1 %}
+    {% elif item.reason == 'short_history' %}{% set reasons.short = reasons.short + 1 %}
+    {% endif %}
+  {% endfor %}
+  {% if reasons.stale or reasons.missing or reasons.short %}
+  <div class="notice warn">{{ t('adv.data_skipped', stale=reasons.stale, missing=reasons.missing, short=reasons.short) }}</div>
+  {% endif %}
+{% endif %}
+
 <div id="adv-flash" class="notice hidden"></div>
 
 {# 引擎提示 #}
@@ -227,6 +242,9 @@
         {% endif %}
       {% endif %}
 
+      {% if r.status == 'active' %}
+      <p class="tiny muted" style="margin-top:10px;">{{ t('adv.manual_limit', code=r.code, high=((r.entry_high or r.entry_low) | cur(cur))) }}</p>
+      {% endif %}
       <details class="guide-details learn-only {% if not ui_learning %}hidden{% endif %}">
         <summary>{{ t('adv.beginner_guide_title') }}</summary>
         <div class="tiny" style="margin-top:8px;color:var(--ink-2);">
@@ -234,6 +252,11 @@
           <div>2. {{ t('adv.guide_step2', high=((r.entry_high or r.entry_low) | cur(cur))) }}</div>
           <div>3. {{ t('adv.guide_step3', stop=(r.stop | cur(cur)), target=(r.target1 | cur(cur))) }}</div>
           <div>4. {{ t('adv.guide_step4') }}</div>
+          {% set lesson = r.learn_en if locale.startswith('en') else r.learn_zh %}
+          {% if lesson %}
+          <div style="margin-top:8px;white-space:pre-line;">{{ lesson }}</div>
+          {% endif %}
+          <p><a href="/sim?locale={{ locale }}">{{ t('learn.practice') }}</a></p>
         </div>
       </details>
     </div>
@@ -243,20 +266,21 @@
         {{ icon('clock', 13) }}
         {{ t('adv.valid_until') }}：{{ r.valid_until[:16].replace('T', ' ') }}
       </span>
+      {% if r.status == 'executed' and r.fill_qty is not none %}
+      <span class="tiny muted" data-priv="qty">{{ t('adv.filled_total', qty=r.fill_qty|num(4), price=r.fill_price|cur(cur)) }}</span>
+      {% endif %}
+      {% if r.status == 'active' %}
       <button type="button" class="btn ghost sm" data-skip="{{ r.id }}">{{ t('adv.skip') }}</button>
+      {% endif %}
       <button type="button" class="btn sm"
               data-open-fill
               data-side="buy"
               data-rec-id="{{ r.id }}"
               data-market="{{ r.market }}"
               data-code="{{ r.code }}"
-              data-qty="{{ r.qty }}"
-              data-price="{{ '%.3f'|format(r.entry_low / 1000000) }}"
-              data-stop="{{ '%.3f'|format(r.stop / 1000000) }}"
-              data-target="{{ '%.3f'|format(r.target1 / 1000000) }}"
-              data-note="{{ t('adv.fill_note') }}">
+              data-horizon="{{ r.horizon or 'short' }}">
         {{ icon('plus', 14) }}
-        <span>{{ t('adv.enter_fill') }}</span>
+        <span>{{ t('adv.add_fill') if r.status == 'executed' else t('adv.enter_fill') }}</span>
       </button>
     </footer>
   </article>
@@ -303,7 +327,12 @@
             <td class="num mono">{{ h.entry_low | cur(h.currency) }}</td>
             <td class="num mono down">{{ h.stop | cur(h.currency) }}</td>
             <td><span class="badge {{ 'ok-badge' if h.status == 'executed' else 'avoid' }}">{{ h.status }}</span></td>
-            <td class="tiny muted">{{ h.decided_note or '—' }}</td>
+            <td class="tiny muted">
+              <span data-priv="money">{{ h.decided_note or '—' }}</span>
+              <button type="button" class="btn ghost sm" data-open-fill data-side="buy"
+                      data-rec-id="{{ h.id }}" data-market="{{ h.market }}" data-code="{{ h.code }}"
+                      data-horizon="{{ h.horizon or 'short' }}">{{ t('adv.add_fill') }}</button>
+            </td>
           </tr>
           {% endfor %}
         </tbody>

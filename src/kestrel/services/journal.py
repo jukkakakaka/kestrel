@@ -7,9 +7,8 @@ from decimal import Decimal
 from kestrel.core.clock import iso, utcnow
 from kestrel.core.money import FX_TO_CNY, from_micro, to_micro
 from kestrel.core.money import to_cny as _to_cny
-from kestrel.core.quantity import db_value, display, validate_order_qty
+from kestrel.core.quantity import db_value, display
 from kestrel.db.engine import connect, transaction
-from kestrel.fees.calculator import quote_fees
 from kestrel.services import config as config_service
 
 FX = FX_TO_CNY
@@ -75,122 +74,31 @@ def close_trade(
     fees_override=None,
     broker: str | None = None,
 ) -> dict | None:
-    """平掉某一条持仓（可部分平仓）。
-
-    卖出按用户实际配置的券商套餐计算卖出侧费用；部分平仓按股数比例把买入侧费用
-    拆分到已平记录中，保留 ``initial_stop`` 且不改写剩余持仓成本。
-    """
-    from kestrel.datasources.base import default_lot_size
-    from kestrel.services.execution import _shanghai_date
+    """Close one open lot through the same accounting path as manual fills."""
+    from kestrel.services import execution
+    from kestrel.services.fills import estimate_fees
 
     conn = connect()
     try:
-        row = conn.execute("SELECT * FROM trade WHERE id=?", (trade_id,)).fetchone()
-        if row is None:
-            return None
-
-        trade = dict(row)
-        held_qty = Decimal(str(trade["qty"]))
-        sell_qty = Decimal(str(qty)) if qty not in (None, "") else held_qty
-        brk = broker or config_service.get(conn, f"broker.{trade['market']}", "") or None
-        lot = default_lot_size(trade["market"], trade["code"])
-        ok_qty, err_qty = validate_order_qty(
-            trade["market"],
-            trade["code"],
-            sell_qty,
-            lot,
-            side="sell",
-            broker=brk,
-            held_qty=held_qty,
-        )
-        if not ok_qty:
-            return {"ok": False, "error": err_qty}
-
-        now_iso = iso(utcnow())
-        if (
-            trade["market"] == "CN"
-            and trade.get("source") != "calibrated"
-            and _shanghai_date(trade.get("filled_at") or trade.get("opened_at"))
-            == _shanghai_date(now_iso)
-        ):
-            return {
-                "ok": False,
-                "error": "受 A 股 T+1 规则限制，今日新买入的股票需下一交易日方可卖出",
-            }
-
-        price = Decimal(str(exit_price))
-        amount_out = price * sell_qty
-        if fees_override not in (None, ""):
-            fee_sell = Decimal(str(fees_override))
-        else:
-            try:
-                fee_sell = quote_fees(trade["market"], amount_out, sell_qty, True, brk).total
-            except Exception:  # noqa: BLE001
-                fee_sell = Decimal("0")
-
-        with transaction(conn):
-            if sell_qty == held_qty:
-                conn.execute(
-                    "UPDATE trade SET exit_price=?, closed_at=?, status='closed',"
-                    " fees=COALESCE(fees,0)+?, review=COALESCE(?,review),"
-                    " rule_break=?, exit_reason=COALESCE(?, exit_reason) WHERE id=?",
-                    (
-                        to_micro(price),
-                        now_iso,
-                        to_micro(fee_sell),
-                        review or None,
-                        1 if rule_break else 0,
-                        exit_reason or None,
-                        trade_id,
-                    ),
-                )
-                closed_id = trade_id
-            else:
-                orig_fees = int(trade.get("fees") or 0)
-                orig_entry_fees = int(
-                    trade["entry_fees"] if trade.get("entry_fees") is not None else orig_fees
-                )
-                buy_fee_share_micro = int(
-                    (Decimal(orig_entry_fees) * sell_qty / held_qty).to_integral_value()
-                )
-                rem_fees_micro = max(0, orig_fees - buy_fee_share_micro)
-                rem_entry_fees_micro = max(0, orig_entry_fees - buy_fee_share_micro)
-                closed_fees_micro = buy_fee_share_micro + to_micro(fee_sell)
-
-                conn.execute(
-                    "UPDATE trade SET qty=?, fees=?, entry_fees=? WHERE id=?",
-                    (
-                        db_value(held_qty - sell_qty),
-                        rem_fees_micro,
-                        rem_entry_fees_micro,
-                        trade_id,
-                    ),
-                )
-                cur = conn.execute(
-                    """
-                    INSERT INTO trade (market, code, name, currency, side, qty, entry_price,
-                                       exit_price, fees, entry_fees, opened_at, filled_at, closed_at,
-                                       status, rec_id, review, rule_break, exit_reason, source,
-                                       plan_snapshot, initial_stop, stop_price, target_price)
-                    SELECT market, code, name, currency, side, ?, entry_price, ?, ?, ?,
-                           opened_at, filled_at, ?, 'closed', rec_id, ?, ?, ?, source,
-                           plan_snapshot, initial_stop, stop_price, target_price
-                    FROM trade WHERE id=?
-                    """,
-                    (
-                        db_value(sell_qty),
-                        to_micro(price),
-                        closed_fees_micro,
-                        buy_fee_share_micro,
-                        now_iso,
-                        review or None,
-                        1 if rule_break else 0,
-                        exit_reason or None,
-                        trade_id,
-                    ),
-                )
-                closed_id = cur.lastrowid
-        return dict(conn.execute("SELECT * FROM trade WHERE id=?", (closed_id,)).fetchone())
+        with transaction(conn, immediate=True):
+            trade = conn.execute("SELECT * FROM trade WHERE id=? AND status='open'", (trade_id,)).fetchone()
+            if trade is None:
+                return None
+            brk = broker or config_service.get(conn, f"broker.{trade['market']}")
+            sell_qty = trade["qty"] if qty in (None, "") else qty
+            if fees_override in (None, ""):
+                try:
+                    fees_override = estimate_fees(trade["market"], exit_price, sell_qty, brk, "sell")
+                except ArithmeticError:
+                    return {"ok": False, "error": "请核对成交价格与数量"}
+            result = execution.record(execution.Fill(
+                market=trade["market"], code=trade["code"], name=trade["name"], side="sell",
+                qty=sell_qty, price=exit_price, fees=fees_override, broker=brk, trade_id=trade_id,
+                note=review, rule_break=rule_break, exit_reason=exit_reason, confirmed=True,
+            ), conn=conn)
+            if not result["ok"]:
+                return result
+            return dict(conn.execute("SELECT * FROM trade WHERE id=?", (result["closed_trades"][0],)).fetchone())
     finally:
         conn.close()
 

@@ -31,6 +31,7 @@ def _seed_bars(market: str, code: str, prices: list[float]) -> None:
     from datetime import date, timedelta
 
     from kestrel.services import bars as bars_service
+    from kestrel.services.calendar import last_closed_session
 
     conn = connect()
     try:
@@ -42,7 +43,7 @@ def _seed_bars(market: str, code: str, prices: list[float]) -> None:
         symbol_id = conn.execute(
             "SELECT id FROM symbol WHERE market=? AND code=?", (market, code)
         ).fetchone()["id"]
-        start = date(2024, 1, 1) - timedelta(days=len(prices))
+        start = date.fromisoformat(last_closed_session(market)) - timedelta(days=len(prices) - 1)
         rows = [
             {
                 "date": str(start + timedelta(days=i)),
@@ -65,7 +66,9 @@ def test_market_is_inferred_from_the_code_shape(home):
 
 def test_an_explicit_market_wins(home):
     target = fills.resolve_target("00700", "US")
-    assert target.market == "US"
+    assert target.market == "US" and target.code == ""
+    assert fills.resolve_target("US/AAPL").code == "AAPL"
+    assert fills.resolve_target("0700.HK").code == "00700"
 
 
 def test_a_known_symbol_supplies_name_and_lot_size(home):

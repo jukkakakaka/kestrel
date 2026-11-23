@@ -900,7 +900,7 @@
   "copilot.welcome_msg": "你好，我是 Kestrel 专业炒股与风控助手。我已实时同步你的总资产、持仓与建议列表，且严格仅回答股票交易与 Kestrel 产品相关问题。请问想分析哪一笔？",
 
   "fill.exit_reason": "卖出原因",
-  "fill.fees_auto_ph": "留空按套餐自动估算",
+  "fill.fees_auto_ph": "留空按券商费率估算",
   "fill.reason_manual": "主观提前卖出 / 换仓",
   "fill.reason_sl": "触发止损认错离场",
   "fill.reason_time": "触发时间止损离场",
@@ -1126,5 +1126,18 @@
   "stock.line_target1": "目标",
   "stock.line_entry_high": "入场上沿",
   "stock.line_entry_low": "入场下沿",
-  "stock.line_stop": "止损"
+  "stock.line_stop": "止损",
+  "adv.manual_limit": "在券商搜索 {code}，选择买入限价单，限价最高 {high}。超过计划区间、建议已失效或券商规则不符时，跳过这笔。成交后按券商记录填写。",
+  "adv.filled_total": "累计成交 {qty} 股 · 均价 {price}",
+  "adv.add_fill": "补记实际成交",
+  "adv.data_skipped": "上次扫描跳过了行情过期的 {stale} 只、无行情的 {missing} 只，以及历史不足的 {short} 只标的。",
+  "fill.actual_only": "请照抄券商的成交价与成交股数。分批成交可以逐笔填写；费用和成交日期留空时用估算费用及当前时间。",
+  "learn.practice": "用示例练习限价、股数和止损",
+  "learn.exercise_title": "练习：数量、止损和部分成交",
+  "learn.exercise_prompt": "虚拟账户有 ¥20,000，这笔愿意承担 ¥200 风险。计划以 ¥20 限价买入，止损在 ¥19。先估算股数上限，再想想：如果只成交了 100 股、均价 ¥19.90，台账该怎么填？",
+  "learn.exercise_check": "查看计算与答案",
+  "learn.exercise_answer": "每股计划风险 ¥1，费用前上限 200 股。真实下单还要按现金、费用和整手规则调整。台账填买入 100 股、¥19.90，有后续成交再记一笔。以 ¥19 为止损，成交后的价格风险是 ¥90，另计费用和可能的滑点，跳空时损失可能更大。",
+  "receipt.action_invalid": "请登记实际成交。只有仍然有效的建议可以标为跳过。",
+  "welcome.settings_invalid": "请检查本金、风险比例、市场和周期后重试。",
+  "welcome.h_fast_note": "用日线寻找数日内的波段，换手成本较高。"
 }

@@ -75,16 +75,18 @@ def _compute_determinism_hash(
     stats_core: dict[str, Any],
 ) -> str:
     """生成回测输入与核心结果的 SHA-256 确定性校验摘要（前 16 位十六进制）。"""
-    bar_sig = {
-        "n": len(bars),
-        "first": (str(bars[0].get("date")), float(bars[0]["close"])) if bars else None,
-        "last": (str(bars[-1].get("date")), float(bars[-1]["close"])) if bars else None,
-    }
     payload = {
         "strategy": strategy_code,
         "params": params,
-        "bars": bar_sig,
-        "trade_rs": [t["r"] for t in trades],
+        "bars": [
+            (
+                str(b.get("date")), float(b.get("open", b["close"])),
+                float(b["high"]), float(b["low"]), float(b["close"]),
+                float(b.get("volume") or 0), float(b.get("turnover") or 0),
+            )
+            for b in bars
+        ],
+        "trades": trades,
         "stats": stats_core,
     }
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")

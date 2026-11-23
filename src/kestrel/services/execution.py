@@ -26,9 +26,9 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
-from kestrel.core.clock import iso, utcnow
+from kestrel.core.clock import iso, market_tz, utcnow
 from kestrel.core.money import currency_for, from_micro, round_tick, to_cny, to_micro
 from kestrel.core.quantity import (
     db_value,
@@ -71,17 +71,29 @@ class Fill:
     exit_reason: str = ""
     rule_break: bool = False
     broker: str | None = None
+    trade_id: int | None = None
+    request_id: str | None = None
+    confirmed: bool = False
 
     def normalised(self) -> Fill:
         mkt = self.market.upper().strip()
+        side = str(self.side).strip().lower()
+        if mkt not in CURRENCY or not self.code.strip() or side not in (SIDE_BUY, SIDE_SELL):
+            raise ValueError("请检查成交的市场、代码和方向")
+        filled_at = None
+        if self.filled_at:
+            moment = datetime.fromisoformat(self.filled_at.replace("Z", "+00:00"))
+            if moment.tzinfo is None:
+                moment = moment.replace(tzinfo=market_tz(mkt))
+            filled_at = iso(moment)
         return Fill(
             market=mkt,
             code=normalize_code(mkt, self.code.strip()),
-            side=SIDE_BUY if str(self.side).lower().startswith("b") else SIDE_SELL,
-            qty=to_qty(self.qty),
+            side=side,
+            qty=Decimal(str(self.qty)),
             price=Decimal(str(self.price)),
             fees=Decimal(str(self.fees or 0)),
-            filled_at=self.filled_at or iso(utcnow()),
+            filled_at=filled_at,
             rec_id=self.rec_id,
             source=self.source,
             note=self.note or "",
@@ -91,6 +103,9 @@ class Fill:
             exit_reason=self.exit_reason or "",
             rule_break=bool(self.rule_break),
             broker=self.broker or None,
+            trade_id=self.trade_id,
+            request_id=self.request_id,
+            confirmed=self.confirmed,
         )
 
 
@@ -436,65 +451,31 @@ def record_intent(
         conn.close()
 
 
-def record(fill: Fill) -> dict:
-    """记一笔成交。买入开仓，卖出按 FIFO 平仓，整个过程原子提交。"""
-    fill = fill.normalised()
-    if fill.qty <= 0:
-        return {"ok": False, "error": "成交数量必须大于 0"}
-    if fill.price <= 0:
-        return {"ok": False, "error": "成交价格必须大于 0"}
+def record(fill: Fill, *, conn=None) -> dict:
+    """Save a confirmed execution and its resulting book changes together."""
+    try:
+        fill = fill.normalised()
+        if (not fill.qty.is_finite() or not 0 < fill.qty < Decimal("1e12")
+                or fill.qty != to_qty(fill.qty)):
+            raise ValueError("成交数量必须大于 0，最多支持 4 位小数")
+        for value in (fill.price, fill.fees, fill.stop, fill.target):
+            if value is not None and (not value.is_finite() or not 0 <= value < Decimal("1e12")):
+                raise ValueError("价格和费用必须是有效的非负数字")
+        if to_micro(fill.price) <= 0:
+            raise ValueError("成交价格必须大于 0")
+        if fill.trade_id and fill.side != SIDE_SELL:
+            raise ValueError("指定持仓后只能登记卖出")
+        if fill.request_id and len(fill.request_id) > 128:
+            raise ValueError("成交请求编号过长")
+    except (ArithmeticError, TypeError, ValueError) as exc:
+        return {"ok": False, "error": str(exc) or "请检查成交数字和日期"}
 
+    if conn is not None:
+        return _record(conn, fill)
     conn = connect()
     try:
-        with transaction(conn):
-            symbol = _ensure_symbol(conn, fill)
-            rec, snapshot = _plan_snapshot(conn, fill.rec_id)
-            if fill.side == SIDE_BUY:
-                result = _buy(conn, fill, symbol, snapshot)
-            else:
-                result = _sell(conn, fill, symbol)
-            if result.get("ok") and fill.rec_id:
-                _mark_recommendation(conn, fill, result)
-            if result.get("ok"):
-                conn.execute(
-                    """
-                    INSERT INTO order_intent
-                        (client_order_id, rec_id, trade_id, market, code, side, order_type,
-                         qty, limit_price, stop_price, status, broker)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-                    """,
-                    (
-                        f"ksl_{uuid.uuid4().hex[:12]}",
-                        fill.rec_id,
-                        result.get("trade_id") or ((result.get("closed_trades") or [None])[0]),
-                        symbol["market"],
-                        symbol["code"],
-                        fill.side,
-                        "LIMIT",
-                        db_value(fill.qty),
-                        to_micro(fill.price),
-                        to_micro(fill.stop) if fill.stop else None,
-                        "FILLED_PAPER" if fill.source == "paper" else "FILLED_MANUAL",
-                        fill.broker,
-                    ),
-                )
-
-        if not result.get("ok"):
-            return result
-
-        result["symbol"] = {
-            "market": symbol["market"],
-            "code": symbol["code"],
-            "name": symbol["name"],
-        }
-        if rec:
-            pct, r = deviation(fill.price, rec)
-            band = band_deviation(fill.price, rec)
-            result["deviation_pct"] = pct
-            result["deviation_r"] = r
-            result["in_zone"] = band["in_zone"]
-            result["band_slippage_pct"] = band["band_pct"]
-        return result
+        with transaction(conn, immediate=True):
+            return _record(conn, fill)
     except Exception as exc:  # noqa: BLE001
         log.exception("record fill failed")
         return {"ok": False, "error": str(exc)}
@@ -502,32 +483,92 @@ def record(fill: Fill) -> dict:
         conn.close()
 
 
+def _record(conn, fill: Fill) -> dict:
+    # A missing timestamp means "now". Match retries before assigning the current time.
+    fingerprint = None
+    if fill.request_id:
+        fingerprint = json.dumps(dataclasses.asdict(fill), default=str, sort_keys=True)
+        saved = conn.execute(
+            "SELECT payload, result FROM fill_request WHERE id=?", (fill.request_id,),
+        ).fetchone()
+        if saved:
+            if fingerprint != saved["payload"]:
+                return {"ok": False, "error": "此成交请求已保存，请重新打开录入窗口"}
+            return json.loads(saved["result"])
+
+    fill.filled_at = fill.filled_at or iso(utcnow())
+    rec, snapshot = _plan_snapshot(conn, fill.rec_id)
+    if fill.rec_id and (
+        not rec or rec["market"] != fill.market or rec["code"] != fill.code or fill.side != SIDE_BUY
+    ):
+        return {"ok": False, "error": "成交的市场、代码或方向与关联建议不一致"}
+
+    symbol = _symbol(conn, fill.market, fill.code)
+    if fill.side == SIDE_SELL and not symbol:
+        # Older journal entries may predate a matching symbol row.
+        symbol = {"market": fill.market, "code": fill.code, "name": fill.name or fill.code,
+                  "lot_size": default_lot_size(fill.market, fill.code)}
+    if fill.side == SIDE_BUY:
+        symbol = symbol or _ensure_symbol(conn, fill)
+        result = _buy(conn, fill, symbol, snapshot)
+    else:
+        result = _sell(conn, fill, symbol)
+    if not result["ok"]:
+        return result
+
+    if rec:
+        _mark_recommendation(conn, fill)
+        pct, risk = deviation(fill.price, rec)
+        band = band_deviation(fill.price, rec)
+        result.update(deviation_pct=pct, deviation_r=risk, in_zone=band["in_zone"],
+                      band_slippage_pct=band["band_pct"])
+    result["symbol"] = {key: symbol[key] for key in ("market", "code", "name")}
+    conn.execute(
+        """
+        INSERT INTO order_intent
+            (client_order_id, rec_id, trade_id, market, code, side, order_type,
+             qty, limit_price, stop_price, status, broker)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            f"ksl_{uuid.uuid4().hex}", fill.rec_id,
+            result.get("trade_id") or result["closed_trades"][0],
+            fill.market, fill.code, fill.side, "LIMIT", db_value(fill.qty), to_micro(fill.price),
+            to_micro(fill.stop) if fill.stop else None,
+            "FILLED_PAPER" if fill.source == "paper" else "FILLED_MANUAL", fill.broker,
+        ),
+    )
+    result["qty"] = db_value(fill.qty)
+    result["filled_at"] = fill.filled_at
+    if fill.request_id:
+        conn.execute(
+            "INSERT INTO fill_request (id, payload, result) VALUES (?,?,?)",
+            (fill.request_id, fingerprint, json.dumps(result, ensure_ascii=False)),
+        )
+    return result
+
+
 def _buy(conn, fill: Fill, symbol: dict, snapshot: dict | None) -> dict:
     lots = max(1, int(symbol["lot_size"] or default_lot_size(fill.market, symbol["code"])))
     broker = fill.broker or config_service.get(conn, f"broker.{fill.market}", "") or None
 
-    # 兼容既有对 A 股整手报错文字的断言：含「每手 {lots} 股」
-    if fill.market == "CN":
-        if to_qty(fill.qty) != to_qty(fill.qty).to_integral_value():
-            return {"ok": False, "error": f"A 股只能按整股成交，你填了 {fill.qty} 股"}
-        ok_qty, err_qty = validate_order_qty(
-            fill.market, symbol["code"], fill.qty, lots, side="buy", broker=broker
-        )
-        if not ok_qty:
-            if "每手" not in err_qty and "至少 200" not in err_qty:
-                err_qty = f"{symbol['name']} 每手 {lots} 股：{err_qty}"
-            elif "每手" not in err_qty:
-                err_qty = f"{symbol['name']} {err_qty}"
-            return {"ok": False, "error": err_qty}
+    if fill.confirmed or fill.rec_id:
+        if fill.market != "US" and fill.qty != fill.qty.to_integral_value():
+            return {"ok": False, "error": "A 股与港股的实际成交须按整股登记"}
     else:
         ok_qty, err_qty = validate_order_qty(
             fill.market, symbol["code"], fill.qty, lots, side="buy", broker=broker
         )
         if not ok_qty:
+            if fill.market == "CN" and "每手" not in err_qty:
+                err_qty = f"{symbol['name']} 每手 {lots} 股：{err_qty}"
             return {"ok": False, "error": err_qty}
 
-    if fill.stop is not None and fill.stop >= fill.price:
+    if fill.stop is not None and not 0 < fill.stop < fill.price:
         return {"ok": False, "error": "止损价必须低于买入成交价"}
+
+    if fill.target is not None and fill.target <= fill.price:
+        return {"ok": False, "error": "目标价必须高于买入成交价，可留空"}
 
     fee_micro = to_micro(fill.fees)
     cur = conn.execute(
@@ -564,7 +605,9 @@ def _buy(conn, fill: Fill, symbol: dict, snapshot: dict | None) -> dict:
         if cand_stop < fill.price:
             final_stop = cand_stop
     if final_target is None and snapshot and snapshot.get("target"):
-        final_target = from_micro(snapshot["target"])
+        cand_target = from_micro(snapshot["target"])
+        if cand_target > fill.price:
+            final_target = cand_target
 
     if final_stop is not None or final_target is not None:
         conn.execute(
@@ -592,54 +635,63 @@ def _sell(conn, fill: Fill, symbol: dict) -> dict:
         " ORDER BY COALESCE(filled_at, opened_at), id",
         (symbol["market"], symbol["code"]),
     ).fetchall()
+    if fill.trade_id is not None:
+        rows = [row for row in rows if row["id"] == fill.trade_id]
     if not rows:
-        return {"ok": False, "error": f"没有 {symbol['name']} 的持仓可卖，先记一笔买入"}
+        return {"ok": False, "error": f"没有 {symbol['name']} 的对应未平仓持仓可卖"}
 
     available = sum((Decimal(str(r["qty"])) for r in rows), Decimal("0"))
     if fill.qty > available:
-        return {
-            "ok": False,
-            "error": f"卖出 {fill.qty} 股超过现有持仓 {available} 股。如果你确实做空，这个工具不支持。",
-        }
+        return {"ok": False, "error": f"卖出 {fill.qty} 股超过现有持仓 {available} 股"}
 
-    ok_qty, err_qty = validate_order_qty(
-        symbol["market"], symbol["code"], fill.qty, symbol["lot_size"],
-        side="sell", broker=fill.broker, held_qty=available,
-    )
+    if fill.confirmed:
+        ok_qty = fill.market == "US" or fill.qty == fill.qty.to_integral_value()
+        err_qty = "A 股与港股的实际成交须按整股登记"
+    else:
+        ok_qty, err_qty = validate_order_qty(
+            symbol["market"], symbol["code"], fill.qty, symbol["lot_size"],
+            side="sell", broker=fill.broker, held_qty=available,
+        )
     if not ok_qty:
         return {"ok": False, "error": err_qty}
 
-    # A 股 T+1：当日买入的非补录底仓不可在同日卖出。
-    if symbol["market"] == "CN":
-        sell_date = _shanghai_date(fill.filled_at)
-        sellable_rows = [
-            r
-            for r in rows
-            if (r["source"] == "calibrated" or _shanghai_date(r["filled_at"] or r["opened_at"]) != sell_date)
-        ]
-        sellable = sum((Decimal(str(r["qty"])) for r in sellable_rows), Decimal("0"))
-        if fill.qty > sellable:
-            return {
-                "ok": False,
-                "error": (
-                    f"受 A 股 T+1 规则限制，{symbol['name']} 今日最多可卖出 {display(sellable)} 股"
-                    f"（总持仓 {display(available)} 股中其余为今日买入，需下一交易日方可卖出）"
-                ),
-            }
-        rows = sellable_rows
+    # Match only lots that existed at the time of the sale. CN also requires a prior local date.
+    sell_at = datetime.fromisoformat(fill.filled_at)
+    sell_date = _shanghai_date(fill.filled_at)
+    eligible = []
+    for row in rows:
+        if row["source"] != "calibrated":
+            opened = datetime.fromisoformat(row["filled_at"] or row["opened_at"])
+            if opened.tzinfo is None:
+                opened = opened.replace(tzinfo=market_tz(fill.market))
+            if opened > sell_at or (fill.market == "CN" and _shanghai_date(opened.isoformat()) >= sell_date):
+                continue
+        eligible.append(row)
+    sellable = sum((Decimal(str(row["qty"])) for row in eligible), Decimal("0"))
+    if fill.qty > sellable:
+        basis = "（A 股 T+1）" if fill.market == "CN" else ""
+        return {"ok": False, "error": f"成交时可用持仓仅 {display(sellable)} 股{basis}，请核对日期与数量"}
 
     remaining = fill.qty
     closed: list[int] = []
     proceeds = Decimal("0")
     cost = Decimal("0")
-    for row in rows:
+    allocated = Decimal("0")
+    total_fees = from_micro(to_micro(fill.fees))
+    for row in eligible:
         if remaining <= 0:
             break
         row_qty = Decimal(str(row["qty"]))
         take = min(remaining, row_qty)
         entry = from_micro(row["entry_price"])
         # 卖出费用按数量分摊到被平的这几笔，避免第一笔承担全部费用。
-        sell_fee_share = (fill.fees * take / fill.qty).quantize(Decimal("0.01"))
+        if take == remaining:
+            sell_fee_share = total_fees - allocated
+        else:
+            sell_fee_share = (total_fees * take / fill.qty).quantize(
+                Decimal("0.000001"), rounding=ROUND_DOWN,
+            )
+        allocated += sell_fee_share
         cost += entry * take
         proceeds += fill.price * take
 
@@ -722,9 +774,7 @@ def _close_row(conn, trade_id: int, fill: Fill, fee_share: Decimal) -> None:
         )
 
 
-def _mark_recommendation(conn, fill: Fill, result: dict) -> None:
-    if fill.side != SIDE_BUY:
-        return
+def _mark_recommendation(conn, fill: Fill) -> None:
     agg = conn.execute(
         "SELECT COALESCE(SUM(qty), 0) AS q,"
         " COALESCE(SUM(qty * entry_price), 0) AS amt"
@@ -740,7 +790,7 @@ def _mark_recommendation(conn, fill: Fill, result: dict) -> None:
     if planned_qty > 0 and filled_total < planned_qty:
         note = f"累计实际买入 {display(filled_total)}/{display(planned_qty)} 股 @ 均价 {from_micro(avg_entry_micro):.3f}"
     else:
-        note = f"实际成交 {display(filled_total)} 股 @ {fill.price}"
+        note = f"实际成交 {display(filled_total)} 股 @ 均价 {from_micro(avg_entry_micro):.3f}"
     conn.execute(
         "UPDATE recommendation SET status='executed', fill_price=?, fill_qty=?, decided_at=?,"
         " decided_note=? WHERE id=?",
@@ -762,6 +812,7 @@ def preview_fill_vs_plan(
     trade_id: int | None = None,
     broker: str | None = None,
     locale: str = "zh-CN",
+    confirmed: bool = False,
 ) -> dict:
     """在成交弹窗输入实际价与数量时，实时对比计划风险、滑点与账户影响。"""
     from kestrel.services import portfolio
@@ -775,6 +826,10 @@ def preview_fill_vs_plan(
     s = Decimal(str(stop)) if stop not in (None, "") else None
     tgt = Decimal(str(target)) if target not in (None, "") else None
     cur = currency_for(mkt)
+    numbers = (q, p, s, tgt, Decimal(str(fees)) if fees not in (None, "") else None)
+    if any(value is not None and (not value.is_finite() or abs(value) >= Decimal("1e12"))
+           for value in numbers):
+        return {"ok": False}
 
     conn = connect()
     try:
@@ -786,6 +841,10 @@ def preview_fill_vs_plan(
             if q > 0
             else (False, "")
         )
+
+        if confirmed or rec_id:
+            qty_ok = q > 0 and (mkt == "US" or q == q.to_integral_value())
+            qty_err = "" if qty_ok else ("Enter whole shares for this market." if en else "该市场须按整股登记")
 
         # 计算手续费：用户未手填则估算当前侧，同时计算买卖双边预估方便新手看清成本。
         est_side_fees = Decimal("0")

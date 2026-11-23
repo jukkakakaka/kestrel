@@ -1,9 +1,8 @@
 """Trading sessions, holidays and the next open/close time per market.
 
 Holiday lists are curated from exchange notices and intentionally kept in one
-place so they are easy to correct. They are used for *display* (is the market
-open, when does it open next), never for pricing decisions: an extra day of
-"market open" changes nothing except a label.
+place so they are easy to correct. The calendar drives display, plan expiry and
+daily-bar freshness. Ad hoc closures and half-days can require an update.
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ SESSIONS: dict[str, list[tuple[time, time]]] = {
     "US": [(time(9, 30), time(16, 0))],
 }
 
-# Full-day closures. Update once a year; wrong entries only affect a label.
+# Full-day closures. Update once a year to preserve daily-bar freshness checks.
 HOLIDAYS: dict[str, set[str]] = {
     "US": {
         "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25",
