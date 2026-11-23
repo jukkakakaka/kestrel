@@ -8,6 +8,7 @@ from datetime import date, timedelta
 
 from kestrel.core.money import to_micro
 from kestrel.datasources.history import fetch_daily
+from kestrel.db.engine import transaction
 
 log = logging.getLogger(__name__)
 
@@ -156,9 +157,19 @@ async def fetch_only(market: str, code: str, limit: int = 260) -> list[dict]:
 def save_bars(conn: sqlite3.Connection, symbol_id: int, bars: list[dict], depth: int = 0) -> None:
     if not bars:
         return
-    _upsert(conn, symbol_id, bars)
-    if depth:
-        _set_depth(conn, symbol_id, depth)
+    with transaction(conn, immediate=True):
+        source = bars[0].get("source")
+        if source:
+            row = conn.execute("SELECT bars_source FROM symbol WHERE id=?", (symbol_id,)).fetchone()
+            if row and row["bars_source"] != source:
+                conn.execute("DELETE FROM bar_daily WHERE symbol_id=?", (symbol_id,))
+                conn.execute(
+                    "UPDATE symbol SET bars_source=?, bars_depth=0 WHERE id=?",
+                    (source, symbol_id),
+                )
+        _upsert(conn, symbol_id, bars)
+        if depth:
+            _set_depth(conn, symbol_id, depth)
 
 
 def valid_count(bars: list[dict]) -> int:
